@@ -1,9 +1,46 @@
-import json
-import re
 from typing import List, Dict, Optional
 from anthropic import Anthropic
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 from models.account import Account
+
+
+# Forces the model to return structured, schema-valid output instead of free
+# text we'd otherwise have to regex/JSON-parse out of a chat response.
+_CATEGORIZE_TOOL = {
+    "name": "categorize_transactions",
+    "description": "Suggest an account categorization for each transaction.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "suggestions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {
+                            "type": "integer",
+                            "description": "1-based transaction number from the prompt"
+                        },
+                        "account_number": {
+                            "type": "string",
+                            "description": "The suggested account's number"
+                        },
+                        "confidence": {
+                            "type": "string",
+                            "enum": ["high", "medium", "low"]
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Brief explanation (1 sentence)"
+                        }
+                    },
+                    "required": ["index", "account_number", "confidence", "reason"]
+                }
+            }
+        },
+        "required": ["suggestions"]
+    }
+}
 
 
 class CategorizationService:
@@ -46,7 +83,7 @@ class CategorizationService:
 
             for i in range(0, len(transactions), batch_size):
                 batch = transactions[i:i + batch_size]
-                self._categorize_batch(batch, accounts, start_index=i)
+                self._categorize_batch(batch, accounts)
 
                 if hasattr(self, 'last_matched'):
                     total_matched += self.last_matched
@@ -62,13 +99,12 @@ class CategorizationService:
 
             return transactions
 
-        return self._categorize_batch(transactions, accounts, start_index=0)
+        return self._categorize_batch(transactions, accounts)
 
     def _categorize_batch(
         self,
         transactions: List[Dict],
-        accounts: List[Account],
-        start_index: int = 0
+        accounts: List[Account]
     ) -> List[Dict]:
         """
         Categorize a single batch of transactions.
@@ -76,7 +112,6 @@ class CategorizationService:
         Args:
             transactions: List of dicts with 'description' and 'amount'
             accounts: List of available Account objects
-            start_index: Starting index for error messages
 
         Returns:
             List of dicts with added 'suggested_account_id' and 'confidence'
@@ -110,112 +145,28 @@ For each transaction, determine the most appropriate expense or revenue account.
 - Positive amounts are deposits - match to a Revenue account
 - If unsure, use "7500: Miscellaneous Expense" for expenses or "4900: Other Income" for revenue
 
-Respond with a JSON array where each element has:
-- "index": the transaction number (1-based)
-- "account_number": the suggested account number
-- "confidence": your confidence level (high, medium, low)
-- "reason": brief explanation (1 sentence)
-
-Example response format:
-[
-  {{"index": 1, "account_number": "6300", "confidence": "high", "reason": "Software subscription payment"}},
-  {{"index": 2, "account_number": "4000", "confidence": "high", "reason": "Client payment for services"}}
-]
-
-Respond only with the JSON array, no other text."""
+Call the categorize_transactions tool with a suggestion for every transaction listed above."""
 
         try:
             response = self.client.messages.create(
                 model=ANTHROPIC_MODEL,
                 max_tokens=4000,
+                tools=[_CATEGORIZE_TOOL],
+                tool_choice={"type": "tool", "name": "categorize_transactions"},
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            # Parse response
-            response_text = response.content[0].text.strip()
-            self.last_raw_response = response_text  # Store for debugging
+            tool_use = next((b for b in response.content if b.type == "tool_use"), None)
+            if tool_use is None:
+                raise ValueError("Model response did not include a categorize_transactions tool call")
 
-            # Clean the response text - remove BOM and other invisible characters
-            # Remove UTF-8 BOM if present
-            if response_text.startswith('\ufeff'):
-                response_text = response_text[1:]
-            # Remove any other common invisible characters
-            response_text = response_text.strip('\x00\x0b\x0c\r\n\t ')
-
-            # Try to extract JSON from the response using multiple methods
-            suggestions = None
-            last_json_error = None
-
-            # Method 1: Try parsing as-is first
-            try:
-                suggestions = json.loads(response_text)
-            except json.JSONDecodeError as e:
-                last_json_error = e
-
-            # Method 2: Extract from markdown code blocks
-            if suggestions is None:
-                code_block_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', response_text)
-                if code_block_match:
-                    json_text = code_block_match.group(1).strip()
-                    try:
-                        suggestions = json.loads(json_text)
-                    except json.JSONDecodeError as e:
-                        last_json_error = e
-
-            # Method 3: Find JSON array pattern in the text
-            if suggestions is None:
-                # Look for array pattern starting with [ and ending with ]
-                array_match = re.search(r'\[\s*\{[\s\S]*\}\s*\]', response_text)
-                if array_match:
-                    try:
-                        suggestions = json.loads(array_match.group(0))
-                    except json.JSONDecodeError as e:
-                        last_json_error = e
-
-            # Method 4: Try to find the start of a JSON array
-            if suggestions is None:
-                start_idx = response_text.find('[')
-                end_idx = response_text.rfind(']')
-                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                    json_text = response_text[start_idx:end_idx + 1]
-                    try:
-                        suggestions = json.loads(json_text)
-                    except json.JSONDecodeError as e:
-                        last_json_error = e
-                        # Try removing trailing commas (common JSON error)
-                        json_text_cleaned = re.sub(r',\s*([}\]])', r'\1', json_text)
-                        try:
-                            suggestions = json.loads(json_text_cleaned)
-                        except json.JSONDecodeError as e:
-                            last_json_error = e
-
-            # Method 5: If response appears truncated (no closing ]), try to fix it
-            if suggestions is None and response_text.count('[') > response_text.count(']'):
-                # Response is likely truncated - try to close the array
-                start_idx = response_text.find('[')
-                if start_idx != -1:
-                    # Find the last complete object (ends with })
-                    last_brace = response_text.rfind('}')
-                    if last_brace > start_idx:
-                        json_text = response_text[start_idx:last_brace + 1] + ']'
-                        try:
-                            suggestions = json.loads(json_text)
-                        except json.JSONDecodeError as e:
-                            last_json_error = e
-
-            if suggestions is None:
-                error_detail = ""
-                if last_json_error:
-                    error_detail = f" Last parse error: {last_json_error}"
-                raise ValueError(f"Could not parse JSON from response.{error_detail} Response preview: {response_text[:500]}...")
-            self.last_suggestions = suggestions  # Store for debugging
+            suggestions = tool_use.input.get("suggestions", [])
 
             # Build account lookup - handle both string and int account numbers
             account_lookup = {}
             for a in accounts:
                 account_lookup[a.account_number] = a.id
                 account_lookup[str(a.account_number)] = a.id
-            self.last_account_lookup = account_lookup  # Store for debugging
 
             # Apply suggestions to transactions
             matched_count = 0
@@ -232,36 +183,15 @@ Respond only with the JSON array, no other text."""
                     else:
                         unmatched_accounts.append(account_num)
 
-            # Store debug info
             self.last_matched = matched_count
             self.last_total = len(suggestions)
             self.last_unmatched = unmatched_accounts
             self.last_error = None
 
-        except json.JSONDecodeError as e:
-            # Provide more helpful error message for JSON parsing issues
-            raw = getattr(self, 'last_raw_response', '')
-            error_context = ""
-            if raw:
-                # Show context around the error position
-                pos = e.pos if hasattr(e, 'pos') else 0
-                start = max(0, pos - 50)
-                end = min(len(raw), pos + 50)
-                error_context = f" Context: ...{raw[start:end]}..."
-
-            self.last_error = f"JSON parse error: {e.msg} at position {getattr(e, 'pos', 'unknown')}.{error_context}"
-            self.last_matched = 0
-            self.last_total = 0
-            import traceback
-            self.last_traceback = traceback.format_exc()
-
         except Exception as e:
             self.last_error = str(e)
             self.last_matched = 0
             self.last_total = 0
-            self.last_raw_response = getattr(self, 'last_raw_response', None)
-            import traceback
-            self.last_traceback = traceback.format_exc()
 
         return transactions
 
