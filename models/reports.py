@@ -1,9 +1,22 @@
 import sqlite3
+import calendar
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 from datetime import date
 from database.connection import get_connection
 import pandas as pd
+
+
+def _fiscal_year_start(as_of_date: date, fiscal_year_end_month: int) -> date:
+    """Return the first day of the fiscal year that as_of_date falls in."""
+    last_day = calendar.monthrange(as_of_date.year, fiscal_year_end_month)[1]
+    fye_this_year = date(as_of_date.year, fiscal_year_end_month, last_day)
+    fy_end_year = as_of_date.year if as_of_date <= fye_this_year else as_of_date.year + 1
+
+    start_month = fiscal_year_end_month + 1
+    if start_month > 12:
+        return date(fy_end_year, 1, 1)
+    return date(fy_end_year - 1, start_month, 1)
 
 
 @dataclass
@@ -27,6 +40,36 @@ class GeneralLedgerEntry:
     memo: str
 
 
+@dataclass
+class TrialBalanceWorksheetRow:
+    """Represents a row in the CPA Trial Balance Worksheet."""
+    account_id: int
+    account_number: str
+    account_name: str
+    account_type: str
+    beginning_dr: float
+    beginning_cr: float
+    period_debits: float      # Regular entries only
+    period_credits: float     # Regular entries only
+    unadjusted_dr: float
+    unadjusted_cr: float
+    aje_debits: float         # Adjusting entries only
+    aje_credits: float
+    adjusted_dr: float
+    adjusted_cr: float
+
+
+@dataclass
+class AJEDetail:
+    """Detail of a single adjusting journal entry for a specific account."""
+    entry_id: int
+    aje_reference: str
+    entry_date: date
+    description: str
+    debit: float
+    credit: float
+
+
 class ReportGenerator:
 
     @staticmethod
@@ -44,6 +87,10 @@ class ReportGenerator:
         # Build params in order they appear in SQL: date filter first, then client_id
         params = date_params + [client_id]
 
+        # The date filter must live on the join between journal_entry_lines and
+        # journal_entries (not just on journal_entries alone), otherwise the LEFT
+        # JOIN still pulls in jel.debit/credit for out-of-range entries and the
+        # date filter has no effect on the SUM().
         cursor.execute(f"""
             SELECT
                 a.account_number,
@@ -52,8 +99,10 @@ class ReportGenerator:
                 COALESCE(SUM(jel.debit), 0) as total_debits,
                 COALESCE(SUM(jel.credit), 0) as total_credits
             FROM accounts a
-            LEFT JOIN journal_entry_lines jel ON a.id = jel.account_id
-            LEFT JOIN journal_entries je ON jel.journal_entry_id = je.id {date_filter}
+            LEFT JOIN (
+                journal_entry_lines jel
+                JOIN journal_entries je ON jel.journal_entry_id = je.id {date_filter}
+            ) ON a.id = jel.account_id
             WHERE a.client_id = ? AND a.is_active = 1
             GROUP BY a.id, a.account_number, a.name, a.type
             HAVING total_debits > 0 OR total_credits > 0
@@ -89,6 +138,198 @@ class ReportGenerator:
         return rows
 
     @staticmethod
+    def trial_balance_worksheet(
+        client_id: int,
+        period_start: date,
+        period_end: date,
+        show_all_accounts: bool = False
+    ) -> tuple[List[TrialBalanceWorksheetRow], List[Dict]]:
+        """
+        Generate a CPA Trial Balance Worksheet for a client.
+
+        Args:
+            client_id: The client ID
+            period_start: Start date of the period
+            period_end: End date of the period
+            show_all_accounts: If True, show all accounts; if False, only show accounts with activity
+
+        Returns:
+            Tuple of (list of TrialBalanceWorksheetRow, list of AJE details by account)
+        """
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Get all active accounts for the client
+        cursor.execute("""
+            SELECT id, account_number, name, type
+            FROM accounts
+            WHERE client_id = ? AND is_active = 1
+            ORDER BY account_number
+        """, (client_id,))
+
+        accounts = cursor.fetchall()
+        rows = []
+        aje_details_by_account = {}
+
+        for acct in accounts:
+            account_id = acct['id']
+            account_number = acct['account_number']
+            account_name = acct['name']
+            account_type = acct['type']
+            is_debit_normal = account_type in ('Asset', 'Expense')
+
+            # Beginning Balance: Sum all entries WHERE entry_date < period_start
+            cursor.execute("""
+                SELECT COALESCE(SUM(jel.debit), 0) as total_dr,
+                       COALESCE(SUM(jel.credit), 0) as total_cr
+                FROM journal_entry_lines jel
+                JOIN journal_entries je ON jel.journal_entry_id = je.id
+                WHERE jel.account_id = ? AND je.entry_date < ?
+            """, (account_id, period_start.isoformat()))
+
+            beg_row = cursor.fetchone()
+            beg_total_dr = beg_row['total_dr']
+            beg_total_cr = beg_row['total_cr']
+
+            # Calculate beginning balance based on normal balance
+            if is_debit_normal:
+                beg_balance = beg_total_dr - beg_total_cr
+                beginning_dr = beg_balance if beg_balance >= 0 else 0
+                beginning_cr = -beg_balance if beg_balance < 0 else 0
+            else:
+                beg_balance = beg_total_cr - beg_total_dr
+                beginning_cr = beg_balance if beg_balance >= 0 else 0
+                beginning_dr = -beg_balance if beg_balance < 0 else 0
+
+            # Period Debits/Credits: Regular entries only
+            cursor.execute("""
+                SELECT COALESCE(SUM(jel.debit), 0) as total_dr,
+                       COALESCE(SUM(jel.credit), 0) as total_cr
+                FROM journal_entry_lines jel
+                JOIN journal_entries je ON jel.journal_entry_id = je.id
+                WHERE jel.account_id = ?
+                  AND je.entry_date >= ? AND je.entry_date <= ?
+                  AND je.entry_type = 'Regular'
+            """, (account_id, period_start.isoformat(), period_end.isoformat()))
+
+            period_row = cursor.fetchone()
+            period_debits = period_row['total_dr']
+            period_credits = period_row['total_cr']
+
+            # Unadjusted TB: Beginning + Period Activity
+            if is_debit_normal:
+                unadj_balance = (beginning_dr - beginning_cr) + (period_debits - period_credits)
+                unadjusted_dr = unadj_balance if unadj_balance >= 0 else 0
+                unadjusted_cr = -unadj_balance if unadj_balance < 0 else 0
+            else:
+                unadj_balance = (beginning_cr - beginning_dr) + (period_credits - period_debits)
+                unadjusted_cr = unadj_balance if unadj_balance >= 0 else 0
+                unadjusted_dr = -unadj_balance if unadj_balance < 0 else 0
+
+            # AJE Activity: Adjusting entries only
+            cursor.execute("""
+                SELECT COALESCE(SUM(jel.debit), 0) as total_dr,
+                       COALESCE(SUM(jel.credit), 0) as total_cr
+                FROM journal_entry_lines jel
+                JOIN journal_entries je ON jel.journal_entry_id = je.id
+                WHERE jel.account_id = ?
+                  AND je.entry_date >= ? AND je.entry_date <= ?
+                  AND je.entry_type = 'Adjusting'
+            """, (account_id, period_start.isoformat(), period_end.isoformat()))
+
+            aje_row = cursor.fetchone()
+            aje_debits = aje_row['total_dr']
+            aje_credits = aje_row['total_cr']
+
+            # Get AJE details for this account
+            cursor.execute("""
+                SELECT je.id, je.aje_reference, je.entry_date, je.description,
+                       jel.debit, jel.credit
+                FROM journal_entry_lines jel
+                JOIN journal_entries je ON jel.journal_entry_id = je.id
+                WHERE jel.account_id = ?
+                  AND je.entry_date >= ? AND je.entry_date <= ?
+                  AND je.entry_type = 'Adjusting'
+                ORDER BY je.entry_date, je.id
+            """, (account_id, period_start.isoformat(), period_end.isoformat()))
+
+            aje_details = []
+            for aje in cursor.fetchall():
+                aje_details.append({
+                    'entry_id': aje['id'],
+                    'aje_reference': aje['aje_reference'] or '',
+                    'entry_date': date.fromisoformat(aje['entry_date']),
+                    'description': aje['description'] or '',
+                    'debit': aje['debit'],
+                    'credit': aje['credit']
+                })
+
+            if aje_details:
+                aje_details_by_account[account_id] = aje_details
+
+            # Adjusted TB: Unadjusted + AJE Activity
+            if is_debit_normal:
+                adj_balance = (unadjusted_dr - unadjusted_cr) + (aje_debits - aje_credits)
+                adjusted_dr = adj_balance if adj_balance >= 0 else 0
+                adjusted_cr = -adj_balance if adj_balance < 0 else 0
+            else:
+                adj_balance = (unadjusted_cr - unadjusted_dr) + (aje_credits - aje_debits)
+                adjusted_cr = adj_balance if adj_balance >= 0 else 0
+                adjusted_dr = -adj_balance if adj_balance < 0 else 0
+
+            # Check if account has any activity
+            has_activity = (
+                beginning_dr != 0 or beginning_cr != 0 or
+                period_debits != 0 or period_credits != 0 or
+                aje_debits != 0 or aje_credits != 0
+            )
+
+            if show_all_accounts or has_activity:
+                rows.append(TrialBalanceWorksheetRow(
+                    account_id=account_id,
+                    account_number=account_number,
+                    account_name=account_name,
+                    account_type=account_type,
+                    beginning_dr=beginning_dr,
+                    beginning_cr=beginning_cr,
+                    period_debits=period_debits,
+                    period_credits=period_credits,
+                    unadjusted_dr=unadjusted_dr,
+                    unadjusted_cr=unadjusted_cr,
+                    aje_debits=aje_debits,
+                    aje_credits=aje_credits,
+                    adjusted_dr=adjusted_dr,
+                    adjusted_cr=adjusted_cr
+                ))
+
+        conn.close()
+        return rows, aje_details_by_account
+
+    @staticmethod
+    def trial_balance_worksheet_to_dataframe(
+        rows: List[TrialBalanceWorksheetRow]
+    ) -> pd.DataFrame:
+        """Convert trial balance worksheet to pandas DataFrame."""
+        return pd.DataFrame([
+            {
+                'Acct #': r.account_number,
+                'Account Name': r.account_name,
+                'Type': r.account_type,
+                'Beg Bal Dr': r.beginning_dr if r.beginning_dr > 0 else '',
+                'Beg Bal Cr': r.beginning_cr if r.beginning_cr > 0 else '',
+                'Debits': r.period_debits if r.period_debits > 0 else '',
+                'Credits': r.period_credits if r.period_credits > 0 else '',
+                'Unadj TB Dr': r.unadjusted_dr if r.unadjusted_dr > 0 else '',
+                'Unadj TB Cr': r.unadjusted_cr if r.unadjusted_cr > 0 else '',
+                'AJE Dr': r.aje_debits if r.aje_debits > 0 else '',
+                'AJE Cr': r.aje_credits if r.aje_credits > 0 else '',
+                'Adj TB Dr': r.adjusted_dr if r.adjusted_dr > 0 else '',
+                'Adj TB Cr': r.adjusted_cr if r.adjusted_cr > 0 else ''
+            }
+            for r in rows
+        ])
+
+    @staticmethod
     def income_statement(
         client_id: int,
         start_date: date,
@@ -98,16 +339,20 @@ class ReportGenerator:
         conn = get_connection()
         cursor = conn.cursor()
 
-        # Get revenue accounts
+        # Get revenue accounts. The date range must be applied on the join between
+        # journal_entry_lines and journal_entries, not on journal_entries alone,
+        # or the LEFT JOIN still includes jel.debit/credit for out-of-range entries.
         cursor.execute("""
             SELECT
                 a.account_number,
                 a.name,
                 COALESCE(SUM(jel.credit), 0) - COALESCE(SUM(jel.debit), 0) as balance
             FROM accounts a
-            LEFT JOIN journal_entry_lines jel ON a.id = jel.account_id
-            LEFT JOIN journal_entries je ON jel.journal_entry_id = je.id
-                AND je.entry_date >= ? AND je.entry_date <= ?
+            LEFT JOIN (
+                journal_entry_lines jel
+                JOIN journal_entries je ON jel.journal_entry_id = je.id
+                    AND je.entry_date >= ? AND je.entry_date <= ?
+            ) ON a.id = jel.account_id
             WHERE a.client_id = ? AND a.type = 'Revenue' AND a.is_active = 1
             GROUP BY a.id
             HAVING balance != 0
@@ -131,9 +376,11 @@ class ReportGenerator:
                 a.name,
                 COALESCE(SUM(jel.debit), 0) - COALESCE(SUM(jel.credit), 0) as balance
             FROM accounts a
-            LEFT JOIN journal_entry_lines jel ON a.id = jel.account_id
-            LEFT JOIN journal_entries je ON jel.journal_entry_id = je.id
-                AND je.entry_date >= ? AND je.entry_date <= ?
+            LEFT JOIN (
+                journal_entry_lines jel
+                JOIN journal_entries je ON jel.journal_entry_id = je.id
+                    AND je.entry_date >= ? AND je.entry_date <= ?
+            ) ON a.id = jel.account_id
             WHERE a.client_id = ? AND a.type = 'Expense' AND a.is_active = 1
             GROUP BY a.id
             HAVING balance != 0
@@ -177,9 +424,11 @@ class ReportGenerator:
                     COALESCE(SUM(jel.debit), 0) as total_debits,
                     COALESCE(SUM(jel.credit), 0) as total_credits
                 FROM accounts a
-                LEFT JOIN journal_entry_lines jel ON a.id = jel.account_id
-                LEFT JOIN journal_entries je ON jel.journal_entry_id = je.id
-                    AND je.entry_date <= ?
+                LEFT JOIN (
+                    journal_entry_lines jel
+                    JOIN journal_entries je ON jel.journal_entry_id = je.id
+                        AND je.entry_date <= ?
+                ) ON a.id = jel.account_id
                 WHERE a.client_id = ? AND a.type = ? AND a.is_active = 1
                 GROUP BY a.id
                 ORDER BY a.account_number
@@ -204,6 +453,52 @@ class ReportGenerator:
         assets = get_accounts_by_type('Asset', 'debit')
         liabilities = get_accounts_by_type('Liability', 'credit')
         equity = get_accounts_by_type('Equity', 'credit')
+
+        # Revenue/expense activity isn't reflected anywhere in Equity until a
+        # closing entry sweeps it there. Compute the un-closed net income as of
+        # as_of_date and surface it as two synthetic equity lines:
+        #   - Current Year Earnings: activity within the fiscal year as_of_date falls in
+        #   - Retained Earnings: activity from all *prior* fiscal years
+        # A posted Closing entry zeroes the revenue/expense accounts it covers, so
+        # any year that has actually been closed contributes $0 here automatically
+        # (its earnings already live in a real Equity account instead).
+        cursor.execute("SELECT fiscal_year_end_month FROM clients WHERE id = ?", (client_id,))
+        client_row = cursor.fetchone()
+        fye_month = (client_row['fiscal_year_end_month'] if client_row and client_row['fiscal_year_end_month'] else 12)
+        fy_start = _fiscal_year_start(as_of_date, fye_month)
+
+        def _net_income(date_filter_sql, params):
+            cursor.execute(f"""
+                SELECT
+                    COALESCE(SUM(CASE WHEN a.type = 'Revenue' THEN jel.credit - jel.debit ELSE 0 END), 0) -
+                    COALESCE(SUM(CASE WHEN a.type = 'Expense' THEN jel.debit - jel.credit ELSE 0 END), 0) as net_income
+                FROM accounts a
+                JOIN journal_entry_lines jel ON a.id = jel.account_id
+                JOIN journal_entries je ON jel.journal_entry_id = je.id
+                WHERE a.client_id = ? AND a.type IN ('Revenue', 'Expense') AND {date_filter_sql}
+            """, [client_id] + params)
+            return cursor.fetchone()['net_income'] or 0.0
+
+        retained_earnings = _net_income("je.entry_date < ?", [fy_start.isoformat()])
+        current_year_earnings = _net_income(
+            "je.entry_date >= ? AND je.entry_date <= ?",
+            [fy_start.isoformat(), as_of_date.isoformat()]
+        )
+
+        if retained_earnings != 0:
+            equity.append({
+                'account_number': '',
+                'name': 'Retained Earnings',
+                'subtype': None,
+                'balance': retained_earnings
+            })
+        if current_year_earnings != 0:
+            equity.append({
+                'account_number': '',
+                'name': 'Current Year Earnings',
+                'subtype': None,
+                'balance': current_year_earnings
+            })
 
         total_assets = sum(a['balance'] for a in assets)
         total_liabilities = sum(l['balance'] for l in liabilities)
@@ -242,7 +537,42 @@ class ReportGenerator:
         account_type = row['type']
         is_debit_normal = account_type in ('Asset', 'Expense')
 
-        # Build query
+        entries = []
+        running_balance = 0.0
+
+        # Calculate beginning balance if start_date is specified
+        if start_date:
+            cursor.execute("""
+                SELECT COALESCE(SUM(jel.debit), 0) as total_dr,
+                       COALESCE(SUM(jel.credit), 0) as total_cr
+                FROM journal_entry_lines jel
+                JOIN journal_entries je ON jel.journal_entry_id = je.id
+                WHERE jel.account_id = ? AND je.entry_date < ?
+            """, (account_id, start_date.isoformat()))
+
+            beg_row = cursor.fetchone()
+            beg_total_dr = beg_row['total_dr']
+            beg_total_cr = beg_row['total_cr']
+
+            if is_debit_normal:
+                running_balance = beg_total_dr - beg_total_cr
+            else:
+                running_balance = beg_total_cr - beg_total_dr
+
+            # Add beginning balance entry if there's a balance
+            if running_balance != 0:
+                entries.append(GeneralLedgerEntry(
+                    entry_date=start_date,
+                    entry_id=0,
+                    description="Beginning Balance",
+                    source_reference="",
+                    debit=0,
+                    credit=0,
+                    balance=running_balance,
+                    memo=""
+                ))
+
+        # Build query for period transactions
         query = """
             SELECT
                 je.entry_date,
@@ -269,9 +599,6 @@ class ReportGenerator:
         query += " ORDER BY je.entry_date, je.id"
 
         cursor.execute(query, params)
-
-        entries = []
-        running_balance = 0.0
 
         for row in cursor.fetchall():
             debit = row['debit']
@@ -350,7 +677,8 @@ class ReportGenerator:
         rows.append({'Item': '', 'Amount': ''})
         rows.append({'Item': 'EQUITY', 'Amount': ''})
         for e in report['equity']:
-            rows.append({'Item': f"  {e['account_number']} - {e['name']}", 'Amount': e['balance']})
+            label = f"  {e['account_number']} - {e['name']}" if e['account_number'] else f"  {e['name']}"
+            rows.append({'Item': label, 'Amount': e['balance']})
         rows.append({'Item': 'Total Equity', 'Amount': report['total_equity']})
 
         rows.append({'Item': '', 'Amount': ''})
@@ -364,7 +692,7 @@ class ReportGenerator:
         return pd.DataFrame([
             {
                 'Date': e.entry_date.isoformat(),
-                'Entry #': e.entry_id,
+                'Entry #': '' if e.entry_id == 0 else e.entry_id,
                 'Description': e.description,
                 'Reference': e.source_reference,
                 'Memo': e.memo,

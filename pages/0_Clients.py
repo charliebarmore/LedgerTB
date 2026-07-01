@@ -8,13 +8,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.client import Client
 from database import init_database
 from database.seed_data import ENTITY_TYPES, BUSINESS_TYPES
+from utils.client_selector import render_client_selector
 
 # Initialize database
 init_database()
 
 st.set_page_config(page_title="Clients", page_icon="👥", layout="wide")
 
+# Same persistent client selector + nav every other page shows, so the
+# sidebar doesn't disappear/reappear when landing on or leaving this page.
+render_client_selector()
+
 st.title("👥 Client Management")
+st.caption("Each client keeps its own separate set of books.")
 
 # Entity type and business type options
 ENTITY_TYPE_OPTIONS = list(ENTITY_TYPES.keys())

@@ -52,6 +52,14 @@ with tab1:
 
             if type_accounts:
                 with st.expander(f"**{account_type}s** ({len(type_accounts)} accounts)", expanded=True):
+                    header_cols = st.columns([1, 3, 2, 1])
+                    with header_cols[0]:
+                        st.markdown("**Acct #**")
+                    with header_cols[1]:
+                        st.markdown("**Name**")
+                    with header_cols[2]:
+                        st.markdown("**Subtype**")
+
                     for account in type_accounts:
                         col1, col2, col3, col4 = st.columns([1, 3, 2, 1])
 
@@ -75,6 +83,11 @@ with tab1:
         # Edit account modal
         if 'editing_account' in st.session_state:
             account = Account.get_by_id(st.session_state['editing_account'])
+            if account and account.client_id != client_id:
+                # Stale id left over from before a client switch - drop it rather
+                # than risk editing/deleting another client's account.
+                del st.session_state['editing_account']
+                account = None
             if account:
                 st.divider()
                 st.subheader(f"Edit Account: {account.display_name()}")

@@ -66,6 +66,47 @@ def create_tables(conn: sqlite3.Connection):
         )
     """)
 
+    # Audit log table - tracks all changes to journal entries
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL,
+            table_name TEXT NOT NULL,
+            record_id INTEGER NOT NULL,
+            action TEXT NOT NULL CHECK(action IN ('INSERT', 'UPDATE', 'DELETE')),
+            old_values TEXT,
+            new_values TEXT,
+            changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            session_id TEXT,
+            FOREIGN KEY (client_id) REFERENCES clients(id)
+        )
+    """)
+
+    # Fiscal periods table - for worksheet date ranges
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fiscal_periods (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL,
+            period_name TEXT NOT NULL,
+            period_type TEXT NOT NULL CHECK(period_type IN ('Year', 'Quarter', 'Month', 'Custom')),
+            start_date DATE NOT NULL,
+            end_date DATE NOT NULL,
+            is_closed INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id)
+        )
+    """)
+
+    # Add aje_reference column to journal_entries if it doesn't exist
+    cursor.execute("PRAGMA table_info(journal_entries)")
+    je_columns = [col[1] for col in cursor.fetchall()]
+    if 'aje_reference' not in je_columns:
+        cursor.execute("ALTER TABLE journal_entries ADD COLUMN aje_reference TEXT")
+
+    # Migrate journal_entries to support 'Beginning Balance' entry type
+    # Check current CHECK constraint by testing an insert
+    _migrate_entry_type_constraint(conn)
+
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_accounts_client ON accounts(client_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_journal_entries_client ON journal_entries(client_id)")
@@ -76,6 +117,9 @@ def create_tables(conn: sqlite3.Connection):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_imported_transactions_client ON imported_transactions(client_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_categorization_rules_pattern ON categorization_rules(pattern)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_categorization_rules_client ON categorization_rules(client_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_client ON audit_log(client_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_table_record ON audit_log(table_name, record_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fiscal_periods_client ON fiscal_periods(client_id)")
 
     conn.commit()
 
@@ -108,7 +152,8 @@ def _create_tables_with_client_support(cursor):
             entry_date DATE NOT NULL,
             description TEXT,
             source_reference TEXT,
-            entry_type TEXT DEFAULT 'Regular' CHECK(entry_type IN ('Regular', 'Adjusting', 'Closing')),
+            entry_type TEXT DEFAULT 'Regular' CHECK(entry_type IN ('Regular', 'Adjusting', 'Closing', 'Beginning Balance')),
+            aje_reference TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (client_id) REFERENCES clients(id)
         )
@@ -175,6 +220,129 @@ def _create_tables_with_client_support(cursor):
             FOREIGN KEY (journal_entry_id) REFERENCES journal_entries(id)
         )
     """)
+
+    # Audit log table - tracks all changes to journal entries
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL,
+            table_name TEXT NOT NULL,
+            record_id INTEGER NOT NULL,
+            action TEXT NOT NULL CHECK(action IN ('INSERT', 'UPDATE', 'DELETE')),
+            old_values TEXT,
+            new_values TEXT,
+            changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            session_id TEXT,
+            FOREIGN KEY (client_id) REFERENCES clients(id)
+        )
+    """)
+
+    # Fiscal periods table - for worksheet date ranges
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fiscal_periods (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_id INTEGER NOT NULL,
+            period_name TEXT NOT NULL,
+            period_type TEXT NOT NULL CHECK(period_type IN ('Year', 'Quarter', 'Month', 'Custom')),
+            start_date DATE NOT NULL,
+            end_date DATE NOT NULL,
+            is_closed INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES clients(id)
+        )
+    """)
+
+
+def _migrate_entry_type_constraint(conn: sqlite3.Connection):
+    """Migrate journal_entries to support 'Beginning Balance' entry type."""
+    cursor = conn.cursor()
+
+    # First check if there's an old constraint table that needs recovery
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='journal_entries_old_constraint'")
+    if cursor.fetchone():
+        # Recovery needed - old table exists, copy data if new table is empty
+        cursor.execute("SELECT COUNT(*) FROM journal_entries")
+        new_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM journal_entries_old_constraint")
+        old_count = cursor.fetchone()[0]
+
+        if new_count == 0 and old_count > 0:
+            # Copy data from old table
+            cursor.execute("""
+                INSERT INTO journal_entries (id, client_id, entry_date, description, source_reference, entry_type, aje_reference, created_at)
+                SELECT id, client_id, entry_date, description, source_reference, entry_type, aje_reference, created_at
+                FROM journal_entries_old_constraint
+            """)
+            conn.commit()
+
+        # Drop the old table
+        cursor.execute("DROP TABLE IF EXISTS journal_entries_old_constraint")
+        conn.commit()
+        return
+
+    # Check if migration is needed by looking at current table schema
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='journal_entries'")
+    row = cursor.fetchone()
+    if not row:
+        return  # Table doesn't exist yet
+
+    create_sql = row[0] or ''
+    if 'Beginning Balance' in create_sql:
+        return  # Already migrated
+
+    # Need to recreate table with new constraint
+    # SQLite doesn't support ALTER TABLE to modify CHECK constraints
+    try:
+        # Get current record count
+        cursor.execute("SELECT COUNT(*) FROM journal_entries")
+        record_count = cursor.fetchone()[0]
+
+        cursor.execute("ALTER TABLE journal_entries RENAME TO journal_entries_old_constraint")
+
+        cursor.execute("""
+            CREATE TABLE journal_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL,
+                entry_date DATE NOT NULL,
+                description TEXT,
+                source_reference TEXT,
+                entry_type TEXT DEFAULT 'Regular' CHECK(entry_type IN ('Regular', 'Adjusting', 'Closing', 'Beginning Balance')),
+                aje_reference TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (client_id) REFERENCES clients(id)
+            )
+        """)
+
+        cursor.execute("""
+            INSERT INTO journal_entries (id, client_id, entry_date, description, source_reference, entry_type, aje_reference, created_at)
+            SELECT id, client_id, entry_date, description, source_reference, entry_type, aje_reference, created_at
+            FROM journal_entries_old_constraint
+        """)
+
+        # Verify the copy worked
+        cursor.execute("SELECT COUNT(*) FROM journal_entries")
+        new_count = cursor.fetchone()[0]
+
+        if new_count == record_count:
+            cursor.execute("DROP TABLE journal_entries_old_constraint")
+            conn.commit()
+        else:
+            # Copy failed, rollback
+            raise Exception(f"Data copy failed: expected {record_count}, got {new_count}")
+
+    except Exception as e:
+        # If migration fails, rollback and try to restore
+        conn.rollback()
+        try:
+            # Check if new table exists and is empty
+            cursor.execute("SELECT COUNT(*) FROM journal_entries")
+            if cursor.fetchone()[0] == 0:
+                # Drop empty new table and restore old one
+                cursor.execute("DROP TABLE journal_entries")
+                cursor.execute("ALTER TABLE journal_entries_old_constraint RENAME TO journal_entries")
+                conn.commit()
+        except:
+            pass
 
 
 def _migrate_to_multi_client(conn: sqlite3.Connection):

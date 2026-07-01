@@ -59,6 +59,10 @@ if selected_report == "Trial Balance":
 
     rows = ReportGenerator.trial_balance(client_id, as_of_date)
 
+    # Get accounts for drill-down
+    accounts = Account.get_all(client_id, active_only=True)
+    account_id_lookup = {f"{a.account_number}": a.id for a in accounts}
+
     if not rows:
         st.info("No transactions recorded yet.")
     else:
@@ -66,18 +70,42 @@ if selected_report == "Trial Balance":
         total_debits = sum(r.debit for r in rows)
         total_credits = sum(r.credit for r in rows)
 
-        # Create display data
-        data = []
-        for row in rows:
-            data.append({
-                "Account #": row.account_number,
-                "Account Name": row.account_name,
-                "Type": row.account_type,
-                "Debit": f"${row.debit:,.2f}" if row.debit > 0 else "",
-                "Credit": f"${row.credit:,.2f}" if row.credit > 0 else ""
-            })
+        st.caption("Click an account to view its General Ledger")
 
-        st.dataframe(data, use_container_width=True, hide_index=True)
+        # Display as interactive rows instead of dataframe
+        header_cols = st.columns([1, 3, 1, 1, 1])
+        with header_cols[0]:
+            st.markdown("**Account #**")
+        with header_cols[1]:
+            st.markdown("**Account Name**")
+        with header_cols[2]:
+            st.markdown("**Type**")
+        with header_cols[3]:
+            st.markdown("**Debit**")
+        with header_cols[4]:
+            st.markdown("**Credit**")
+
+        for row in rows:
+            cols = st.columns([1, 3, 1, 1, 1])
+            with cols[0]:
+                st.text(row.account_number)
+            with cols[1]:
+                # Make account name clickable. No use_container_width here --
+                # a full-width bordered button reads as a text input; a
+                # content-width one reads as a link.
+                account_id = account_id_lookup.get(row.account_number)
+                if account_id and st.button(row.account_name, key=f"tb_acct_{row.account_number}"):
+                    st.session_state.gl_account_id = account_id
+                    st.session_state.gl_start_date = date(as_of_date.year, 1, 1)
+                    st.session_state.gl_end_date = as_of_date
+                    st.session_state.active_report = "General Ledger"
+                    st.rerun()
+            with cols[2]:
+                st.text(row.account_type)
+            with cols[3]:
+                st.text(f"${row.debit:,.2f}" if row.debit > 0 else "")
+            with cols[4]:
+                st.text(f"${row.credit:,.2f}" if row.credit > 0 else "")
 
         # Totals
         col1, col2, col3 = st.columns([2, 1, 1])
@@ -119,18 +147,37 @@ elif selected_report == "Income Statement":
 
     report = ReportGenerator.income_statement(client_id, is_start, is_end)
 
+    # Get accounts for drill-down
+    accounts = Account.get_all(client_id, active_only=True)
+    account_id_lookup = {a.account_number: a.id for a in accounts}
+
+    def is_drill_down_link(account_number, account_name, balance, key_prefix):
+        """Same drill-down pattern as the Trial Balance / Balance Sheet views,
+        scoped to the Income Statement's own date range."""
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            account_id = account_id_lookup.get(account_number)
+            if account_id:
+                if st.button(f"{account_number} - {account_name}", key=f"{key_prefix}_{account_number}"):
+                    st.session_state.gl_account_id = account_id
+                    st.session_state.gl_start_date = is_start
+                    st.session_state.gl_end_date = is_end
+                    st.session_state.active_report = "General Ledger"
+                    st.rerun()
+            else:
+                st.text(f"  {account_name}")
+        with col2:
+            st.text(f"${balance:,.2f}")
+
     st.markdown(f"**Period: {is_start} to {is_end}**")
+    st.caption("Click an account to view its General Ledger")
     st.divider()
 
     # Revenue section
     st.markdown("### Revenue")
     if report['revenues']:
         for r in report['revenues']:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.text(f"  {r['account_number']} - {r['name']}")
-            with col2:
-                st.text(f"${r['balance']:,.2f}")
+            is_drill_down_link(r['account_number'], r['name'], r['balance'], "is_rev")
     else:
         st.caption("  No revenue recorded")
 
@@ -146,11 +193,7 @@ elif selected_report == "Income Statement":
     st.markdown("### Expenses")
     if report['expenses']:
         for e in report['expenses']:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.text(f"  {e['account_number']} - {e['name']}")
-            with col2:
-                st.text(f"${e['balance']:,.2f}")
+            is_drill_down_link(e['account_number'], e['name'], e['balance'], "is_exp")
     else:
         st.caption("  No expenses recorded")
 
@@ -194,18 +237,37 @@ elif selected_report == "Balance Sheet":
 
     report = ReportGenerator.balance_sheet(client_id, bs_date)
 
+    # Get accounts for drill-down
+    accounts = Account.get_all(client_id, active_only=True)
+    account_id_lookup = {a.account_number: a.id for a in accounts}
+
+    def drill_down_link(account_number, account_name, balance, key_prefix):
+        """Create a clickable account link for drill-down. Falls back to plain
+        text when there's no backing account (e.g. computed Current Year Earnings)."""
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            account_id = account_id_lookup.get(account_number) if account_number else None
+            if account_id:
+                if st.button(f"  {account_number} - {account_name}", key=f"{key_prefix}_{account_number}"):
+                    st.session_state.gl_account_id = account_id
+                    st.session_state.gl_start_date = date(bs_date.year, 1, 1)
+                    st.session_state.gl_end_date = bs_date
+                    st.session_state.active_report = "General Ledger"
+                    st.rerun()
+            else:
+                st.text(f"  {account_name}")
+        with col2:
+            st.text(f"${balance:,.2f}")
+
     st.markdown(f"**As of: {bs_date}**")
+    st.caption("Click an account to view its General Ledger")
     st.divider()
 
     # Assets
     st.markdown("### Assets")
     if report['assets']:
         for a in report['assets']:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.text(f"  {a['account_number']} - {a['name']}")
-            with col2:
-                st.text(f"${a['balance']:,.2f}")
+            drill_down_link(a['account_number'], a['name'], a['balance'], "bs_asset")
     else:
         st.caption("  No assets recorded")
 
@@ -221,11 +283,7 @@ elif selected_report == "Balance Sheet":
     st.markdown("### Liabilities")
     if report['liabilities']:
         for l in report['liabilities']:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.text(f"  {l['account_number']} - {l['name']}")
-            with col2:
-                st.text(f"${l['balance']:,.2f}")
+            drill_down_link(l['account_number'], l['name'], l['balance'], "bs_liab")
     else:
         st.caption("  No liabilities recorded")
 
@@ -241,11 +299,7 @@ elif selected_report == "Balance Sheet":
     st.markdown("### Equity")
     if report['equity']:
         for e in report['equity']:
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.text(f"  {e['account_number']} - {e['name']}")
-            with col2:
-                st.text(f"${e['balance']:,.2f}")
+            drill_down_link(e['account_number'], e['name'], e['balance'], "bs_equity")
     else:
         st.caption("  No equity recorded")
 
@@ -292,24 +346,43 @@ elif selected_report == "General Ledger":
     accounts = Account.get_all(client_id, active_only=True)
     account_options = {a.id: a.display_name() for a in accounts}
 
+    # Check for drill-down from another report
+    default_account = st.session_state.get('gl_account_id', None)
+    default_start = st.session_state.get('gl_start_date', date(date.today().year - 1, 1, 1))
+    default_end = st.session_state.get('gl_end_date', date.today())
+
+    # Clear the session state after using it
+    if 'gl_account_id' in st.session_state:
+        del st.session_state.gl_account_id
+    if 'gl_start_date' in st.session_state:
+        del st.session_state.gl_start_date
+    if 'gl_end_date' in st.session_state:
+        del st.session_state.gl_end_date
+
     col1, col2, col3 = st.columns(3)
 
     with col1:
         if account_options:
+            # Find default index
+            default_idx = 0
+            if default_account and default_account in account_options:
+                default_idx = list(account_options.keys()).index(default_account)
+
             selected_account = st.selectbox(
                 "Select Account",
                 options=list(account_options.keys()),
-                format_func=lambda x: account_options[x]
+                format_func=lambda x: account_options[x],
+                index=default_idx
             )
         else:
             st.warning("No accounts available")
             selected_account = None
 
     with col2:
-        gl_start = st.date_input("Start Date", value=date.today() - timedelta(days=90), key="gl_start")
+        gl_start = st.date_input("Start Date", value=default_start, key="gl_start")
 
     with col3:
-        gl_end = st.date_input("End Date", value=date.today(), key="gl_end")
+        gl_end = st.date_input("End Date", value=default_end, key="gl_end")
 
     if selected_account:
         entries = ReportGenerator.general_ledger(selected_account, gl_start, gl_end)
@@ -317,28 +390,76 @@ elif selected_report == "General Ledger":
         if not entries:
             st.info("No transactions for this account in the selected period.")
         else:
-            # Display entries
-            data = []
-            for e in entries:
-                data.append({
-                    "Date": e.entry_date.isoformat(),
-                    "Entry #": e.entry_id,
-                    "Description": e.description[:40],
-                    "Reference": e.source_reference[:20] if e.source_reference else "",
-                    "Debit": f"${e.debit:,.2f}" if e.debit > 0 else "",
-                    "Credit": f"${e.credit:,.2f}" if e.credit > 0 else "",
-                    "Balance": f"${e.balance:,.2f}"
-                })
+            # Calculate period totals (excluding beginning balance)
+            period_debits = sum(e.debit for e in entries if e.entry_id != 0)
+            period_credits = sum(e.credit for e in entries if e.entry_id != 0)
 
-            st.dataframe(data, use_container_width=True, hide_index=True)
+            # Check for beginning balance
+            beginning_balance = 0
+            if entries and entries[0].entry_id == 0:
+                beginning_balance = entries[0].balance
+
+            # Display entries as interactive table with clickable Entry #
+            st.caption("Click an Entry # to edit that journal entry")
+
+            # Header row
+            header_cols = st.columns([1, 0.8, 2.5, 1.5, 1, 1, 1])
+            with header_cols[0]:
+                st.markdown("**Date**")
+            with header_cols[1]:
+                st.markdown("**Entry #**")
+            with header_cols[2]:
+                st.markdown("**Description**")
+            with header_cols[3]:
+                st.markdown("**Reference**")
+            with header_cols[4]:
+                st.markdown("**Debit**")
+            with header_cols[5]:
+                st.markdown("**Credit**")
+            with header_cols[6]:
+                st.markdown("**Balance**")
+
+            for idx, e in enumerate(entries):
+                cols = st.columns([1, 0.8, 2.5, 1.5, 1, 1, 1])
+                with cols[0]:
+                    st.text(e.entry_date.isoformat())
+                with cols[1]:
+                    if e.entry_id == 0:
+                        st.text("")  # Beginning balance has no entry
+                    else:
+                        # Make entry # clickable to edit (use idx for unique key).
+                        # No use_container_width, for the same reason as the other
+                        # drill-down links: content-width reads as a compact tag,
+                        # full-width reads as an empty input field.
+                        if st.button(f"#{e.entry_id}", key=f"gl_je_{idx}"):
+                            st.session_state.edit_entry_id = e.entry_id
+                            st.switch_page("pages/2_Journal_Entries.py")
+                with cols[2]:
+                    st.text(e.description[:35] if e.description else "")
+                with cols[3]:
+                    st.text(e.source_reference[:18] if e.source_reference else "")
+                with cols[4]:
+                    st.text(f"${e.debit:,.2f}" if e.debit > 0 else "")
+                with cols[5]:
+                    st.text(f"${e.credit:,.2f}" if e.credit > 0 else "")
+                with cols[6]:
+                    st.text(f"${e.balance:,.2f}")
 
             # Summary
             account = Account.get_by_id(selected_account)
             final_balance = entries[-1].balance if entries else 0
 
-            col1, col2 = st.columns([3, 1])
+            st.divider()
+            st.markdown("**Summary**")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Beginning Balance", f"${beginning_balance:,.2f}")
             with col2:
-                st.metric(f"Ending Balance", f"${final_balance:,.2f}")
+                st.metric("Period Debits", f"${period_debits:,.2f}")
+            with col3:
+                st.metric("Period Credits", f"${period_credits:,.2f}")
+            with col4:
+                st.metric("Ending Balance", f"${final_balance:,.2f}")
 
             # Export
             st.divider()

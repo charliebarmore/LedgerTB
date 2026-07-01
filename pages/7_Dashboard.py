@@ -57,12 +57,19 @@ income_report = ReportGenerator.income_statement(client_id, year_start, today)
 if 'dashboard_expanded' not in st.session_state:
     st.session_state.dashboard_expanded = None
 
-# Quick stats row - clickable cards
+# Quick stats row - clickable cards. These render with the same flat styling
+# as a static st.metric, so a chevron is appended to signal they expand a
+# detail panel on click (▾ collapsed / ▴ expanded) -- otherwise nothing about
+# them reads as interactive.
+def _toggle_icon(section: str) -> str:
+    return "▴" if st.session_state.dashboard_expanded == section else "▾"
+
+
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     if st.button(
-        f"**Total Assets**\n\n${total_assets:,.2f}",
+        f"**Total Assets** {_toggle_icon('assets')}\n\n${total_assets:,.2f}",
         key="btn_assets",
         use_container_width=True,
         type="secondary" if st.session_state.dashboard_expanded != 'assets' else "primary"
@@ -72,7 +79,7 @@ with col1:
 
 with col2:
     if st.button(
-        f"**Total Liabilities**\n\n${total_liabilities:,.2f}",
+        f"**Total Liabilities** {_toggle_icon('liabilities')}\n\n${total_liabilities:,.2f}",
         key="btn_liabilities",
         use_container_width=True,
         type="secondary" if st.session_state.dashboard_expanded != 'liabilities' else "primary"
@@ -82,7 +89,7 @@ with col2:
 
 with col3:
     if st.button(
-        f"**YTD Net Income**\n\n${income_report['net_income']:,.2f}",
+        f"**YTD Net Income** {_toggle_icon('income')}\n\n${income_report['net_income']:,.2f}",
         key="btn_income",
         use_container_width=True,
         type="secondary" if st.session_state.dashboard_expanded != 'income' else "primary"
@@ -93,7 +100,7 @@ with col3:
 with col4:
     if pending_count > 0:
         if st.button(
-            f"**Pending Imports**\n\n{pending_count} (Action needed)",
+            f"**Pending Imports** →\n\n{pending_count} (Action needed)",
             key="btn_pending",
             use_container_width=True,
             type="secondary"
@@ -192,15 +199,15 @@ with col1:
                     st.text(f"${entry.total_debits():,.2f}")
                 st.divider()
 
-    st.page_link("pages/3_Journal_Entries.py", label="View All Entries →")
+    st.page_link("pages/2_Journal_Entries.py", label="View All Entries →", icon="📝")
 
 with col2:
     st.subheader("Quick Actions")
 
-    st.page_link("pages/3_Journal_Entries.py", label="📝 New Journal Entry")
+    st.page_link("pages/2_Journal_Entries.py", label="📝 New Journal Entry")
     st.page_link("pages/4_Import_Transactions.py", label="📥 Import Transactions")
     st.page_link("pages/5_Reports.py", label="📊 Generate Reports")
-    st.page_link("pages/2_Chart_of_Accounts.py", label="📋 Manage Accounts")
+    st.page_link("pages/3_Chart_of_Accounts.py", label="📋 Manage Accounts")
 
 st.divider()
 

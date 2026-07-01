@@ -28,6 +28,9 @@ data/
 *.swp
 *.swo
 
+# Test artifacts
+.pytest_cache/
+
 # Test/sample data
 *.csv
 
