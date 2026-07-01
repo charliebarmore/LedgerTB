@@ -37,10 +37,11 @@ st.subheader("Filters")
 col1, col2, col3, col4 = st.columns(4)
 
 with col1:
-    # Date range
+    # Date range. Defaults to All Time rather than a recent window so a
+    # freshly-imported or older book of transactions isn't hidden on first view.
     date_range = st.selectbox(
         "Date Range",
-        options=["Last 30 days", "Last 90 days", "This Year", "Last Year", "All Time", "Custom"],
+        options=["All Time", "Last 30 days", "Last 90 days", "This Year", "Last Year", "Custom"],
         index=0
     )
 

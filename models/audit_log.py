@@ -1,0 +1,318 @@
+import sqlite3
+import json
+import uuid
+from dataclasses import dataclass, asdict
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from database.connection import get_connection
+
+
+@dataclass
+class AuditLog:
+    id: Optional[int] = None
+    client_id: int = 0
+    table_name: str = ""
+    record_id: int = 0
+    action: str = ""  # INSERT, UPDATE, DELETE
+    old_values: Optional[Dict[str, Any]] = None
+    new_values: Optional[Dict[str, Any]] = None
+    changed_at: Optional[datetime] = None
+    session_id: Optional[str] = None
+
+    @staticmethod
+    def get_session_id() -> str:
+        """Get or create a session ID for tracking related changes."""
+        import streamlit as st
+        if 'audit_session_id' not in st.session_state:
+            st.session_state.audit_session_id = str(uuid.uuid4())
+        return st.session_state.audit_session_id
+
+    @staticmethod
+    def log_change(
+        client_id: int,
+        table_name: str,
+        record_id: int,
+        action: str,
+        old_values: Optional[Dict[str, Any]] = None,
+        new_values: Optional[Dict[str, Any]] = None
+    ) -> int:
+        """
+        Log a change to the audit log.
+
+        Args:
+            client_id: The client ID
+            table_name: Name of the table being modified
+            record_id: ID of the record being modified
+            action: 'INSERT', 'UPDATE', or 'DELETE'
+            old_values: Dictionary of values before the change (for UPDATE/DELETE)
+            new_values: Dictionary of values after the change (for INSERT/UPDATE)
+
+        Returns:
+            The ID of the created audit log entry
+        """
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        try:
+            session_id = AuditLog.get_session_id()
+        except Exception:
+            # If streamlit is not available (e.g., in tests), use a random ID
+            session_id = str(uuid.uuid4())
+
+        old_json = json.dumps(old_values) if old_values else None
+        new_json = json.dumps(new_values) if new_values else None
+
+        try:
+            cursor.execute(
+                """
+                INSERT INTO audit_log (client_id, table_name, record_id, action, old_values, new_values, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (client_id, table_name, record_id, action, old_json, new_json, session_id)
+            )
+            log_id = cursor.lastrowid
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+
+        return log_id
+
+    @staticmethod
+    def get_by_id(log_id: int) -> Optional['AuditLog']:
+        """Get an audit log entry by ID."""
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT * FROM audit_log WHERE id = ?", (log_id,))
+        row = cursor.fetchone()
+
+        if not row:
+            conn.close()
+            return None
+
+        log = AuditLog(
+            id=row['id'],
+            client_id=row['client_id'],
+            table_name=row['table_name'],
+            record_id=row['record_id'],
+            action=row['action'],
+            old_values=json.loads(row['old_values']) if row['old_values'] else None,
+            new_values=json.loads(row['new_values']) if row['new_values'] else None,
+            changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
+            session_id=row['session_id']
+        )
+
+        conn.close()
+        return log
+
+    @staticmethod
+    def get_earliest_date(client_id: int) -> Optional[datetime]:
+        """Get the timestamp of the client's earliest audit log entry, if any."""
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT MIN(changed_at) as earliest FROM audit_log WHERE client_id = ?",
+            (client_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        if row and row['earliest']:
+            return datetime.fromisoformat(row['earliest'])
+        return None
+
+    @staticmethod
+    def get_history(
+        table_name: str,
+        record_id: int
+    ) -> List['AuditLog']:
+        """
+        Get the change history for a specific record.
+
+        Args:
+            table_name: Name of the table
+            record_id: ID of the record
+
+        Returns:
+            List of AuditLog entries, ordered by time descending
+        """
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT * FROM audit_log
+            WHERE table_name = ? AND record_id = ?
+            ORDER BY changed_at DESC
+        """, (table_name, record_id))
+
+        logs = []
+        for row in cursor.fetchall():
+            logs.append(AuditLog(
+                id=row['id'],
+                client_id=row['client_id'],
+                table_name=row['table_name'],
+                record_id=row['record_id'],
+                action=row['action'],
+                old_values=json.loads(row['old_values']) if row['old_values'] else None,
+                new_values=json.loads(row['new_values']) if row['new_values'] else None,
+                changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
+                session_id=row['session_id']
+            ))
+
+        conn.close()
+        return logs
+
+    @staticmethod
+    def get_all(
+        client_id: int,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        table_name: Optional[str] = None,
+        action: Optional[str] = None,
+        search_term: Optional[str] = None,
+        limit: int = 100
+    ) -> List['AuditLog']:
+        """
+        Get audit log entries with optional filters.
+
+        Args:
+            client_id: The client ID
+            start_date: Filter for changes after this time
+            end_date: Filter for changes before this time
+            table_name: Filter by table name
+            action: Filter by action type (INSERT, UPDATE, DELETE)
+            search_term: Search in old_values and new_values JSON
+            limit: Maximum number of entries to return
+
+        Returns:
+            List of AuditLog entries, ordered by time descending
+        """
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM audit_log WHERE client_id = ?"
+        params: List[Any] = [client_id]
+
+        # changed_at is stored as SQLite's CURRENT_TIMESTAMP format
+        # ("YYYY-MM-DD HH:MM:SS", space-separated), so the filter values must
+        # match that format -- datetime.isoformat() uses a "T" separator,
+        # which sorts after the space and silently excludes same-day rows.
+        if start_date:
+            query += " AND changed_at >= ?"
+            params.append(start_date.strftime("%Y-%m-%d %H:%M:%S"))
+
+        if end_date:
+            query += " AND changed_at <= ?"
+            params.append(end_date.strftime("%Y-%m-%d %H:%M:%S"))
+
+        if table_name:
+            query += " AND table_name = ?"
+            params.append(table_name)
+
+        if action:
+            query += " AND action = ?"
+            params.append(action)
+
+        if search_term:
+            query += " AND (old_values LIKE ? OR new_values LIKE ?)"
+            search_pattern = f"%{search_term}%"
+            params.extend([search_pattern, search_pattern])
+
+        query += " ORDER BY changed_at DESC LIMIT ?"
+        params.append(limit)
+
+        cursor.execute(query, params)
+
+        logs = []
+        for row in cursor.fetchall():
+            logs.append(AuditLog(
+                id=row['id'],
+                client_id=row['client_id'],
+                table_name=row['table_name'],
+                record_id=row['record_id'],
+                action=row['action'],
+                old_values=json.loads(row['old_values']) if row['old_values'] else None,
+                new_values=json.loads(row['new_values']) if row['new_values'] else None,
+                changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
+                session_id=row['session_id']
+            ))
+
+        conn.close()
+        return logs
+
+    @staticmethod
+    def get_entry_changes(
+        client_id: int,
+        entry_id: int
+    ) -> List['AuditLog']:
+        """
+        Get all audit log entries for a specific journal entry.
+
+        Args:
+            client_id: The client ID
+            entry_id: The journal entry ID
+
+        Returns:
+            List of AuditLog entries related to this journal entry
+        """
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        # Get changes to the journal entry itself and its lines
+        cursor.execute("""
+            SELECT * FROM audit_log
+            WHERE client_id = ?
+              AND ((table_name = 'journal_entries' AND record_id = ?)
+                   OR (table_name = 'journal_entry_lines' AND new_values LIKE ?))
+            ORDER BY changed_at DESC
+        """, (client_id, entry_id, f'%"journal_entry_id": {entry_id}%'))
+
+        logs = []
+        for row in cursor.fetchall():
+            logs.append(AuditLog(
+                id=row['id'],
+                client_id=row['client_id'],
+                table_name=row['table_name'],
+                record_id=row['record_id'],
+                action=row['action'],
+                old_values=json.loads(row['old_values']) if row['old_values'] else None,
+                new_values=json.loads(row['new_values']) if row['new_values'] else None,
+                changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
+                session_id=row['session_id']
+            ))
+
+        conn.close()
+        return logs
+
+    def format_changes(self) -> str:
+        """Format the changes for display."""
+        if self.action == 'INSERT':
+            if self.new_values:
+                return f"Created with: {self._format_values(self.new_values)}"
+            return "Created"
+        elif self.action == 'DELETE':
+            if self.old_values:
+                return f"Deleted: {self._format_values(self.old_values)}"
+            return "Deleted"
+        elif self.action == 'UPDATE':
+            changes = []
+            if self.old_values and self.new_values:
+                for key in set(list(self.old_values.keys()) + list(self.new_values.keys())):
+                    old_val = self.old_values.get(key)
+                    new_val = self.new_values.get(key)
+                    if old_val != new_val:
+                        changes.append(f"{key}: {old_val} -> {new_val}")
+            return "; ".join(changes) if changes else "Updated"
+        return ""
+
+    def _format_values(self, values: Dict[str, Any]) -> str:
+        """Format a dictionary of values for display."""
+        formatted = []
+        for key, value in values.items():
+            if key not in ('id', 'created_at', 'client_id'):
+                formatted.append(f"{key}={value}")
+        return ", ".join(formatted)

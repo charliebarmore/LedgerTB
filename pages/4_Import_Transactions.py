@@ -573,6 +573,11 @@ if selected_tab == "Upload CSV":
 
                                 st.session_state.transactions_to_review = transactions
 
+                                # Pre-populate selectbox session state with AI suggestions
+                                for i, t in enumerate(transactions):
+                                    if 'suggested_account_id' in t and t['suggested_account_id']:
+                                        st.session_state[f"cat_{i}"] = t['suggested_account_id']
+
                                 # Show success message with duplicate warning if applicable
                                 if duplicate_count > 0:
                                     st.warning(f"Found {duplicate_count} potential duplicate transaction(s) that have been auto-deselected.")
@@ -608,7 +613,7 @@ elif selected_tab == "Review & Categorize":
             if st.button("Done - Go to Dashboard", type="secondary", use_container_width=True):
                 st.session_state.import_complete = False
                 st.session_state.import_complete_msg = None
-                st.switch_page("pages/1_Dashboard.py")
+                st.switch_page("pages/7_Dashboard.py")
 
         st.stop()
 
@@ -647,22 +652,73 @@ elif selected_tab == "Review & Categorize":
         with col5:
             subcol1, subcol2 = st.columns(2)
             with subcol1:
-                if st.button("Select All"):
-                    for t in transactions:
+                if st.button("Select All", key="select_all_top"):
+                    for i, t in enumerate(transactions):
                         t['include'] = True
+                        st.session_state[f"include_{i}"] = True
                     st.rerun()
             with subcol2:
-                if st.button("Deselect All"):
-                    for t in transactions:
+                if st.button("Deselect All", key="deselect_all_top"):
+                    for i, t in enumerate(transactions):
                         t['include'] = False
+                        st.session_state[f"include_{i}"] = False
                     st.rerun()
+
+        # Sorting options
+        st.divider()
+        sort_col1, sort_col2, sort_col3 = st.columns([1, 1, 3])
+        with sort_col1:
+            sort_by = st.selectbox(
+                "Sort by",
+                options=["Date", "Description", "Amount"],
+                index=0,
+                key="sort_by"
+            )
+        with sort_col2:
+            sort_order = st.selectbox(
+                "Order",
+                options=["Ascending", "Descending"],
+                index=0,
+                key="sort_order"
+            )
+
+        # Apply sorting
+        reverse = (sort_order == "Descending")
+        if sort_by == "Date":
+            transactions.sort(key=lambda x: x.get('date', ''), reverse=reverse)
+        elif sort_by == "Description":
+            transactions.sort(key=lambda x: x.get('description', '').lower(), reverse=reverse)
+        elif sort_by == "Amount":
+            transactions.sort(key=lambda x: x.get('amount', 0), reverse=reverse)
+
+        # Update session state with sorted order
+        st.session_state.transactions_to_review = transactions
 
         # AI Categorization section
         st.divider()
         st.markdown("**AI-Powered Categorization**")
 
+        # Show previous categorization result if any
+        if st.session_state.get('ai_categorization_result'):
+            result = st.session_state.ai_categorization_result
+            if result.get('error'):
+                st.error(f"AI categorization error: {result['error']}")
+            elif result.get('matched', 0) > 0:
+                st.success(f"AI categorization complete! Matched {result['matched']} of {result['total']} suggestions.")
+            else:
+                st.warning(f"AI returned {result.get('total', 0)} suggestions but none matched your accounts.")
+            # Clear the message after showing
+            st.session_state.ai_categorization_result = None
+
         if categorization_service.is_available():
-            uncategorized = [t for t in transactions if t.get('selected_account_id', 0) == 0 and 'suggested_account_id' not in t]
+            # Build list of uncategorized transactions with their indices
+            # Check session state for current selection, not transaction dict
+            uncategorized_with_idx = [
+                (i, t) for i, t in enumerate(transactions)
+                if st.session_state.get(f"cat_{i}", 0) == 0
+            ]
+            uncategorized = [t for i, t in uncategorized_with_idx]
+            uncategorized_indices = [i for i, t in uncategorized_with_idx]
 
             if uncategorized:
                 col1, col2 = st.columns([2, 2])
@@ -676,7 +732,28 @@ elif selected_tab == "Review & Categorize":
                                 uncategorized,
                                 expense_accts + revenue_accts
                             )
-                        st.success("AI categorization complete!")
+
+                        # Store result in session state for display after rerun
+                        if hasattr(categorization_service, 'last_error') and categorization_service.last_error:
+                            st.session_state.ai_categorization_result = {
+                                'error': categorization_service.last_error
+                            }
+                        else:
+                            st.session_state.ai_categorization_result = {
+                                'matched': getattr(categorization_service, 'last_matched', 0),
+                                'total': getattr(categorization_service, 'last_total', 0),
+                            }
+
+                        # Update the selectbox session state keys to match AI suggestions
+                        # Only update for transactions that were just categorized
+                        # This preserves manual selections the user already made
+                        for i in uncategorized_indices:
+                            t = transactions[i]
+                            if 'suggested_account_id' in t and t['suggested_account_id']:
+                                st.session_state[f"cat_{i}"] = t['suggested_account_id']
+
+                        # Save updated transactions to session state
+                        st.session_state.transactions_to_review = transactions
                         st.rerun()
                 with col2:
                     st.caption("AI will suggest accounts based on transaction descriptions")
@@ -708,7 +785,26 @@ elif selected_tab == "Review & Categorize":
         # Bulk categorization section
         st.divider()
         st.markdown("**Bulk Categorization**")
-        st.caption("Apply one account to all selected (checked) transactions")
+        st.caption("Deselect all, then check the transactions you want to categorize together")
+
+        # Selection controls
+        sel_col1, sel_col2, sel_col3, sel_col4 = st.columns([1, 1, 1, 2])
+        with sel_col1:
+            if st.button("Deselect All", key="deselect_bulk"):
+                for i, t in enumerate(transactions):
+                    t['include'] = False
+                    st.session_state[f"include_{i}"] = False
+                st.rerun()
+        with sel_col2:
+            if st.button("Select All", key="select_bulk"):
+                for i, t in enumerate(transactions):
+                    t['include'] = True
+                    st.session_state[f"include_{i}"] = True
+                st.rerun()
+        with sel_col3:
+            # Count selected using session state checkbox values
+            selected_count = sum(1 for i in range(len(transactions)) if st.session_state.get(f"include_{i}", True))
+            st.markdown(f"**{selected_count}** selected")
 
         col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
@@ -719,17 +815,30 @@ elif selected_tab == "Review & Categorize":
                 key="bulk_account_select"
             )
         with col2:
-            if st.button("Apply to Selected", type="secondary"):
+            if st.button("Apply to Selected", type="primary"):
                 if bulk_account == 0:
                     st.warning("Please select an account first")
                 else:
                     applied_count = 0
-                    for t in transactions:
-                        if t.get('include', True):
+                    for i, t in enumerate(transactions):
+                        # Check session state for checkbox value
+                        is_selected = st.session_state.get(f"include_{i}", True)
+                        if is_selected:
                             t['selected_account_id'] = bulk_account
                             t['suggested_account_id'] = bulk_account
+                            # Update the selectbox session state
+                            st.session_state[f"cat_{i}"] = bulk_account
                             applied_count += 1
-                    st.success(f"Applied to {applied_count} transactions")
+                    # Deselect all checkboxes after applying
+                    for i in range(len(transactions)):
+                        st.session_state[f"include_{i}"] = False
+                        transactions[i]['include'] = False
+                    # Save changes to session state
+                    st.session_state.transactions_to_review = transactions
+                    if applied_count > 0:
+                        st.session_state.bulk_result = f"Applied to {applied_count} transactions"
+                    else:
+                        st.session_state.bulk_result = "No transactions selected"
                     st.rerun()
         with col3:
             if st.button("Apply to Uncategorized"):
@@ -737,13 +846,29 @@ elif selected_tab == "Review & Categorize":
                     st.warning("Please select an account first")
                 else:
                     applied_count = 0
-                    for t in transactions:
-                        if t.get('include', True) and t.get('selected_account_id', 0) == 0 and 'suggested_account_id' not in t:
+                    for i, t in enumerate(transactions):
+                        is_selected = st.session_state.get(f"include_{i}", True)
+                        # Check session state for current category selection (0 = uncategorized)
+                        current_category = st.session_state.get(f"cat_{i}", 0)
+                        if is_selected and current_category == 0:
                             t['selected_account_id'] = bulk_account
                             t['suggested_account_id'] = bulk_account
+                            # Update the selectbox session state
+                            st.session_state[f"cat_{i}"] = bulk_account
                             applied_count += 1
-                    st.success(f"Applied to {applied_count} uncategorized transactions")
+                    # Deselect all checkboxes after applying
+                    for i in range(len(transactions)):
+                        st.session_state[f"include_{i}"] = False
+                        transactions[i]['include'] = False
+                    # Save changes to session state
+                    st.session_state.transactions_to_review = transactions
+                    st.session_state.bulk_result = f"Applied to {applied_count} uncategorized transactions"
                     st.rerun()
+
+        # Show bulk result message if any
+        if st.session_state.get('bulk_result'):
+            st.info(st.session_state.bulk_result)
+            st.session_state.bulk_result = None
 
         # Quick add new account for categorization
         with st.expander("+ Add New Category Account"):
@@ -786,9 +911,9 @@ elif selected_tab == "Review & Categorize":
         # Review each transaction - header row
         st.divider()
 
-        header_cols = st.columns([0.6, 1, 2.5, 1.2, 1.5, 0.5])
+        header_cols = st.columns([0.5, 0.9, 2.2, 1, 0.6, 1.5, 0.5])
         with header_cols[0]:
-            st.markdown("**Import**")
+            st.markdown("**Select**")
         with header_cols[1]:
             st.markdown("**Date**")
         with header_cols[2]:
@@ -796,8 +921,10 @@ elif selected_tab == "Review & Categorize":
         with header_cols[3]:
             st.markdown("**Amount**")
         with header_cols[4]:
-            st.markdown("**Category Account**")
+            st.markdown("**Xfer**")
         with header_cols[5]:
+            st.markdown("**Category/Transfer Account**")
+        with header_cols[6]:
             if st.button("+ New", key="add_acct_btn", help="Add a new account"):
                 st.session_state.show_add_account_form = True
 
@@ -847,16 +974,25 @@ elif selected_tab == "Review & Categorize":
 
         st.divider()
 
+        # Build transfer account options (only Asset/Liability accounts for transfers)
+        transfer_accounts = [a for a in all_accounts if a.type in ('Asset', 'Liability')]
+        transfer_options = {0: "-- Select Account --"}
+        transfer_options.update({a.id: a.display_name() for a in transfer_accounts})
+
         for i, t in enumerate(transactions):
-            col0, col1, col2, col3, col4 = st.columns([0.6, 1, 2.5, 1.2, 2])
+            col0, col1, col2, col3, col4, col5 = st.columns([0.5, 0.9, 2.2, 1, 0.6, 2])
 
             with col0:
+                # Initialize session state for checkbox if not set
+                if f"include_{i}" not in st.session_state:
+                    st.session_state[f"include_{i}"] = t.get('include', True)
+
                 include = st.checkbox(
-                    "Import",
-                    value=t.get('include', True),
+                    "Select",
                     key=f"include_{i}",
                     label_visibility="collapsed"
                 )
+                # Sync back to transaction data
                 transactions[i]['include'] = include
 
             with col1:
@@ -869,7 +1005,7 @@ elif selected_tab == "Review & Categorize":
                     dup_info = t.get('duplicate_info', {})
                     st.caption(f"Matches JE #{dup_info.get('entry_id', '?')} on {dup_info.get('entry_date', '?')}")
 
-                st.text(t['description'][:40])
+                st.text(t['description'][:35])
                 # Show source account if from multi-account import
                 if t.get('source_account'):
                     source_acct = Account.get_by_id(t.get('bank_account_id'))
@@ -883,17 +1019,46 @@ elif selected_tab == "Review & Categorize":
                 st.markdown(f":{color}[${abs(t['amount']):,.2f}]")
 
             with col4:
-                # Determine default account based on amount
-                default_account = t.get('suggested_account_id', 0)
-
-                selected = st.selectbox(
-                    "Account",
-                    options=list(account_options.keys()),
-                    format_func=lambda x: account_options[x],
-                    index=list(account_options.keys()).index(default_account) if default_account in account_options else 0,
-                    key=f"cat_{i}",
-                    label_visibility="collapsed"
+                # Transfer toggle
+                is_transfer = st.checkbox(
+                    "Xfer",
+                    value=t.get('is_transfer', False),
+                    key=f"xfer_{i}",
+                    help="Check if this is a transfer between accounts (e.g., credit card payment)"
                 )
+                transactions[i]['is_transfer'] = is_transfer
+
+            with col5:
+                # Initialize session state for this selectbox if not already set
+                cat_key = f"cat_{i}"
+                if cat_key not in st.session_state:
+                    # Use suggested_account_id if available, otherwise 0
+                    st.session_state[cat_key] = t.get('suggested_account_id', 0)
+
+                if is_transfer:
+                    # For transfers, show only bank/liability accounts
+                    # Ensure the current value is valid for transfer options
+                    if st.session_state[cat_key] not in transfer_options:
+                        st.session_state[cat_key] = 0
+                    selected = st.selectbox(
+                        "Transfer To/From",
+                        options=list(transfer_options.keys()),
+                        format_func=lambda x: transfer_options[x],
+                        key=cat_key,
+                        label_visibility="collapsed"
+                    )
+                else:
+                    # For regular transactions, show all accounts
+                    # Ensure the current value is valid for account options
+                    if st.session_state[cat_key] not in account_options:
+                        st.session_state[cat_key] = 0
+                    selected = st.selectbox(
+                        "Account",
+                        options=list(account_options.keys()),
+                        format_func=lambda x: account_options[x],
+                        key=cat_key,
+                        label_visibility="collapsed"
+                    )
                 transactions[i]['selected_account_id'] = selected
 
         st.divider()
@@ -906,9 +1071,10 @@ elif selected_tab == "Review & Categorize":
                 skipped = 0
                 errors = []
 
-                for t in transactions:
-                    # Skip if not included
-                    if not t.get('include', True):
+                for i, t in enumerate(transactions):
+                    # Skip if not included (check session state)
+                    is_selected = st.session_state.get(f"include_{i}", True)
+                    if not is_selected:
                         skipped += 1
                         continue
 
@@ -919,38 +1085,72 @@ elif selected_tab == "Review & Categorize":
                     try:
                         # Create journal entry
                         lines = []
+                        is_transfer = t.get('is_transfer', False)
 
                         if t['amount'] < 0:
-                            # Expense: Debit expense, Credit bank
-                            lines.append(JournalEntryLine(
-                                account_id=account_id,
-                                debit=abs(t['amount']),
-                                credit=0,
-                                memo=t['description'][:100]
-                            ))
-                            lines.append(JournalEntryLine(
-                                account_id=t['bank_account_id'],
-                                debit=0,
-                                credit=abs(t['amount'])
-                            ))
+                            if is_transfer:
+                                # Transfer OUT: Debit destination account, Credit source bank
+                                # e.g., CC payment: Debit CC Payable, Credit Cash
+                                lines.append(JournalEntryLine(
+                                    account_id=account_id,
+                                    debit=abs(t['amount']),
+                                    credit=0,
+                                    memo=f"Transfer: {t['description'][:90]}"
+                                ))
+                                lines.append(JournalEntryLine(
+                                    account_id=t['bank_account_id'],
+                                    debit=0,
+                                    credit=abs(t['amount'])
+                                ))
+                            else:
+                                # Expense: Debit expense, Credit bank
+                                lines.append(JournalEntryLine(
+                                    account_id=account_id,
+                                    debit=abs(t['amount']),
+                                    credit=0,
+                                    memo=t['description'][:100]
+                                ))
+                                lines.append(JournalEntryLine(
+                                    account_id=t['bank_account_id'],
+                                    debit=0,
+                                    credit=abs(t['amount'])
+                                ))
                         else:
-                            # Deposit: Debit bank, Credit revenue
-                            lines.append(JournalEntryLine(
-                                account_id=t['bank_account_id'],
-                                debit=t['amount'],
-                                credit=0
-                            ))
-                            lines.append(JournalEntryLine(
-                                account_id=account_id,
-                                debit=0,
-                                credit=t['amount'],
-                                memo=t['description'][:100]
-                            ))
+                            if is_transfer:
+                                # Transfer IN: Debit bank, Credit source account
+                                # e.g., Transfer from savings: Debit Checking, Credit Savings
+                                lines.append(JournalEntryLine(
+                                    account_id=t['bank_account_id'],
+                                    debit=t['amount'],
+                                    credit=0
+                                ))
+                                lines.append(JournalEntryLine(
+                                    account_id=account_id,
+                                    debit=0,
+                                    credit=t['amount'],
+                                    memo=f"Transfer: {t['description'][:90]}"
+                                ))
+                            else:
+                                # Deposit: Debit bank, Credit revenue
+                                lines.append(JournalEntryLine(
+                                    account_id=t['bank_account_id'],
+                                    debit=t['amount'],
+                                    credit=0
+                                ))
+                                lines.append(JournalEntryLine(
+                                    account_id=account_id,
+                                    debit=0,
+                                    credit=t['amount'],
+                                    memo=t['description'][:100]
+                                ))
+
+                        # Set description with Transfer prefix if applicable
+                        entry_description = f"[Transfer] {t['description'][:180]}" if is_transfer else t['description'][:200]
 
                         entry = JournalEntry(
                             client_id=client_id,
                             entry_date=t['date'],
-                            description=t['description'][:200],
+                            description=entry_description,
                             source_reference=f"Import batch {t['batch_id']}",
                             entry_type='Regular',
                             lines=lines
@@ -972,8 +1172,9 @@ elif selected_tab == "Review & Categorize":
                         )
                         imported_txn.save()
 
-                        # Learn pattern
-                        PatternLearner.learn_pattern(client_id, t['description'], account_id)
+                        # Learn pattern (skip for transfers - they're not expense/revenue patterns)
+                        if not is_transfer:
+                            PatternLearner.learn_pattern(client_id, t['description'], account_id)
 
                     except Exception as e:
                         errors.append(f"{t['description'][:30]}: {e}")

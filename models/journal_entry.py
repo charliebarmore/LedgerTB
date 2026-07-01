@@ -25,6 +25,7 @@ class JournalEntry:
     description: str = ""
     source_reference: Optional[str] = None
     entry_type: str = "Regular"  # Regular, Adjusting, Closing
+    aje_reference: Optional[str] = None  # AJE-001, AJE-002, etc. for adjusting entries
     lines: List[JournalEntryLine] = field(default_factory=list)
 
     def is_balanced(self) -> bool:
@@ -70,33 +71,61 @@ class JournalEntry:
 
     def save(self) -> int:
         """Save the journal entry and its lines."""
+        from models.audit_log import AuditLog
+
         errors = self.validate()
         if errors:
             raise ValueError("; ".join(errors))
 
+        # Block posting/editing entries dated within a closed fiscal year
+        from models.fiscal_period import FiscalPeriod
+        closed = FiscalPeriod.get_closed_period_for_date(self.client_id, self.entry_date)
+        if closed:
+            raise ValueError(
+                f"{closed.period_name} is closed. Reopen the year before posting or "
+                f"editing entries dated {self.entry_date.isoformat()}."
+            )
+
         conn = get_connection()
         cursor = conn.cursor()
 
+        is_new = self.id is None
+        old_values = None
+
         try:
-            if self.id is None:
+            if is_new:
                 # Insert new entry
                 cursor.execute(
                     """
-                    INSERT INTO journal_entries (client_id, entry_date, description, source_reference, entry_type)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO journal_entries (client_id, entry_date, description, source_reference, entry_type, aje_reference)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (self.client_id, self.entry_date.isoformat(), self.description, self.source_reference, self.entry_type)
+                    (self.client_id, self.entry_date.isoformat(), self.description,
+                     self.source_reference, self.entry_type, self.aje_reference)
                 )
                 self.id = cursor.lastrowid
             else:
+                # Get old values for audit log
+                cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (self.id,))
+                old_row = cursor.fetchone()
+                if old_row:
+                    old_values = {
+                        'entry_date': old_row['entry_date'],
+                        'description': old_row['description'],
+                        'source_reference': old_row['source_reference'],
+                        'entry_type': old_row['entry_type'],
+                        'aje_reference': old_row['aje_reference'] if 'aje_reference' in old_row.keys() else None
+                    }
+
                 # Update existing entry
                 cursor.execute(
                     """
                     UPDATE journal_entries
-                    SET entry_date = ?, description = ?, source_reference = ?, entry_type = ?
+                    SET entry_date = ?, description = ?, source_reference = ?, entry_type = ?, aje_reference = ?
                     WHERE id = ?
                     """,
-                    (self.entry_date.isoformat(), self.description, self.source_reference, self.entry_type, self.id)
+                    (self.entry_date.isoformat(), self.description, self.source_reference,
+                     self.entry_type, self.aje_reference, self.id)
                 )
                 # Delete existing lines
                 cursor.execute("DELETE FROM journal_entry_lines WHERE journal_entry_id = ?", (self.id,))
@@ -114,6 +143,39 @@ class JournalEntry:
                 line.journal_entry_id = self.id
 
             conn.commit()
+
+            # Log to audit trail
+            new_values = {
+                'entry_date': self.entry_date.isoformat(),
+                'description': self.description,
+                'source_reference': self.source_reference,
+                'entry_type': self.entry_type,
+                'aje_reference': self.aje_reference,
+                'total_debits': self.total_debits(),
+                'total_credits': self.total_credits()
+            }
+
+            try:
+                if is_new:
+                    AuditLog.log_change(
+                        client_id=self.client_id,
+                        table_name='journal_entries',
+                        record_id=self.id,
+                        action='INSERT',
+                        new_values=new_values
+                    )
+                else:
+                    AuditLog.log_change(
+                        client_id=self.client_id,
+                        table_name='journal_entries',
+                        record_id=self.id,
+                        action='UPDATE',
+                        old_values=old_values,
+                        new_values=new_values
+                    )
+            except Exception:
+                pass  # Don't fail the save if audit logging fails
+
         except Exception as e:
             conn.rollback()
             raise e
@@ -141,7 +203,8 @@ class JournalEntry:
             entry_date=date.fromisoformat(row['entry_date']),
             description=row['description'],
             source_reference=row['source_reference'],
-            entry_type=row['entry_type']
+            entry_type=row['entry_type'],
+            aje_reference=row['aje_reference'] if 'aje_reference' in row.keys() else None
         )
 
         # Get lines with account info
@@ -212,7 +275,8 @@ class JournalEntry:
                 entry_date=date.fromisoformat(row['entry_date']),
                 description=row['description'],
                 source_reference=row['source_reference'],
-                entry_type=row['entry_type']
+                entry_type=row['entry_type'],
+                aje_reference=row['aje_reference'] if 'aje_reference' in row.keys() else None
             )
 
             # Get lines
@@ -247,11 +311,92 @@ class JournalEntry:
     @staticmethod
     def delete(entry_id: int):
         """Delete a journal entry and its lines."""
+        from models.audit_log import AuditLog
+
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
-        conn.commit()
+
+        # Get the entry info for audit logging
+        cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
+        row = cursor.fetchone()
+
+        if row:
+            old_values = {
+                'entry_date': row['entry_date'],
+                'description': row['description'],
+                'source_reference': row['source_reference'],
+                'entry_type': row['entry_type'],
+                'aje_reference': row['aje_reference'] if 'aje_reference' in row.keys() else None
+            }
+            client_id = row['client_id']
+
+            # Block deleting entries dated within a closed fiscal year
+            from models.fiscal_period import FiscalPeriod
+            entry_date = date.fromisoformat(row['entry_date'])
+            closed = FiscalPeriod.get_closed_period_for_date(client_id, entry_date)
+            if closed:
+                conn.close()
+                raise ValueError(
+                    f"{closed.period_name} is closed. Reopen the year before deleting "
+                    f"entries dated {entry_date.isoformat()}."
+                )
+
+            cursor.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
+            conn.commit()
+
+            # Log to audit trail
+            try:
+                AuditLog.log_change(
+                    client_id=client_id,
+                    table_name='journal_entries',
+                    record_id=entry_id,
+                    action='DELETE',
+                    old_values=old_values
+                )
+            except Exception:
+                pass  # Don't fail the delete if audit logging fails
+
         conn.close()
+
+    @staticmethod
+    def get_next_aje_reference(client_id: int, period_start: date, period_end: date) -> str:
+        """
+        Generate the next AJE reference number for a client/period.
+        Format: AJE-001, AJE-002, etc.
+
+        Args:
+            client_id: The client ID
+            period_start: Start of the period
+            period_end: End of the period
+
+        Returns:
+            Next available AJE reference (e.g., "AJE-001")
+        """
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT aje_reference FROM journal_entries
+            WHERE client_id = ?
+              AND entry_type = 'Adjusting'
+              AND entry_date >= ? AND entry_date <= ?
+              AND aje_reference IS NOT NULL
+            ORDER BY aje_reference DESC
+            LIMIT 1
+        """, (client_id, period_start.isoformat(), period_end.isoformat()))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row and row['aje_reference']:
+            # Extract number from AJE-XXX format
+            try:
+                current_num = int(row['aje_reference'].split('-')[1])
+                return f"AJE-{current_num + 1:03d}"
+            except (IndexError, ValueError):
+                pass
+
+        return "AJE-001"
 
     @staticmethod
     def find_potential_duplicates(

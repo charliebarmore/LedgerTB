@@ -1,0 +1,21 @@
+# ProBooks visual theme — clean, professional, navy-accented light UI.
+# Flip base to "dark" if you prefer the original dark slate look.
+[theme]
+base = "light"
+primaryColor = "#1f3a5f"            # navy — buttons, accents, active nav
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#eef2f7" # sidebar / cards
+textColor = "#1a2330"
+font = "sans serif"
+
+[client]
+# Hide the "Deploy" button and the developer hamburger menu for a cleaner,
+# product-like UI. Use "developer" to bring the dev tools back.
+toolbarMode = "minimal"
+# Hide Streamlit's auto-generated page list in the sidebar — the app renders
+# its own CPA-workflow nav (with icons + client selector) in client_selector.py,
+# so the auto list was a duplicate. Set true to bring it back.
+showSidebarNavigation = false
+
+[browser]
+gatherUsageStats = false
