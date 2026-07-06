@@ -26,9 +26,25 @@ def create_tables(conn: sqlite3.Connection):
         if version in applied:
             continue
 
-        conn.executescript(migration_path.read_text())
-        conn.execute(
-            "INSERT INTO schema_migrations (version) VALUES (?)",
-            (version,)
+        migration_sql = migration_path.read_text().strip()
+        if not migration_sql.endswith(";"):
+            migration_sql += ";"
+        # version is a filename stem (controlled), but quote-escape defensively.
+        safe_version = version.replace("'", "''")
+
+        # Run the migration's statements AND record its version inside a single
+        # explicit transaction. Otherwise executescript() commits the DDL on its
+        # own and a crash before the separate version-insert would leave the
+        # migration applied-but-unrecorded -- re-running it on the next startup,
+        # which is unsafe for any non-idempotent migration (e.g. ALTER TABLE).
+        script = (
+            "BEGIN;\n"
+            f"{migration_sql}\n"
+            f"INSERT INTO schema_migrations (version) VALUES ('{safe_version}');\n"
+            "COMMIT;"
         )
-        conn.commit()
+        try:
+            conn.executescript(script)
+        except Exception:
+            conn.rollback()
+            raise
