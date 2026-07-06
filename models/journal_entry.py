@@ -167,26 +167,14 @@ class JournalEntry:
                     'total_credits': self.total_credits()
                 }
 
-                try:
-                    if is_new:
-                        AuditLog.log_change(
-                            client_id=self.client_id,
-                            table_name='journal_entries',
-                            record_id=self.id,
-                            action='INSERT',
-                            new_values=new_values
-                        )
-                    else:
-                        AuditLog.log_change(
-                            client_id=self.client_id,
-                            table_name='journal_entries',
-                            record_id=self.id,
-                            action='UPDATE',
-                            old_values=old_values,
-                            new_values=new_values
-                        )
-                except Exception:
-                    pass  # Don't fail the save if audit logging fails
+                AuditLog.log_change_safe(
+                    client_id=self.client_id,
+                    table_name='journal_entries',
+                    record_id=self.id,
+                    action='INSERT' if is_new else 'UPDATE',
+                    old_values=None if is_new else old_values,
+                    new_values=new_values,
+                )
 
         except Exception as e:
             if owns_conn:
@@ -364,17 +352,14 @@ class JournalEntry:
                 cursor.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
                 conn.commit()
 
-                # Log to audit trail
-                try:
-                    AuditLog.log_change(
-                        client_id=client_id,
-                        table_name='journal_entries',
-                        record_id=entry_id,
-                        action='DELETE',
-                        old_values=old_values
-                    )
-                except Exception:
-                    pass  # Don't fail the delete if audit logging fails
+                # Log to audit trail (best-effort; logged if it fails)
+                AuditLog.log_change_safe(
+                    client_id=client_id,
+                    table_name='journal_entries',
+                    record_id=entry_id,
+                    action='DELETE',
+                    old_values=old_values
+                )
         finally:
             conn.close()
 

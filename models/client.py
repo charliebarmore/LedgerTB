@@ -52,13 +52,15 @@ class Client:
         Args:
             seed_accounts: If True and this is a new client, seed default chart of accounts
         """
+        from models.audit_log import AuditLog
+
         # Kept on a raw connection (with try/finally for leak safety) because the
         # account seeder writes on the same connection/transaction as the insert.
         conn = get_connection()
+        is_new = self.id is None
+        old_values = None
         try:
             cursor = conn.cursor()
-
-            is_new = self.id is None
 
             if is_new:
                 cursor.execute(
@@ -70,6 +72,16 @@ class Client:
                 )
                 self.id = cursor.lastrowid
             else:
+                cursor.execute("SELECT name, entity_type, business_type, fiscal_year_end_month, is_active FROM clients WHERE id = ?", (self.id,))
+                prev = cursor.fetchone()
+                if prev:
+                    old_values = {
+                        'name': prev['name'],
+                        'entity_type': prev['entity_type'],
+                        'business_type': prev['business_type'] if 'business_type' in prev.keys() else None,
+                        'fiscal_year_end_month': prev['fiscal_year_end_month'],
+                        'is_active': bool(prev['is_active']),
+                    }
                 cursor.execute(
                     """
                     UPDATE clients
@@ -89,10 +101,25 @@ class Client:
                     self.entity_type or "Sole Proprietorship",
                     self.business_type or "Other"
                 )
-
-            return self.id
         finally:
             conn.close()
+
+        new_values = {
+            'name': self.name,
+            'entity_type': self.entity_type,
+            'business_type': self.business_type,
+            'fiscal_year_end_month': self.fiscal_year_end_month,
+            'is_active': self.is_active,
+        }
+        AuditLog.log_change_safe(
+            client_id=self.id,
+            table_name='clients',
+            record_id=self.id,
+            action='INSERT' if is_new else 'UPDATE',
+            old_values=old_values,
+            new_values=new_values,
+        )
+        return self.id
 
     def deactivate(self):
         """Soft delete - mark client as inactive."""
