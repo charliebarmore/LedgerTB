@@ -22,55 +22,70 @@ class ImportedTransaction:
     bank_account_name: Optional[str] = None
     suggested_account_name: Optional[str] = None
 
-    def save(self) -> int:
-        """Save or update the imported transaction."""
-        conn = get_connection()
+    def save(self, conn=None) -> int:
+        """Save or update the imported transaction.
+
+        If ``conn`` is provided, uses the caller's connection and does not
+        commit or close it (the caller owns the transaction). When omitted it
+        manages its own connection.
+        """
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
         cursor = conn.cursor()
 
-        if self.id is None:
-            cursor.execute(
-                """
-                INSERT INTO imported_transactions
-                (client_id, import_batch, transaction_date, description, amount, bank_account_id,
-                 suggested_account_id, status, journal_entry_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    self.client_id,
-                    self.import_batch,
-                    self.transaction_date.isoformat() if self.transaction_date else None,
-                    self.description,
-                    self.amount,
-                    self.bank_account_id,
-                    self.suggested_account_id,
-                    self.status,
-                    self.journal_entry_id
+        try:
+            if self.id is None:
+                cursor.execute(
+                    """
+                    INSERT INTO imported_transactions
+                    (client_id, import_batch, transaction_date, description, amount, bank_account_id,
+                     suggested_account_id, status, journal_entry_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        self.client_id,
+                        self.import_batch,
+                        self.transaction_date.isoformat() if self.transaction_date else None,
+                        self.description,
+                        self.amount,
+                        self.bank_account_id,
+                        self.suggested_account_id,
+                        self.status,
+                        self.journal_entry_id
+                    )
                 )
-            )
-            self.id = cursor.lastrowid
-        else:
-            cursor.execute(
-                """
-                UPDATE imported_transactions
-                SET import_batch = ?, transaction_date = ?, description = ?, amount = ?,
-                    bank_account_id = ?, suggested_account_id = ?, status = ?, journal_entry_id = ?
-                WHERE id = ?
-                """,
-                (
-                    self.import_batch,
-                    self.transaction_date.isoformat() if self.transaction_date else None,
-                    self.description,
-                    self.amount,
-                    self.bank_account_id,
-                    self.suggested_account_id,
-                    self.status,
-                    self.journal_entry_id,
-                    self.id
+                self.id = cursor.lastrowid
+            else:
+                cursor.execute(
+                    """
+                    UPDATE imported_transactions
+                    SET import_batch = ?, transaction_date = ?, description = ?, amount = ?,
+                        bank_account_id = ?, suggested_account_id = ?, status = ?, journal_entry_id = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        self.import_batch,
+                        self.transaction_date.isoformat() if self.transaction_date else None,
+                        self.description,
+                        self.amount,
+                        self.bank_account_id,
+                        self.suggested_account_id,
+                        self.status,
+                        self.journal_entry_id,
+                        self.id
+                    )
                 )
-            )
 
-        conn.commit()
-        conn.close()
+            if owns_conn:
+                conn.commit()
+        except Exception:
+            if owns_conn:
+                conn.rollback()
+            raise
+        finally:
+            if owns_conn:
+                conn.close()
         return self.id
 
     @staticmethod

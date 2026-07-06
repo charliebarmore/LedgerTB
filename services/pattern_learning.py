@@ -9,50 +9,63 @@ class PatternLearner:
     """Learns and applies vendor-to-account mappings per client."""
 
     @staticmethod
-    def learn_pattern(client_id: int, description: str, account_id: int):
+    def learn_pattern(client_id: int, description: str, account_id: int, conn=None):
         """
         Learn a pattern from a transaction description for a specific client.
         Stores normalized description as a pattern for future matching.
-        """
-        conn = get_connection()
-        cursor = conn.cursor()
 
+        If ``conn`` is provided, uses the caller's connection and does not commit
+        or close it (the caller owns the transaction). When omitted it manages
+        its own connection.
+        """
         # Normalize the description
         normalized = CSVImporter.normalize_description(description)
 
         if not normalized:
-            conn.close()
             return
 
-        # Check if this pattern already exists for this client
-        cursor.execute(
-            "SELECT id, times_used FROM categorization_rules WHERE client_id = ? AND pattern = ?",
-            (client_id, normalized)
-        )
-        existing = cursor.fetchone()
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
+        cursor = conn.cursor()
 
-        if existing:
-            # Update existing rule
+        try:
+            # Check if this pattern already exists for this client
             cursor.execute(
-                """
-                UPDATE categorization_rules
-                SET default_account_id = ?, times_used = times_used + 1
-                WHERE id = ?
-                """,
-                (account_id, existing['id'])
+                "SELECT id, times_used FROM categorization_rules WHERE client_id = ? AND pattern = ?",
+                (client_id, normalized)
             )
-        else:
-            # Create new rule
-            cursor.execute(
-                """
-                INSERT INTO categorization_rules (client_id, pattern, default_account_id, confidence, times_used)
-                VALUES (?, ?, ?, 1.0, 1)
-                """,
-                (client_id, normalized, account_id)
-            )
+            existing = cursor.fetchone()
 
-        conn.commit()
-        conn.close()
+            if existing:
+                # Update existing rule
+                cursor.execute(
+                    """
+                    UPDATE categorization_rules
+                    SET default_account_id = ?, times_used = times_used + 1
+                    WHERE id = ?
+                    """,
+                    (account_id, existing['id'])
+                )
+            else:
+                # Create new rule
+                cursor.execute(
+                    """
+                    INSERT INTO categorization_rules (client_id, pattern, default_account_id, confidence, times_used)
+                    VALUES (?, ?, ?, 1.0, 1)
+                    """,
+                    (client_id, normalized, account_id)
+                )
+
+            if owns_conn:
+                conn.commit()
+        except Exception:
+            if owns_conn:
+                conn.rollback()
+            raise
+        finally:
+            if owns_conn:
+                conn.close()
 
     @staticmethod
     def find_match(client_id: int, description: str) -> Optional[Dict]:

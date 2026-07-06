@@ -8,11 +8,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.account import Account
 from models.client import Client
-from models.transaction import ImportedTransaction
-from models.journal_entry import JournalEntry, JournalEntryLine
+from models.journal_entry import JournalEntry
 from services.csv_import import CSVImporter
 from services.categorization import CategorizationService
 from services.pattern_learning import PatternLearner
+from services.posting import post_transaction
 from database import init_database
 from utils.client_selector import render_client_selector
 
@@ -1083,98 +1083,19 @@ elif selected_tab == "Review & Categorize":
                         continue
 
                     try:
-                        # Create journal entry
-                        lines = []
-                        is_transfer = t.get('is_transfer', False)
-
-                        if t['amount'] < 0:
-                            if is_transfer:
-                                # Transfer OUT: Debit destination account, Credit source bank
-                                # e.g., CC payment: Debit CC Payable, Credit Cash
-                                lines.append(JournalEntryLine(
-                                    account_id=account_id,
-                                    debit=abs(t['amount']),
-                                    credit=0,
-                                    memo=f"Transfer: {t['description'][:90]}"
-                                ))
-                                lines.append(JournalEntryLine(
-                                    account_id=t['bank_account_id'],
-                                    debit=0,
-                                    credit=abs(t['amount'])
-                                ))
-                            else:
-                                # Expense: Debit expense, Credit bank
-                                lines.append(JournalEntryLine(
-                                    account_id=account_id,
-                                    debit=abs(t['amount']),
-                                    credit=0,
-                                    memo=t['description'][:100]
-                                ))
-                                lines.append(JournalEntryLine(
-                                    account_id=t['bank_account_id'],
-                                    debit=0,
-                                    credit=abs(t['amount'])
-                                ))
-                        else:
-                            if is_transfer:
-                                # Transfer IN: Debit bank, Credit source account
-                                # e.g., Transfer from savings: Debit Checking, Credit Savings
-                                lines.append(JournalEntryLine(
-                                    account_id=t['bank_account_id'],
-                                    debit=t['amount'],
-                                    credit=0
-                                ))
-                                lines.append(JournalEntryLine(
-                                    account_id=account_id,
-                                    debit=0,
-                                    credit=t['amount'],
-                                    memo=f"Transfer: {t['description'][:90]}"
-                                ))
-                            else:
-                                # Deposit: Debit bank, Credit revenue
-                                lines.append(JournalEntryLine(
-                                    account_id=t['bank_account_id'],
-                                    debit=t['amount'],
-                                    credit=0
-                                ))
-                                lines.append(JournalEntryLine(
-                                    account_id=account_id,
-                                    debit=0,
-                                    credit=t['amount'],
-                                    memo=t['description'][:100]
-                                ))
-
-                        # Set description with Transfer prefix if applicable
-                        entry_description = f"[Transfer] {t['description'][:180]}" if is_transfer else t['description'][:200]
-
-                        entry = JournalEntry(
+                        # Post the transaction as a balanced journal entry. The
+                        # journal entry, import record, and learned pattern all
+                        # commit together (or roll back together on failure), so
+                        # `created` is only incremented once the post fully succeeds.
+                        post_transaction(
                             client_id=client_id,
-                            entry_date=t['date'],
-                            description=entry_description,
-                            source_reference=f"Import batch {t['batch_id']}",
-                            entry_type='Regular',
-                            lines=lines
-                        )
-                        entry.save()
-                        created += 1
-
-                        # Save imported transaction record
-                        imported_txn = ImportedTransaction(
-                            client_id=client_id,
-                            import_batch=t['batch_id'],
-                            transaction_date=t['date'],
-                            description=t['description'][:200],
-                            amount=t['amount'],
+                            transaction=t,
+                            target_account_id=account_id,
                             bank_account_id=t['bank_account_id'],
-                            suggested_account_id=account_id,
-                            status='Posted',
-                            journal_entry_id=entry.id
+                            is_transfer=t.get('is_transfer', False),
+                            batch_id=t['batch_id'],
                         )
-                        imported_txn.save()
-
-                        # Learn pattern (skip for transfers - they're not expense/revenue patterns)
-                        if not is_transfer:
-                            PatternLearner.learn_pattern(client_id, t['description'], account_id)
+                        created += 1
 
                     except Exception as e:
                         errors.append(f"{t['description'][:30]}: {e}")
