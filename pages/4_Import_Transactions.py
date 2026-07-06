@@ -795,7 +795,11 @@ elif selected_tab == "Review & Categorize":
                         st.success("API key saved! Please restart the application for changes to take effect.")
                         st.info("Run: `streamlit run app.py` to restart")
 
-                st.caption("Your API key is stored locally in the .env file and never shared.")
+                st.caption(
+                    "Your API key is stored locally in the .env file. When you run AI "
+                    "categorization, transaction descriptions and amounts are sent to "
+                    "Anthropic's API to suggest accounts."
+                )
 
         # Bulk categorization section
         st.divider()
