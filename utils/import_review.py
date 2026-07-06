@@ -12,6 +12,34 @@ for that id and the key format, so the two can never drift apart.
 """
 
 import uuid
+from collections import namedtuple
+
+
+# Partition of review rows for a "Create Journal Entries" run.
+#   to_post       - included rows that have a chosen account (ready to post)
+#   uncategorized - included rows with no account (KEPT, never silently dropped)
+#   excluded      - rows the user deselected (an explicit, acknowledged skip)
+RowPlan = namedtuple("RowPlan", ["to_post", "uncategorized", "excluded"])
+
+
+def classify_review_rows(transactions, is_included, get_account_id):
+    """Partition review rows ahead of posting.
+
+    ``is_included(t) -> bool`` and ``get_account_id(t) -> int`` (0 == no account)
+    are supplied by the caller so this stays free of Streamlit/session state and
+    is unit-testable. Returns a :class:`RowPlan`. The key guarantee: an included
+    row with no account lands in ``uncategorized`` (to be kept and surfaced to the
+    user), never silently discarded.
+    """
+    to_post, uncategorized, excluded = [], [], []
+    for t in transactions:
+        if not is_included(t):
+            excluded.append(t)
+        elif get_account_id(t) == 0:
+            uncategorized.append(t)
+        else:
+            to_post.append(t)
+    return RowPlan(to_post, uncategorized, excluded)
 
 
 def ensure_row_ids(transactions):

@@ -6,7 +6,7 @@ fix keys every per-row widget by a stable per-transaction id instead. These
 tests lock the identity helper and demonstrate the sort-stability invariant.
 """
 
-from utils.import_review import ensure_row_ids, row_key
+from utils.import_review import ensure_row_ids, row_key, classify_review_rows
 
 
 def test_ensure_row_ids_assigns_unique_ids():
@@ -82,3 +82,52 @@ def test_position_based_keys_would_desync_on_sort():
         if session_state[f"cat_{i}"] != f"acct-for-{t['description']}"
     ]
     assert mismatches  # the desync the fix eliminates
+
+
+# ---- classify_review_rows (H3: never silently drop uncategorized rows) ----
+
+
+def _rows():
+    return [
+        {"uid": "a", "acct": 6000, "inc": True},   # ready to post
+        {"uid": "b", "acct": 0,    "inc": True},   # included but uncategorized
+        {"uid": "c", "acct": 4000, "inc": False},  # deselected
+        {"uid": "d", "acct": 0,    "inc": False},  # deselected AND uncategorized
+    ]
+
+
+def _plan(rows):
+    return classify_review_rows(
+        rows,
+        is_included=lambda t: t["inc"],
+        get_account_id=lambda t: t["acct"],
+    )
+
+
+def test_classify_partitions_rows():
+    plan = _plan(_rows())
+    assert [t["uid"] for t in plan.to_post] == ["a"]
+    assert [t["uid"] for t in plan.uncategorized] == ["b"]
+    assert [t["uid"] for t in plan.excluded] == ["c", "d"]
+
+
+def test_classify_never_loses_a_row():
+    rows = _rows()
+    plan = _plan(rows)
+    accounted = len(plan.to_post) + len(plan.uncategorized) + len(plan.excluded)
+    assert accounted == len(rows)  # every row is classified, none dropped
+
+
+def test_included_uncategorized_row_is_kept_not_dropped():
+    """The H3 bug: an included row with no account used to be silently skipped.
+    It must now land in `uncategorized` so the page keeps it in the review list."""
+    plan = _plan([{"uid": "x", "acct": 0, "inc": True}])
+    assert not plan.to_post
+    assert [t["uid"] for t in plan.uncategorized] == ["x"]
+
+
+def test_all_ready_leaves_nothing_to_keep():
+    plan = _plan([{"uid": "a", "acct": 6000, "inc": True},
+                  {"uid": "b", "acct": 4000, "inc": True}])
+    assert len(plan.to_post) == 2
+    assert not plan.uncategorized and not plan.excluded
