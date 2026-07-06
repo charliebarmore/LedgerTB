@@ -2,7 +2,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional, List
 from datetime import date
-from database.connection import get_connection
+from database.connection import get_connection, get_cursor
 
 
 @dataclass
@@ -91,25 +91,22 @@ class ImportedTransaction:
     @staticmethod
     def get_by_status(client_id: int, status: str) -> List['ImportedTransaction']:
         """Get all transactions for a client with a specific status."""
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT it.*,
+                       ba.name as bank_account_name,
+                       sa.name as suggested_account_name
+                FROM imported_transactions it
+                LEFT JOIN accounts ba ON it.bank_account_id = ba.id
+                LEFT JOIN accounts sa ON it.suggested_account_id = sa.id
+                WHERE it.client_id = ? AND it.status = ?
+                ORDER BY it.transaction_date DESC
+                """,
+                (client_id, status)
+            )
 
-        cursor.execute(
-            """
-            SELECT it.*,
-                   ba.name as bank_account_name,
-                   sa.name as suggested_account_name
-            FROM imported_transactions it
-            LEFT JOIN accounts ba ON it.bank_account_id = ba.id
-            LEFT JOIN accounts sa ON it.suggested_account_id = sa.id
-            WHERE it.client_id = ? AND it.status = ?
-            ORDER BY it.transaction_date DESC
-            """,
-            (client_id, status)
-        )
-
-        rows = cursor.fetchall()
-        conn.close()
+            rows = cursor.fetchall()
 
         return [ImportedTransaction(
             id=row['id'],
@@ -129,22 +126,17 @@ class ImportedTransaction:
     @staticmethod
     def get_pending_count(client_id: int) -> int:
         """Get count of pending transactions for a client."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT COUNT(*) FROM imported_transactions WHERE client_id = ? AND status = 'Pending'",
-            (client_id,)
-        )
-        count = cursor.fetchone()[0]
-        conn.close()
+        with get_cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM imported_transactions WHERE client_id = ? AND status = 'Pending'",
+                (client_id,)
+            )
+            count = cursor.fetchone()[0]
         return count
 
     @staticmethod
     def bulk_insert(transactions: List['ImportedTransaction']):
         """Insert multiple transactions at once."""
-        conn = get_connection()
-        cursor = conn.cursor()
-
         data = [
             (
                 t.client_id,
@@ -160,36 +152,28 @@ class ImportedTransaction:
             for t in transactions
         ]
 
-        cursor.executemany(
-            """
-            INSERT INTO imported_transactions
-            (client_id, import_batch, transaction_date, description, amount, bank_account_id,
-             suggested_account_id, status, journal_entry_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            data
-        )
-
-        conn.commit()
-        conn.close()
+        with get_cursor(commit=True) as cursor:
+            cursor.executemany(
+                """
+                INSERT INTO imported_transactions
+                (client_id, import_batch, transaction_date, description, amount, bank_account_id,
+                 suggested_account_id, status, journal_entry_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                data
+            )
 
     @staticmethod
     def delete(transaction_id: int):
         """Delete an imported transaction."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM imported_transactions WHERE id = ?", (transaction_id,))
-        conn.commit()
-        conn.close()
+        with get_cursor(commit=True) as cursor:
+            cursor.execute("DELETE FROM imported_transactions WHERE id = ?", (transaction_id,))
 
     @staticmethod
     def delete_batch(batch_id: str):
         """Delete all transactions from a batch."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM imported_transactions WHERE import_batch = ?", (batch_id,))
-        conn.commit()
-        conn.close()
+        with get_cursor(commit=True) as cursor:
+            cursor.execute("DELETE FROM imported_transactions WHERE import_batch = ?", (batch_id,))
 
     @staticmethod
     def get_all(
@@ -201,9 +185,6 @@ class ImportedTransaction:
         limit: int = 500
     ) -> List['ImportedTransaction']:
         """Get all imported transactions for a client with optional filters."""
-        conn = get_connection()
-        cursor = conn.cursor()
-
         query = """
             SELECT it.*,
                    ba.name as bank_account_name,
@@ -236,9 +217,9 @@ class ImportedTransaction:
         query += " ORDER BY it.transaction_date DESC, it.id DESC LIMIT ?"
         params.append(limit)
 
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-        conn.close()
+        with get_cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
 
         return [ImportedTransaction(
             id=row['id'],
@@ -258,12 +239,10 @@ class ImportedTransaction:
     @staticmethod
     def get_count(client_id: int) -> int:
         """Get total count of imported transactions for a client."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT COUNT(*) FROM imported_transactions WHERE client_id = ?",
-            (client_id,)
-        )
-        count = cursor.fetchone()[0]
-        conn.close()
+        with get_cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM imported_transactions WHERE client_id = ?",
+                (client_id,)
+            )
+            count = cursor.fetchone()[0]
         return count

@@ -2,7 +2,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Optional, List
 from datetime import date
-from database.connection import get_connection
+from database.connection import get_connection, get_cursor
 
 
 @dataclass
@@ -199,30 +199,9 @@ class JournalEntry:
         return self.id
 
     @staticmethod
-    def get_by_id(entry_id: int, client_id: Optional[int] = None) -> Optional['JournalEntry']:
-        """Get a journal entry with its lines.
-
-        If ``client_id`` is given, the entry is returned only when it belongs to
-        that client -- defense-in-depth for id-based lookups (e.g. the entry
-        search box). Returns None on a cross-client mismatch.
-        """
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        if client_id is None:
-            cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
-        else:
-            cursor.execute(
-                "SELECT * FROM journal_entries WHERE id = ? AND client_id = ?",
-                (entry_id, client_id)
-            )
-        row = cursor.fetchone()
-
-        if not row:
-            conn.close()
-            return None
-
-        entry = JournalEntry(
+    def _entry_from_row(row) -> 'JournalEntry':
+        """Build a JournalEntry (header only) from a DB row."""
+        return JournalEntry(
             id=row['id'],
             client_id=row['client_id'],
             entry_date=date.fromisoformat(row['entry_date']),
@@ -232,31 +211,51 @@ class JournalEntry:
             aje_reference=row['aje_reference'] if 'aje_reference' in row.keys() else None
         )
 
-        # Get lines with account info
-        cursor.execute(
-            """
-            SELECT jel.*, a.name as account_name, a.account_number
-            FROM journal_entry_lines jel
-            JOIN accounts a ON jel.account_id = a.id
-            WHERE jel.journal_entry_id = ?
-            ORDER BY jel.id
-            """,
-            (entry_id,)
+    @staticmethod
+    def _line_from_row(row) -> 'JournalEntryLine':
+        """Build a JournalEntryLine from a lines-query row (jel.* + account info)."""
+        return JournalEntryLine(
+            id=row['id'],
+            journal_entry_id=row['journal_entry_id'],
+            account_id=row['account_id'],
+            debit=row['debit'],
+            credit=row['credit'],
+            memo=row['memo'],
+            account_name=row['account_name'],
+            account_number=row['account_number']
         )
 
-        for line_row in cursor.fetchall():
-            entry.lines.append(JournalEntryLine(
-                id=line_row['id'],
-                journal_entry_id=line_row['journal_entry_id'],
-                account_id=line_row['account_id'],
-                debit=line_row['debit'],
-                credit=line_row['credit'],
-                memo=line_row['memo'],
-                account_name=line_row['account_name'],
-                account_number=line_row['account_number']
-            ))
+    _LINES_SQL = """
+        SELECT jel.*, a.name as account_name, a.account_number
+        FROM journal_entry_lines jel
+        JOIN accounts a ON jel.account_id = a.id
+        WHERE jel.journal_entry_id = ?
+        ORDER BY jel.id
+    """
 
-        conn.close()
+    @staticmethod
+    def get_by_id(entry_id: int, client_id: Optional[int] = None) -> Optional['JournalEntry']:
+        """Get a journal entry with its lines.
+
+        If ``client_id`` is given, the entry is returned only when it belongs to
+        that client -- defense-in-depth for id-based lookups (e.g. the entry
+        search box). Returns None on a cross-client mismatch.
+        """
+        with get_cursor() as cursor:
+            if client_id is None:
+                cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
+            else:
+                cursor.execute(
+                    "SELECT * FROM journal_entries WHERE id = ? AND client_id = ?",
+                    (entry_id, client_id)
+                )
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            entry = JournalEntry._entry_from_row(row)
+            cursor.execute(JournalEntry._LINES_SQL, (entry_id,))
+            entry.lines = [JournalEntry._line_from_row(r) for r in cursor.fetchall()]
         return entry
 
     @staticmethod
@@ -268,69 +267,34 @@ class JournalEntry:
         limit: int = 100
     ) -> List['JournalEntry']:
         """Get journal entries for a client with optional filters."""
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_cursor() as cursor:
+            query = "SELECT * FROM journal_entries WHERE client_id = ?"
+            params = [client_id]
 
-        query = "SELECT * FROM journal_entries WHERE client_id = ?"
-        params = [client_id]
+            if start_date:
+                query += " AND entry_date >= ?"
+                params.append(start_date.isoformat())
 
-        if start_date:
-            query += " AND entry_date >= ?"
-            params.append(start_date.isoformat())
+            if end_date:
+                query += " AND entry_date <= ?"
+                params.append(end_date.isoformat())
 
-        if end_date:
-            query += " AND entry_date <= ?"
-            params.append(end_date.isoformat())
+            if entry_type:
+                query += " AND entry_type = ?"
+                params.append(entry_type)
 
-        if entry_type:
-            query += " AND entry_type = ?"
-            params.append(entry_type)
+            query += " ORDER BY entry_date DESC, id DESC LIMIT ?"
+            params.append(limit)
 
-        query += " ORDER BY entry_date DESC, id DESC LIMIT ?"
-        params.append(limit)
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
 
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
-
-        entries = []
-        for row in rows:
-            entry = JournalEntry(
-                id=row['id'],
-                client_id=row['client_id'],
-                entry_date=date.fromisoformat(row['entry_date']),
-                description=row['description'],
-                source_reference=row['source_reference'],
-                entry_type=row['entry_type'],
-                aje_reference=row['aje_reference'] if 'aje_reference' in row.keys() else None
-            )
-
-            # Get lines
-            cursor.execute(
-                """
-                SELECT jel.*, a.name as account_name, a.account_number
-                FROM journal_entry_lines jel
-                JOIN accounts a ON jel.account_id = a.id
-                WHERE jel.journal_entry_id = ?
-                ORDER BY jel.id
-                """,
-                (entry.id,)
-            )
-
-            for line_row in cursor.fetchall():
-                entry.lines.append(JournalEntryLine(
-                    id=line_row['id'],
-                    journal_entry_id=line_row['journal_entry_id'],
-                    account_id=line_row['account_id'],
-                    debit=line_row['debit'],
-                    credit=line_row['credit'],
-                    memo=line_row['memo'],
-                    account_name=line_row['account_name'],
-                    account_number=line_row['account_number']
-                ))
-
-            entries.append(entry)
-
-        conn.close()
+            entries = []
+            for row in rows:
+                entry = JournalEntry._entry_from_row(row)
+                cursor.execute(JournalEntry._LINES_SQL, (entry.id,))
+                entry.lines = [JournalEntry._line_from_row(r) for r in cursor.fetchall()]
+                entries.append(entry)
         return entries
 
     @staticmethod
@@ -418,21 +382,17 @@ class JournalEntry:
         Returns:
             Next available AJE reference (e.g., "AJE-001")
         """
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT aje_reference FROM journal_entries
-            WHERE client_id = ?
-              AND entry_type = 'Adjusting'
-              AND entry_date >= ? AND entry_date <= ?
-              AND aje_reference IS NOT NULL
-            ORDER BY aje_reference DESC
-            LIMIT 1
-        """, (client_id, period_start.isoformat(), period_end.isoformat()))
-
-        row = cursor.fetchone()
-        conn.close()
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT aje_reference FROM journal_entries
+                WHERE client_id = ?
+                  AND entry_type = 'Adjusting'
+                  AND entry_date >= ? AND entry_date <= ?
+                  AND aje_reference IS NOT NULL
+                ORDER BY aje_reference DESC
+                LIMIT 1
+            """, (client_id, period_start.isoformat(), period_end.isoformat()))
+            row = cursor.fetchone()
 
         if row and row['aje_reference']:
             # Extract number from AJE-XXX format
@@ -457,9 +417,6 @@ class JournalEntry:
 
         Returns list of dicts with matching journal entry info.
         """
-        conn = get_connection()
-        cursor = conn.cursor()
-
         # Look for journal entries on the same date with matching amount
         # Amount could be in either debit or credit depending on transaction type
         abs_amount = abs(amount)
@@ -480,18 +437,15 @@ class JournalEntry:
             query += " AND jel.account_id = ?"
             params.append(bank_account_id)
 
-        cursor.execute(query, params)
+        with get_cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
 
-        duplicates = []
-        for row in cursor.fetchall():
-            duplicates.append({
-                'entry_id': row['id'],
-                'entry_date': row['entry_date'],
-                'description': row['description'],
-                'source_reference': row['source_reference'],
-                'amount': row['debit'] if row['debit'] > 0 else row['credit'],
-                'memo': row['memo']
-            })
-
-        conn.close()
-        return duplicates
+        return [{
+            'entry_id': row['id'],
+            'entry_date': row['entry_date'],
+            'description': row['description'],
+            'source_reference': row['source_reference'],
+            'amount': row['debit'] if row['debit'] > 0 else row['credit'],
+            'memo': row['memo']
+        } for row in rows]
