@@ -201,7 +201,10 @@ class ReportGenerator:
                 beginning_cr = beg_balance if beg_balance >= 0 else 0
                 beginning_dr = -beg_balance if beg_balance < 0 else 0
 
-            # Period Debits/Credits: Regular entries only
+            # Period Debits/Credits: all non-adjusting activity in the period.
+            # Must be the complement of the AJE bucket below (entry_type = 'Adjusting')
+            # so that Closing and Beginning Balance entries dated within the period are
+            # captured here rather than silently dropped from the worksheet.
             cursor.execute("""
                 SELECT COALESCE(SUM(jel.debit), 0) as total_dr,
                        COALESCE(SUM(jel.credit), 0) as total_cr
@@ -209,7 +212,7 @@ class ReportGenerator:
                 JOIN journal_entries je ON jel.journal_entry_id = je.id
                 WHERE jel.account_id = ?
                   AND je.entry_date >= ? AND je.entry_date <= ?
-                  AND je.entry_type = 'Regular'
+                  AND je.entry_type != 'Adjusting'
             """, (account_id, period_start.isoformat(), period_end.isoformat()))
 
             period_row = cursor.fetchone()
