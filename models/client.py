@@ -1,7 +1,7 @@
 import sqlite3
 from dataclasses import dataclass
 from typing import Optional, List
-from database.connection import get_connection
+from database.connection import get_connection, get_cursor
 from database.seed_data import seed_chart_of_accounts_for_client
 
 
@@ -15,49 +15,35 @@ class Client:
     is_active: bool = True
 
     @staticmethod
-    def get_all(active_only: bool = True) -> List['Client']:
-        """Get all clients, optionally filtered by active status."""
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        if active_only:
-            cursor.execute(
-                "SELECT * FROM clients WHERE is_active = 1 ORDER BY name"
-            )
-        else:
-            cursor.execute("SELECT * FROM clients ORDER BY name")
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        return [Client(
+    def _from_row(row) -> 'Client':
+        """Build a Client from a DB row (single source of the row mapping)."""
+        return Client(
             id=row['id'],
             name=row['name'],
             entity_type=row['entity_type'],
             business_type=row['business_type'] if 'business_type' in row.keys() else None,
             fiscal_year_end_month=row['fiscal_year_end_month'],
             is_active=bool(row['is_active'])
-        ) for row in rows]
+        )
+
+    @staticmethod
+    def get_all(active_only: bool = True) -> List['Client']:
+        """Get all clients, optionally filtered by active status."""
+        with get_cursor() as cursor:
+            if active_only:
+                cursor.execute("SELECT * FROM clients WHERE is_active = 1 ORDER BY name")
+            else:
+                cursor.execute("SELECT * FROM clients ORDER BY name")
+            rows = cursor.fetchall()
+        return [Client._from_row(row) for row in rows]
 
     @staticmethod
     def get_by_id(client_id: int) -> Optional['Client']:
         """Get a client by its ID."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
-        row = cursor.fetchone()
-        conn.close()
-
-        if row:
-            return Client(
-                id=row['id'],
-                name=row['name'],
-                entity_type=row['entity_type'],
-                business_type=row['business_type'] if 'business_type' in row.keys() else None,
-                fiscal_year_end_month=row['fiscal_year_end_month'],
-                is_active=bool(row['is_active'])
-            )
-        return None
+        with get_cursor() as cursor:
+            cursor.execute("SELECT * FROM clients WHERE id = ?", (client_id,))
+            row = cursor.fetchone()
+        return Client._from_row(row) if row else None
 
     def save(self, seed_accounts: bool = True) -> int:
         """
@@ -66,43 +52,47 @@ class Client:
         Args:
             seed_accounts: If True and this is a new client, seed default chart of accounts
         """
+        # Kept on a raw connection (with try/finally for leak safety) because the
+        # account seeder writes on the same connection/transaction as the insert.
         conn = get_connection()
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        is_new = self.id is None
+            is_new = self.id is None
 
-        if is_new:
-            cursor.execute(
-                """
-                INSERT INTO clients (name, entity_type, business_type, fiscal_year_end_month, is_active)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (self.name, self.entity_type, self.business_type, self.fiscal_year_end_month, int(self.is_active))
-            )
-            self.id = cursor.lastrowid
-        else:
-            cursor.execute(
-                """
-                UPDATE clients
-                SET name = ?, entity_type = ?, business_type = ?, fiscal_year_end_month = ?, is_active = ?
-                WHERE id = ?
-                """,
-                (self.name, self.entity_type, self.business_type, self.fiscal_year_end_month, int(self.is_active), self.id)
-            )
+            if is_new:
+                cursor.execute(
+                    """
+                    INSERT INTO clients (name, entity_type, business_type, fiscal_year_end_month, is_active)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (self.name, self.entity_type, self.business_type, self.fiscal_year_end_month, int(self.is_active))
+                )
+                self.id = cursor.lastrowid
+            else:
+                cursor.execute(
+                    """
+                    UPDATE clients
+                    SET name = ?, entity_type = ?, business_type = ?, fiscal_year_end_month = ?, is_active = ?
+                    WHERE id = ?
+                    """,
+                    (self.name, self.entity_type, self.business_type, self.fiscal_year_end_month, int(self.is_active), self.id)
+                )
 
-        conn.commit()
+            conn.commit()
 
-        # Seed chart of accounts for new clients based on entity and business type
-        if is_new and seed_accounts:
-            seed_chart_of_accounts_for_client(
-                conn,
-                self.id,
-                self.entity_type or "Sole Proprietorship",
-                self.business_type or "Other"
-            )
+            # Seed chart of accounts for new clients based on entity and business type
+            if is_new and seed_accounts:
+                seed_chart_of_accounts_for_client(
+                    conn,
+                    self.id,
+                    self.entity_type or "Sole Proprietorship",
+                    self.business_type or "Other"
+                )
 
-        conn.close()
-        return self.id
+            return self.id
+        finally:
+            conn.close()
 
     def deactivate(self):
         """Soft delete - mark client as inactive."""
@@ -112,15 +102,12 @@ class Client:
     @staticmethod
     def has_transactions(client_id: int) -> bool:
         """Check if a client has any journal entries."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT COUNT(*) FROM journal_entries WHERE client_id = ?",
-            (client_id,)
-        )
-        count = cursor.fetchone()[0]
-        conn.close()
-        return count > 0
+        with get_cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM journal_entries WHERE client_id = ?",
+                (client_id,)
+            )
+            return cursor.fetchone()[0] > 0
 
     @staticmethod
     def get_first() -> Optional['Client']:

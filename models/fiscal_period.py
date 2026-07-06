@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import Optional, List
 from datetime import date
 from calendar import monthrange
-from database.connection import get_connection
+from database.connection import get_connection, get_cursor
 
 
 @dataclass
@@ -75,20 +75,18 @@ class FiscalPeriod:
         fiscal year. Only Year-type periods gate edits; Quarter/Month periods
         are reporting views and do not lock.
         """
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT * FROM fiscal_periods
-            WHERE client_id = ? AND is_closed = 1 AND period_type = 'Year'
-              AND start_date <= ? AND end_date >= ?
-            ORDER BY end_date DESC
-            LIMIT 1
-            """,
-            (client_id, entry_date.isoformat(), entry_date.isoformat())
-        )
-        row = cursor.fetchone()
-        conn.close()
+        with get_cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT * FROM fiscal_periods
+                WHERE client_id = ? AND is_closed = 1 AND period_type = 'Year'
+                  AND start_date <= ? AND end_date >= ?
+                ORDER BY end_date DESC
+                LIMIT 1
+                """,
+                (client_id, entry_date.isoformat(), entry_date.isoformat())
+            )
+            row = cursor.fetchone()
 
         if not row:
             return None
@@ -106,14 +104,11 @@ class FiscalPeriod:
     @staticmethod
     def get_by_id(period_id: int) -> Optional['FiscalPeriod']:
         """Get a fiscal period by ID."""
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT * FROM fiscal_periods WHERE id = ?", (period_id,))
-        row = cursor.fetchone()
+        with get_cursor() as cursor:
+            cursor.execute("SELECT * FROM fiscal_periods WHERE id = ?", (period_id,))
+            row = cursor.fetchone()
 
         if not row:
-            conn.close()
             return None
 
         period = FiscalPeriod(
@@ -126,15 +121,11 @@ class FiscalPeriod:
             is_closed=bool(row['is_closed'])
         )
 
-        conn.close()
         return period
 
     @staticmethod
     def get_all(client_id: int, period_type: Optional[str] = None) -> List['FiscalPeriod']:
         """Get all fiscal periods for a client, optionally filtered by type."""
-        conn = get_connection()
-        cursor = conn.cursor()
-
         query = "SELECT * FROM fiscal_periods WHERE client_id = ?"
         params = [client_id]
 
@@ -144,8 +135,9 @@ class FiscalPeriod:
 
         query += " ORDER BY start_date DESC"
 
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
+        with get_cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
 
         periods = []
         for row in rows:
@@ -159,26 +151,22 @@ class FiscalPeriod:
                 is_closed=bool(row['is_closed'])
             ))
 
-        conn.close()
         return periods
 
     @staticmethod
     def get_current(client_id: int) -> Optional['FiscalPeriod']:
         """Get the current open period for a client (most recent non-closed period)."""
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM fiscal_periods
+                WHERE client_id = ? AND is_closed = 0
+                ORDER BY end_date DESC
+                LIMIT 1
+            """, (client_id,))
 
-        cursor.execute("""
-            SELECT * FROM fiscal_periods
-            WHERE client_id = ? AND is_closed = 0
-            ORDER BY end_date DESC
-            LIMIT 1
-        """, (client_id,))
-
-        row = cursor.fetchone()
+            row = cursor.fetchone()
 
         if not row:
-            conn.close()
             return None
 
         period = FiscalPeriod(
@@ -191,17 +179,13 @@ class FiscalPeriod:
             is_closed=bool(row['is_closed'])
         )
 
-        conn.close()
         return period
 
     @staticmethod
     def delete(period_id: int):
         """Delete a fiscal period."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM fiscal_periods WHERE id = ?", (period_id,))
-        conn.commit()
-        conn.close()
+        with get_cursor(commit=True) as cursor:
+            cursor.execute("DELETE FROM fiscal_periods WHERE id = ?", (period_id,))
 
     @staticmethod
     def generate_periods(client_id: int, year: int, fiscal_year_end_month: int = 12) -> List['FiscalPeriod']:
@@ -218,22 +202,19 @@ class FiscalPeriod:
             List of created FiscalPeriod objects
         """
         periods = []
-        conn = get_connection()
-        cursor = conn.cursor()
 
         # Delete existing periods for this year to avoid duplicates
         # Check if periods already exist
-        cursor.execute("""
-            SELECT COUNT(*) as cnt FROM fiscal_periods
-            WHERE client_id = ? AND period_name LIKE ?
-        """, (client_id, f"FY {year}%"))
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt FROM fiscal_periods
+                WHERE client_id = ? AND period_name LIKE ?
+            """, (client_id, f"FY {year}%"))
+            cnt = cursor.fetchone()['cnt']
 
-        if cursor.fetchone()['cnt'] > 0:
-            conn.close()
+        if cnt > 0:
             # Return existing periods
             return FiscalPeriod.get_all(client_id)
-
-        conn.close()
 
         # Calculate fiscal year start and end
         if fiscal_year_end_month == 12:
@@ -366,17 +347,14 @@ class FiscalPeriod:
         Returns:
             List of FiscalPeriod objects for the year
         """
-        conn = get_connection()
-        cursor = conn.cursor()
-
         # Check if periods exist for this year
-        cursor.execute("""
-            SELECT COUNT(*) as cnt FROM fiscal_periods
-            WHERE client_id = ? AND period_name LIKE ?
-        """, (client_id, f"FY {year}%"))
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*) as cnt FROM fiscal_periods
+                WHERE client_id = ? AND period_name LIKE ?
+            """, (client_id, f"FY {year}%"))
 
-        count = cursor.fetchone()['cnt']
-        conn.close()
+            count = cursor.fetchone()['cnt']
 
         if count == 0:
             return FiscalPeriod.generate_periods(client_id, year, fiscal_year_end_month)

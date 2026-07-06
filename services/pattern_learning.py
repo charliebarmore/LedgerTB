@@ -1,7 +1,7 @@
 import sqlite3
 import re
 from typing import Optional, List, Dict
-from database.connection import get_connection
+from database.connection import get_connection, get_cursor
 from services.csv_import import CSVImporter
 
 
@@ -75,137 +75,121 @@ class PatternLearner:
         Returns:
             Dict with 'account_id', 'confidence', 'pattern' or None if no match
         """
-        conn = get_connection()
-        cursor = conn.cursor()
-
         # Normalize the description
         normalized = CSVImporter.normalize_description(description)
 
         if not normalized:
-            conn.close()
             return None
 
-        # Try exact match first
-        cursor.execute(
-            """
-            SELECT cr.*, a.name as account_name, a.account_number
-            FROM categorization_rules cr
-            JOIN accounts a ON cr.default_account_id = a.id
-            WHERE cr.client_id = ? AND cr.pattern = ?
-            ORDER BY cr.times_used DESC
-            LIMIT 1
-            """,
-            (client_id, normalized)
-        )
-        exact = cursor.fetchone()
+        with get_cursor() as cursor:
+            # Try exact match first
+            cursor.execute(
+                """
+                SELECT cr.*, a.name as account_name, a.account_number
+                FROM categorization_rules cr
+                JOIN accounts a ON cr.default_account_id = a.id
+                WHERE cr.client_id = ? AND cr.pattern = ?
+                ORDER BY cr.times_used DESC
+                LIMIT 1
+                """,
+                (client_id, normalized)
+            )
+            exact = cursor.fetchone()
 
-        if exact:
-            conn.close()
-            return {
-                'account_id': exact['default_account_id'],
-                'account_name': exact['account_name'],
-                'account_number': exact['account_number'],
-                'confidence': exact['confidence'],
-                'pattern': exact['pattern'],
-                'match_type': 'exact'
-            }
-
-        # Try partial match (pattern contained in description or vice versa)
-        cursor.execute(
-            """
-            SELECT cr.*, a.name as account_name, a.account_number
-            FROM categorization_rules cr
-            JOIN accounts a ON cr.default_account_id = a.id
-            WHERE cr.client_id = ?
-            ORDER BY cr.times_used DESC
-            """,
-            (client_id,)
-        )
-
-        for rule in cursor.fetchall():
-            pattern = rule['pattern']
-            # Check if pattern is in normalized description
-            if pattern in normalized or normalized in pattern:
-                conn.close()
+            if exact:
                 return {
-                    'account_id': rule['default_account_id'],
-                    'account_name': rule['account_name'],
-                    'account_number': rule['account_number'],
-                    'confidence': rule['confidence'] * 0.8,  # Lower confidence for partial match
-                    'pattern': pattern,
-                    'match_type': 'partial'
+                    'account_id': exact['default_account_id'],
+                    'account_name': exact['account_name'],
+                    'account_number': exact['account_number'],
+                    'confidence': exact['confidence'],
+                    'pattern': exact['pattern'],
+                    'match_type': 'exact'
                 }
 
-            # Check word-level matching
-            pattern_words = set(pattern.split())
-            desc_words = set(normalized.split())
-            common_words = pattern_words & desc_words
+            # Try partial match (pattern contained in description or vice versa)
+            cursor.execute(
+                """
+                SELECT cr.*, a.name as account_name, a.account_number
+                FROM categorization_rules cr
+                JOIN accounts a ON cr.default_account_id = a.id
+                WHERE cr.client_id = ?
+                ORDER BY cr.times_used DESC
+                """,
+                (client_id,)
+            )
 
-            # If significant word overlap, consider it a match
-            if len(common_words) >= 2 and len(common_words) / len(pattern_words) > 0.5:
-                conn.close()
-                return {
-                    'account_id': rule['default_account_id'],
-                    'account_name': rule['account_name'],
-                    'account_number': rule['account_number'],
-                    'confidence': rule['confidence'] * 0.6,  # Even lower for word match
-                    'pattern': pattern,
-                    'match_type': 'word'
-                }
+            for rule in cursor.fetchall():
+                pattern = rule['pattern']
+                # Check if pattern is in normalized description
+                if pattern in normalized or normalized in pattern:
+                    return {
+                        'account_id': rule['default_account_id'],
+                        'account_name': rule['account_name'],
+                        'account_number': rule['account_number'],
+                        'confidence': rule['confidence'] * 0.8,  # Lower confidence for partial match
+                        'pattern': pattern,
+                        'match_type': 'partial'
+                    }
 
-        conn.close()
-        return None
+                # Check word-level matching
+                pattern_words = set(pattern.split())
+                desc_words = set(normalized.split())
+                common_words = pattern_words & desc_words
+
+                # If significant word overlap, consider it a match
+                if len(common_words) >= 2 and len(common_words) / len(pattern_words) > 0.5:
+                    return {
+                        'account_id': rule['default_account_id'],
+                        'account_name': rule['account_name'],
+                        'account_number': rule['account_number'],
+                        'confidence': rule['confidence'] * 0.6,  # Even lower for word match
+                        'pattern': pattern,
+                        'match_type': 'word'
+                    }
+
+            return None
 
     @staticmethod
     def get_all_rules(client_id: int) -> List[Dict]:
         """Get all categorization rules for a client with account info."""
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT cr.*, a.name as account_name, a.account_number
+                FROM categorization_rules cr
+                JOIN accounts a ON cr.default_account_id = a.id
+                WHERE cr.client_id = ?
+                ORDER BY cr.times_used DESC
+                """,
+                (client_id,)
+            )
 
-        cursor.execute(
-            """
-            SELECT cr.*, a.name as account_name, a.account_number
-            FROM categorization_rules cr
-            JOIN accounts a ON cr.default_account_id = a.id
-            WHERE cr.client_id = ?
-            ORDER BY cr.times_used DESC
-            """,
-            (client_id,)
-        )
+            rules = [
+                {
+                    'id': row['id'],
+                    'pattern': row['pattern'],
+                    'account_id': row['default_account_id'],
+                    'account_name': row['account_name'],
+                    'account_number': row['account_number'],
+                    'confidence': row['confidence'],
+                    'times_used': row['times_used']
+                }
+                for row in cursor.fetchall()
+            ]
 
-        rules = [
-            {
-                'id': row['id'],
-                'pattern': row['pattern'],
-                'account_id': row['default_account_id'],
-                'account_name': row['account_name'],
-                'account_number': row['account_number'],
-                'confidence': row['confidence'],
-                'times_used': row['times_used']
-            }
-            for row in cursor.fetchall()
-        ]
-
-        conn.close()
-        return rules
+            return rules
 
     @staticmethod
     def delete_rule(rule_id: int):
         """Delete a categorization rule."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM categorization_rules WHERE id = ?", (rule_id,))
-        conn.commit()
-        conn.close()
+        with get_cursor(commit=True) as cursor:
+            cursor.execute("DELETE FROM categorization_rules WHERE id = ?", (rule_id,))
 
     @staticmethod
     def update_rule(rule_id: int, account_id: int):
         """Update the account for a categorization rule."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE categorization_rules SET default_account_id = ? WHERE id = ?",
-            (account_id, rule_id)
-        )
-        conn.commit()
-        conn.close()
+        with get_cursor(commit=True) as cursor:
+            cursor.execute(
+                "UPDATE categorization_rules SET default_account_id = ? WHERE id = ?",
+                (account_id, rule_id)
+            )

@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from database.connection import get_connection
+from database.connection import get_cursor
 
 
 @dataclass
@@ -50,9 +50,6 @@ class AuditLog:
         Returns:
             The ID of the created audit log entry
         """
-        conn = get_connection()
-        cursor = conn.cursor()
-
         try:
             session_id = AuditLog.get_session_id()
         except Exception:
@@ -62,7 +59,7 @@ class AuditLog:
         old_json = json.dumps(old_values) if old_values else None
         new_json = json.dumps(new_values) if new_values else None
 
-        try:
+        with get_cursor(commit=True) as cursor:
             cursor.execute(
                 """
                 INSERT INTO audit_log (client_id, table_name, record_id, action, old_values, new_values, session_id)
@@ -71,55 +68,42 @@ class AuditLog:
                 (client_id, table_name, record_id, action, old_json, new_json, session_id)
             )
             log_id = cursor.lastrowid
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            raise e
-        finally:
-            conn.close()
 
         return log_id
 
     @staticmethod
     def get_by_id(log_id: int) -> Optional['AuditLog']:
         """Get an audit log entry by ID."""
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_cursor() as cursor:
+            cursor.execute("SELECT * FROM audit_log WHERE id = ?", (log_id,))
+            row = cursor.fetchone()
 
-        cursor.execute("SELECT * FROM audit_log WHERE id = ?", (log_id,))
-        row = cursor.fetchone()
+            if not row:
+                return None
 
-        if not row:
-            conn.close()
-            return None
+            log = AuditLog(
+                id=row['id'],
+                client_id=row['client_id'],
+                table_name=row['table_name'],
+                record_id=row['record_id'],
+                action=row['action'],
+                old_values=json.loads(row['old_values']) if row['old_values'] else None,
+                new_values=json.loads(row['new_values']) if row['new_values'] else None,
+                changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
+                session_id=row['session_id']
+            )
 
-        log = AuditLog(
-            id=row['id'],
-            client_id=row['client_id'],
-            table_name=row['table_name'],
-            record_id=row['record_id'],
-            action=row['action'],
-            old_values=json.loads(row['old_values']) if row['old_values'] else None,
-            new_values=json.loads(row['new_values']) if row['new_values'] else None,
-            changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
-            session_id=row['session_id']
-        )
-
-        conn.close()
         return log
 
     @staticmethod
     def get_earliest_date(client_id: int) -> Optional[datetime]:
         """Get the timestamp of the client's earliest audit log entry, if any."""
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "SELECT MIN(changed_at) as earliest FROM audit_log WHERE client_id = ?",
-            (client_id,)
-        )
-        row = cursor.fetchone()
-        conn.close()
+        with get_cursor() as cursor:
+            cursor.execute(
+                "SELECT MIN(changed_at) as earliest FROM audit_log WHERE client_id = ?",
+                (client_id,)
+            )
+            row = cursor.fetchone()
 
         if row and row['earliest']:
             return datetime.fromisoformat(row['earliest'])
@@ -140,30 +124,27 @@ class AuditLog:
         Returns:
             List of AuditLog entries, ordered by time descending
         """
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_cursor() as cursor:
+            cursor.execute("""
+                SELECT * FROM audit_log
+                WHERE table_name = ? AND record_id = ?
+                ORDER BY changed_at DESC
+            """, (table_name, record_id))
 
-        cursor.execute("""
-            SELECT * FROM audit_log
-            WHERE table_name = ? AND record_id = ?
-            ORDER BY changed_at DESC
-        """, (table_name, record_id))
+            logs = []
+            for row in cursor.fetchall():
+                logs.append(AuditLog(
+                    id=row['id'],
+                    client_id=row['client_id'],
+                    table_name=row['table_name'],
+                    record_id=row['record_id'],
+                    action=row['action'],
+                    old_values=json.loads(row['old_values']) if row['old_values'] else None,
+                    new_values=json.loads(row['new_values']) if row['new_values'] else None,
+                    changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
+                    session_id=row['session_id']
+                ))
 
-        logs = []
-        for row in cursor.fetchall():
-            logs.append(AuditLog(
-                id=row['id'],
-                client_id=row['client_id'],
-                table_name=row['table_name'],
-                record_id=row['record_id'],
-                action=row['action'],
-                old_values=json.loads(row['old_values']) if row['old_values'] else None,
-                new_values=json.loads(row['new_values']) if row['new_values'] else None,
-                changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
-                session_id=row['session_id']
-            ))
-
-        conn.close()
         return logs
 
     @staticmethod
@@ -191,9 +172,6 @@ class AuditLog:
         Returns:
             List of AuditLog entries, ordered by time descending
         """
-        conn = get_connection()
-        cursor = conn.cursor()
-
         query = "SELECT * FROM audit_log WHERE client_id = ?"
         params: List[Any] = [client_id]
 
@@ -225,23 +203,23 @@ class AuditLog:
         query += " ORDER BY changed_at DESC LIMIT ?"
         params.append(limit)
 
-        cursor.execute(query, params)
+        with get_cursor() as cursor:
+            cursor.execute(query, params)
 
-        logs = []
-        for row in cursor.fetchall():
-            logs.append(AuditLog(
-                id=row['id'],
-                client_id=row['client_id'],
-                table_name=row['table_name'],
-                record_id=row['record_id'],
-                action=row['action'],
-                old_values=json.loads(row['old_values']) if row['old_values'] else None,
-                new_values=json.loads(row['new_values']) if row['new_values'] else None,
-                changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
-                session_id=row['session_id']
-            ))
+            logs = []
+            for row in cursor.fetchall():
+                logs.append(AuditLog(
+                    id=row['id'],
+                    client_id=row['client_id'],
+                    table_name=row['table_name'],
+                    record_id=row['record_id'],
+                    action=row['action'],
+                    old_values=json.loads(row['old_values']) if row['old_values'] else None,
+                    new_values=json.loads(row['new_values']) if row['new_values'] else None,
+                    changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
+                    session_id=row['session_id']
+                ))
 
-        conn.close()
         return logs
 
     @staticmethod
@@ -259,33 +237,30 @@ class AuditLog:
         Returns:
             List of AuditLog entries related to this journal entry
         """
-        conn = get_connection()
-        cursor = conn.cursor()
+        with get_cursor() as cursor:
+            # Get changes to the journal entry itself and its lines
+            cursor.execute("""
+                SELECT * FROM audit_log
+                WHERE client_id = ?
+                  AND ((table_name = 'journal_entries' AND record_id = ?)
+                       OR (table_name = 'journal_entry_lines' AND new_values LIKE ?))
+                ORDER BY changed_at DESC
+            """, (client_id, entry_id, f'%"journal_entry_id": {entry_id}%'))
 
-        # Get changes to the journal entry itself and its lines
-        cursor.execute("""
-            SELECT * FROM audit_log
-            WHERE client_id = ?
-              AND ((table_name = 'journal_entries' AND record_id = ?)
-                   OR (table_name = 'journal_entry_lines' AND new_values LIKE ?))
-            ORDER BY changed_at DESC
-        """, (client_id, entry_id, f'%"journal_entry_id": {entry_id}%'))
+            logs = []
+            for row in cursor.fetchall():
+                logs.append(AuditLog(
+                    id=row['id'],
+                    client_id=row['client_id'],
+                    table_name=row['table_name'],
+                    record_id=row['record_id'],
+                    action=row['action'],
+                    old_values=json.loads(row['old_values']) if row['old_values'] else None,
+                    new_values=json.loads(row['new_values']) if row['new_values'] else None,
+                    changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
+                    session_id=row['session_id']
+                ))
 
-        logs = []
-        for row in cursor.fetchall():
-            logs.append(AuditLog(
-                id=row['id'],
-                client_id=row['client_id'],
-                table_name=row['table_name'],
-                record_id=row['record_id'],
-                action=row['action'],
-                old_values=json.loads(row['old_values']) if row['old_values'] else None,
-                new_values=json.loads(row['new_values']) if row['new_values'] else None,
-                changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
-                session_id=row['session_id']
-            ))
-
-        conn.close()
         return logs
 
     def format_changes(self) -> str:
