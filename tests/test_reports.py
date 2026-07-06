@@ -90,3 +90,48 @@ def test_trial_balance_respects_as_of_date(client_id, accounts):
     after_second_entry = ReportGenerator.trial_balance(client_id, date(2025, 12, 31))
     cash_row = next(r for r in after_second_entry if r.account_number == "1000")
     assert cash_row.debit == 600
+
+
+def test_worksheet_includes_in_period_beginning_balance_and_closing_entries(client_id, accounts):
+    """Regression for C1: a Beginning Balance or Closing entry dated inside the
+    period must appear on the Trial Balance Worksheet, not silently vanish while
+    the worksheet still reports 'balanced'. Previously the period bucket filtered
+    entry_type = 'Regular', so both legs of such entries dropped together (leaving
+    debits == credits) and the equity/opening balance disappeared."""
+    # Opening balances posted as a Beginning Balance entry dated within the period.
+    post_entry(client_id, date(2025, 1, 1), [
+        (accounts["cash"], 5000, 0),
+        (accounts["equity"], 0, 5000),
+    ], entry_type="Beginning Balance")
+    # Ordinary in-period activity.
+    post_entry(client_id, date(2025, 3, 15), [
+        (accounts["cash"], 1000, 0),
+        (accounts["revenue"], 0, 1000),
+    ])
+    # A Closing entry dated within the period must also be captured.
+    post_entry(client_id, date(2025, 12, 31), [
+        (accounts["revenue"], 1000, 0),
+        (accounts["equity"], 0, 1000),
+    ], entry_type="Closing")
+
+    rows, _ = ReportGenerator.trial_balance_worksheet(
+        client_id, date(2025, 1, 1), date(2025, 12, 31)
+    )
+    by_name = {r.account_name: r for r in rows}
+
+    # The equity legs of the Beginning Balance + Closing entries must not disappear.
+    assert "Owner's Equity" in by_name
+    assert by_name["Owner's Equity"].adjusted_cr == 6000  # 5000 opening + 1000 closed
+
+    # Revenue was earned (1000) then closed out (1000) -> nets to zero, present or dropped is fine.
+    # Cash must reflect both cash legs: 5000 + 1000 = 6000.
+    assert by_name["Cash"].adjusted_dr == 6000
+
+    # Adjusted TB must tie out AND match the plain trial balance totals.
+    total_dr = sum(r.adjusted_dr for r in rows)
+    total_cr = sum(r.adjusted_cr for r in rows)
+    assert total_dr == total_cr
+
+    plain = ReportGenerator.trial_balance(client_id, date(2025, 12, 31))
+    assert total_dr == sum(r.debit for r in plain)
+    assert total_cr == sum(r.credit for r in plain)
