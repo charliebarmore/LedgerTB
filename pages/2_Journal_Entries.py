@@ -46,8 +46,8 @@ if 'editing_entry_id' not in st.session_state:
 
 # Check if we're coming from General Ledger drill-down
 if 'edit_entry_id' in st.session_state:
-    entry_to_edit = JournalEntry.get_by_id(st.session_state.edit_entry_id)
-    if entry_to_edit and entry_to_edit.client_id == client_id:
+    entry_to_edit = JournalEntry.get_by_id(st.session_state.edit_entry_id, client_id=client_id)
+    if entry_to_edit:
         st.session_state.editing_entry_id = entry_to_edit.id
         st.session_state.je_lines = [
             {
@@ -256,8 +256,8 @@ with tab2:
     with search_col2:
         if search_id > 0:
             if st.button("Go to Entry", key="search_btn"):
-                found_entry = JournalEntry.get_by_id(search_id)
-                if found_entry and found_entry.client_id == client_id:
+                found_entry = JournalEntry.get_by_id(search_id, client_id=client_id)
+                if found_entry:
                     # Load into edit form (including header fields)
                     st.session_state.editing_entry_id = found_entry.id
                     st.session_state.je_lines = [
@@ -349,7 +349,7 @@ with tab2:
 
                         if st.button("Delete", key=f"delete_entry_{entry.id}"):
                             try:
-                                JournalEntry.delete(entry.id)
+                                JournalEntry.delete(entry.id, client_id=client_id)
                                 st.success("Entry deleted!")
                                 st.rerun()
                             except ValueError as e:
@@ -395,7 +395,7 @@ with tab2:
 
                         if st.button("Delete", key=f"delete_entry_{entry.id}"):
                             try:
-                                JournalEntry.delete(entry.id)
+                                JournalEntry.delete(entry.id, client_id=client_id)
                                 st.success("Entry deleted!")
                                 st.rerun()
                             except ValueError as e:
@@ -438,7 +438,7 @@ with tab2:
 
                         if st.button("Delete", key=f"delete_entry_{entry.id}"):
                             try:
-                                JournalEntry.delete(entry.id)
+                                JournalEntry.delete(entry.id, client_id=client_id)
                                 st.success("Entry deleted!")
                                 st.rerun()
                             except ValueError as e:

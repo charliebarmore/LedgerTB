@@ -524,14 +524,25 @@ class ReportGenerator:
     def general_ledger(
         account_id: int,
         start_date: Optional[date] = None,
-        end_date: Optional[date] = None
+        end_date: Optional[date] = None,
+        client_id: Optional[int] = None
     ) -> List[GeneralLedgerEntry]:
-        """Generate general ledger for a specific account."""
+        """Generate general ledger for a specific account.
+
+        If ``client_id`` is given, a ledger is produced only when the account
+        belongs to that client; a cross-client id returns an empty ledger.
+        """
         conn = get_connection()
         cursor = conn.cursor()
 
-        # Get account type for balance calculation
-        cursor.execute("SELECT type FROM accounts WHERE id = ?", (account_id,))
+        # Get account type for balance calculation (scoped to the client when given)
+        if client_id is None:
+            cursor.execute("SELECT type FROM accounts WHERE id = ?", (account_id,))
+        else:
+            cursor.execute(
+                "SELECT type FROM accounts WHERE id = ? AND client_id = ?",
+                (account_id, client_id)
+            )
         row = cursor.fetchone()
         if not row:
             conn.close()

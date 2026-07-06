@@ -507,7 +507,7 @@ if selected_tab == "Upload CSV":
                                     t['bank_account_id'] = mapped_account_id
 
                                     # Apply sign convention based on account type
-                                    mapped_account = Account.get_by_id(mapped_account_id)
+                                    mapped_account = Account.get_by_id(mapped_account_id, client_id=client_id)
                                     if mapped_account and mapped_account.type == 'Liability':
                                         # Credit card: positive = expense, flip to negative
                                         t['amount'] = -t['amount']
@@ -1024,7 +1024,7 @@ elif selected_tab == "Review & Categorize":
                 st.text(t['description'][:35])
                 # Show source account if from multi-account import
                 if t.get('source_account'):
-                    source_acct = Account.get_by_id(t.get('bank_account_id'))
+                    source_acct = Account.get_by_id(t.get('bank_account_id'), client_id=client_id)
                     if source_acct:
                         st.caption(f"From: {source_acct.display_name()}")
                 if t.get('reason'):
