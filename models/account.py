@@ -95,8 +95,12 @@ class Account:
 
     def save(self) -> int:
         """Save or update the account."""
+        from models.audit_log import AuditLog
+
+        is_new = self.id is None
+        old_values = None
         with get_cursor(commit=True) as cursor:
-            if self.id is None:
+            if is_new:
                 cursor.execute(
                     """
                     INSERT INTO accounts (client_id, account_number, name, type, subtype, description, is_active)
@@ -106,6 +110,16 @@ class Account:
                 )
                 self.id = cursor.lastrowid
             else:
+                cursor.execute("SELECT account_number, name, type, subtype, is_active FROM accounts WHERE id = ?", (self.id,))
+                prev = cursor.fetchone()
+                if prev:
+                    old_values = {
+                        'account_number': prev['account_number'],
+                        'name': prev['name'],
+                        'type': prev['type'],
+                        'subtype': prev['subtype'],
+                        'is_active': bool(prev['is_active']),
+                    }
                 cursor.execute(
                     """
                     UPDATE accounts
@@ -114,6 +128,22 @@ class Account:
                     """,
                     (self.account_number, self.name, self.type, self.subtype, self.description, int(self.is_active), self.id)
                 )
+
+        new_values = {
+            'account_number': self.account_number,
+            'name': self.name,
+            'type': self.type,
+            'subtype': self.subtype,
+            'is_active': self.is_active,
+        }
+        AuditLog.log_change_safe(
+            client_id=self.client_id,
+            table_name='accounts',
+            record_id=self.id,
+            action='INSERT' if is_new else 'UPDATE',
+            old_values=old_values,
+            new_values=new_values,
+        )
         return self.id
 
     def deactivate(self):
@@ -214,16 +244,13 @@ class Account:
             cursor.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
             conn.commit()
 
-            try:
-                AuditLog.log_change(
-                    client_id=acct_client_id,
-                    table_name="accounts",
-                    record_id=account_id,
-                    action="DELETE",
-                    old_values=old_values,
-                )
-            except Exception:
-                pass  # Don't fail the delete if audit logging fails
+            AuditLog.log_change_safe(
+                client_id=acct_client_id,
+                table_name="accounts",
+                record_id=account_id,
+                action="DELETE",
+                old_values=old_values,
+            )
         except Exception:
             conn.rollback()
             raise

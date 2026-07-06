@@ -146,23 +146,20 @@ def post_transaction(
 
     # Best-effort audit AFTER the atomic write commits — mirrors the audit
     # behavior of a standalone JournalEntry.save() and never fails the post.
-    try:
-        from models.audit_log import AuditLog
-        AuditLog.log_change(
-            client_id=client_id,
-            table_name="journal_entries",
-            record_id=entry.id,
-            action="INSERT",
-            new_values={
-                "entry_date": entry.entry_date.isoformat(),
-                "description": entry.description,
-                "source_reference": entry.source_reference,
-                "entry_type": entry.entry_type,
-                "total_debits": entry.total_debits(),
-                "total_credits": entry.total_credits(),
-            },
-        )
-    except Exception:
-        pass
+    from models.audit_log import AuditLog
+    AuditLog.log_change_safe(
+        client_id=client_id,
+        table_name="journal_entries",
+        record_id=entry.id,
+        action="INSERT",
+        new_values={
+            "entry_date": entry.entry_date.isoformat(),
+            "description": entry.description,
+            "source_reference": entry.source_reference,
+            "entry_type": entry.entry_type,
+            "total_debits": entry.total_debits(),
+            "total_credits": entry.total_credits(),
+        },
+    )
 
     return entry, imported_txn

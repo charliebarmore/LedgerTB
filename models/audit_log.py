@@ -1,10 +1,13 @@
 import sqlite3
 import json
+import logging
 import uuid
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from database.connection import get_cursor
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -70,6 +73,39 @@ class AuditLog:
             log_id = cursor.lastrowid
 
         return log_id
+
+    @staticmethod
+    def log_change_safe(
+        client_id: int,
+        table_name: str,
+        record_id: int,
+        action: str,
+        old_values: Optional[Dict[str, Any]] = None,
+        new_values: Optional[Dict[str, Any]] = None
+    ) -> Optional[int]:
+        """Best-effort audit log write for use inside a mutating operation.
+
+        A failing audit write must not fail the underlying operation (losing a
+        user's save to an audit hiccup is worse than a missing audit row), but
+        the failure is logged via the logging module rather than silently
+        swallowed, so it is visible rather than invisible. Returns the log id, or
+        None if logging failed.
+        """
+        try:
+            return AuditLog.log_change(
+                client_id=client_id,
+                table_name=table_name,
+                record_id=record_id,
+                action=action,
+                old_values=old_values,
+                new_values=new_values,
+            )
+        except Exception:
+            logger.warning(
+                "Audit log write failed for %s on %s id=%s",
+                action, table_name, record_id, exc_info=True,
+            )
+            return None
 
     @staticmethod
     def get_by_id(log_id: int) -> Optional['AuditLog']:
