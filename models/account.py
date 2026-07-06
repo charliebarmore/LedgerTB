@@ -47,11 +47,22 @@ class Account:
         ) for row in rows]
 
     @staticmethod
-    def get_by_id(account_id: int) -> Optional['Account']:
-        """Get an account by its ID."""
+    def get_by_id(account_id: int, client_id: Optional[int] = None) -> Optional['Account']:
+        """Get an account by its ID.
+
+        If ``client_id`` is given, the account is returned only when it belongs
+        to that client -- defense-in-depth against reading another client's data
+        with a mismatched id. Returns None on a cross-client mismatch.
+        """
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM accounts WHERE id = ?", (account_id,))
+        if client_id is None:
+            cursor.execute("SELECT * FROM accounts WHERE id = ?", (account_id,))
+        else:
+            cursor.execute(
+                "SELECT * FROM accounts WHERE id = ? AND client_id = ?",
+                (account_id, client_id)
+            )
         row = cursor.fetchone()
         conn.close()
 
@@ -142,17 +153,27 @@ class Account:
         return f"{self.account_number} - {self.name}"
 
     @staticmethod
-    def get_balance(account_id: int, as_of_date: Optional[str] = None) -> float:
+    def get_balance(account_id: int, as_of_date: Optional[str] = None,
+                    client_id: Optional[int] = None) -> float:
         """
         Calculate the balance for an account.
         For Asset/Expense: Debits increase, Credits decrease
         For Liability/Equity/Revenue: Credits increase, Debits decrease
+
+        If ``client_id`` is given, a balance is computed only when the account
+        belongs to that client; a cross-client id returns 0.0.
         """
         conn = get_connection()
         cursor = conn.cursor()
 
-        # Get account type
-        cursor.execute("SELECT type FROM accounts WHERE id = ?", (account_id,))
+        # Get account type (scoped to the client when provided)
+        if client_id is None:
+            cursor.execute("SELECT type FROM accounts WHERE id = ?", (account_id,))
+        else:
+            cursor.execute(
+                "SELECT type FROM accounts WHERE id = ? AND client_id = ?",
+                (account_id, client_id)
+            )
         row = cursor.fetchone()
         if not row:
             conn.close()

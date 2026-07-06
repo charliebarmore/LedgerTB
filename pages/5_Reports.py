@@ -385,7 +385,7 @@ elif selected_report == "General Ledger":
         gl_end = st.date_input("End Date", value=default_end, key="gl_end")
 
     if selected_account:
-        entries = ReportGenerator.general_ledger(selected_account, gl_start, gl_end)
+        entries = ReportGenerator.general_ledger(selected_account, gl_start, gl_end, client_id=client_id)
 
         if not entries:
             st.info("No transactions for this account in the selected period.")
@@ -446,7 +446,7 @@ elif selected_report == "General Ledger":
                     st.text(f"${e.balance:,.2f}")
 
             # Summary
-            account = Account.get_by_id(selected_account)
+            account = Account.get_by_id(selected_account, client_id=client_id)
             final_balance = entries[-1].balance if entries else 0
 
             st.divider()

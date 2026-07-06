@@ -82,12 +82,11 @@ with tab1:
 
         # Edit account modal
         if 'editing_account' in st.session_state:
-            account = Account.get_by_id(st.session_state['editing_account'])
-            if account and account.client_id != client_id:
-                # Stale id left over from before a client switch - drop it rather
-                # than risk editing/deleting another client's account.
-                del st.session_state['editing_account']
-                account = None
+            account = Account.get_by_id(st.session_state['editing_account'], client_id=client_id)
+            if account is None:
+                # Unknown or stale id (e.g. left over from before a client switch) -
+                # drop it rather than risk editing/deleting another client's account.
+                st.session_state.pop('editing_account', None)
             if account:
                 st.divider()
                 st.subheader(f"Edit Account: {account.display_name()}")

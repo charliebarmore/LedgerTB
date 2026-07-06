@@ -199,12 +199,23 @@ class JournalEntry:
         return self.id
 
     @staticmethod
-    def get_by_id(entry_id: int) -> Optional['JournalEntry']:
-        """Get a journal entry with its lines."""
+    def get_by_id(entry_id: int, client_id: Optional[int] = None) -> Optional['JournalEntry']:
+        """Get a journal entry with its lines.
+
+        If ``client_id`` is given, the entry is returned only when it belongs to
+        that client -- defense-in-depth for id-based lookups (e.g. the entry
+        search box). Returns None on a cross-client mismatch.
+        """
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
+        if client_id is None:
+            cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
+        else:
+            cursor.execute(
+                "SELECT * FROM journal_entries WHERE id = ? AND client_id = ?",
+                (entry_id, client_id)
+            )
         row = cursor.fetchone()
 
         if not row:
@@ -323,16 +334,26 @@ class JournalEntry:
         return entries
 
     @staticmethod
-    def delete(entry_id: int):
-        """Delete a journal entry and its lines."""
+    def delete(entry_id: int, client_id: Optional[int] = None):
+        """Delete a journal entry and its lines.
+
+        If ``client_id`` is given, only an entry belonging to that client is
+        deleted; a cross-client id is a no-op (the row is treated as not found).
+        """
         from models.audit_log import AuditLog
 
         conn = get_connection()
         try:
             cursor = conn.cursor()
 
-            # Get the entry info for audit logging
-            cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
+            # Get the entry info for audit logging (scoped to the client when given)
+            if client_id is None:
+                cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
+            else:
+                cursor.execute(
+                    "SELECT * FROM journal_entries WHERE id = ? AND client_id = ?",
+                    (entry_id, client_id)
+                )
             row = cursor.fetchone()
 
             if row:
