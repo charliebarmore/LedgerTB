@@ -50,6 +50,12 @@ class CategorizationService:
         self.client = None
         if ANTHROPIC_API_KEY:
             self.client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        # Result state from the most recent run (always present so callers never
+        # read a stale value or hit a missing attribute).
+        self.last_matched = 0
+        self.last_total = 0
+        self.last_unmatched = []
+        self.last_error = None
 
     def is_available(self) -> bool:
         """Check if the API is configured and available."""
@@ -116,6 +122,13 @@ class CategorizationService:
         Returns:
             List of dicts with added 'suggested_account_id' and 'confidence'
         """
+        # Reset per-batch result state up front so a failure (or an early return)
+        # can never leave stale values from a previous batch.
+        self.last_matched = 0
+        self.last_total = 0
+        self.last_unmatched = []
+        self.last_error = None
+
         if not transactions:
             return transactions
 
@@ -161,39 +174,58 @@ Call the categorize_transactions tool with a suggestion for every transaction li
                 raise ValueError("Model response did not include a categorize_transactions tool call")
 
             suggestions = tool_use.input.get("suggestions", [])
-
-            # Build account lookup - handle both string and int account numbers
-            account_lookup = {}
-            for a in accounts:
-                account_lookup[a.account_number] = a.id
-                account_lookup[str(a.account_number)] = a.id
-
-            # Apply suggestions to transactions
-            matched_count = 0
-            unmatched_accounts = []
-            for suggestion in suggestions:
-                idx = suggestion.get('index', 0) - 1
-                if 0 <= idx < len(transactions):
-                    account_num = str(suggestion.get('account_number', ''))
-                    if account_num in account_lookup:
-                        transactions[idx]['suggested_account_id'] = account_lookup[account_num]
-                        transactions[idx]['confidence'] = suggestion.get('confidence', 'medium')
-                        transactions[idx]['reason'] = suggestion.get('reason', 'AI suggested')
-                        matched_count += 1
-                    else:
-                        unmatched_accounts.append(account_num)
+            matched_count, unmatched_accounts = self._apply_suggestions(
+                transactions, suggestions, accounts
+            )
 
             self.last_matched = matched_count
-            self.last_total = len(suggestions)
+            self.last_total = len(transactions)
             self.last_unmatched = unmatched_accounts
             self.last_error = None
 
         except Exception as e:
             self.last_error = str(e)
-            self.last_matched = 0
-            self.last_total = 0
+            # last_matched/last_total/last_unmatched remain at their reset values.
 
         return transactions
+
+    @staticmethod
+    def _apply_suggestions(transactions, suggestions, accounts):
+        """Apply model suggestions to transactions in place.
+
+        Validates the model-supplied 1-based ``index``: out-of-range indices and
+        duplicate indices are ignored, so a suggestion can never be written to
+        the wrong transaction or overwrite an already-suggested one (only the
+        first suggestion for a given index is honored). Returns
+        ``(matched_count, unmatched_account_numbers)``.
+        """
+        # Account lookup - handle both string and int account numbers
+        account_lookup = {}
+        for a in accounts:
+            account_lookup[a.account_number] = a.id
+            account_lookup[str(a.account_number)] = a.id
+
+        matched_count = 0
+        unmatched_accounts = []
+        seen_indices = set()
+        for suggestion in suggestions:
+            idx = suggestion.get('index', 0) - 1
+            if not (0 <= idx < len(transactions)):
+                continue  # index the model invented / out of range
+            if idx in seen_indices:
+                continue  # duplicate index - keep only the first suggestion
+            seen_indices.add(idx)
+
+            account_num = str(suggestion.get('account_number', ''))
+            if account_num in account_lookup:
+                transactions[idx]['suggested_account_id'] = account_lookup[account_num]
+                transactions[idx]['confidence'] = suggestion.get('confidence', 'medium')
+                transactions[idx]['reason'] = suggestion.get('reason', 'AI suggested')
+                matched_count += 1
+            else:
+                unmatched_accounts.append(account_num)
+
+        return matched_count, unmatched_accounts
 
     def categorize_single(
         self,

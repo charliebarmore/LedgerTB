@@ -721,9 +721,9 @@ elif selected_tab == "Review & Categorize":
             if result.get('error'):
                 st.error(f"AI categorization error: {result['error']}")
             elif result.get('matched', 0) > 0:
-                st.success(f"AI categorization complete! Matched {result['matched']} of {result['total']} suggestions.")
+                st.success(f"AI categorization complete! Matched {result['matched']} of {result['total']} transactions.")
             else:
-                st.warning(f"AI returned {result.get('total', 0)} suggestions but none matched your accounts.")
+                st.warning(f"AI processed {result.get('total', 0)} transactions but none matched your accounts.")
             # Clear the message after showing
             st.session_state.ai_categorization_result = None
 

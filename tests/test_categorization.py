@@ -96,3 +96,67 @@ def test_categorize_transactions_batches_and_aggregates_stats():
     assert service.last_matched == 3
     assert service.last_total == 3
     assert all("suggested_account_id" in t for t in result)
+
+
+# ---- M7: index validation in _apply_suggestions + stale-state reset ----
+
+def _accts():
+    return [
+        Account(id=10, client_id=1, account_number="6300", name="Software", type="Expense", is_active=True),
+        Account(id=20, client_id=1, account_number="4000", name="Fees", type="Revenue", is_active=True),
+    ]
+
+
+def test_apply_suggestions_ignores_duplicate_index():
+    """A duplicate 1-based index must not overwrite an already-suggested txn or
+    be double-counted; only the first suggestion for an index is honored."""
+    txns = [{"description": "A", "amount": -1.0}, {"description": "B", "amount": -2.0}]
+    suggestions = [
+        {"index": 1, "account_number": "6300", "confidence": "high", "reason": "first"},
+        {"index": 1, "account_number": "4000", "confidence": "low", "reason": "dupe"},  # same index
+    ]
+    matched, unmatched = CategorizationService._apply_suggestions(txns, suggestions, _accts())
+    assert matched == 1
+    assert txns[0]["suggested_account_id"] == 10          # first suggestion kept
+    assert txns[0]["reason"] == "first"
+    assert "suggested_account_id" not in txns[1]           # txn 2 untouched
+
+
+def test_apply_suggestions_ignores_out_of_range_index():
+    txns = [{"description": "A", "amount": -1.0}]
+    suggestions = [
+        {"index": 0, "account_number": "6300", "confidence": "high", "reason": "bad"},   # 0 -> -1
+        {"index": 5, "account_number": "6300", "confidence": "high", "reason": "bad"},   # beyond len
+    ]
+    matched, _ = CategorizationService._apply_suggestions(txns, suggestions, _accts())
+    assert matched == 0
+    assert "suggested_account_id" not in txns[0]
+
+
+def test_apply_suggestions_reports_unknown_account():
+    txns = [{"description": "A", "amount": -1.0}]
+    suggestions = [{"index": 1, "account_number": "9999", "confidence": "low", "reason": "?"}]
+    matched, unmatched = CategorizationService._apply_suggestions(txns, suggestions, _accts())
+    assert matched == 0
+    assert unmatched == ["9999"]
+
+
+def test_batch_failure_resets_stale_unmatched():
+    """After a batch fails, last_unmatched (and matched/total) must be cleared,
+    not left holding a previous batch's values."""
+    from types import SimpleNamespace
+
+    service = CategorizationService()
+    service.last_unmatched = ["STALE"]
+    service.last_matched = 99
+
+    class BoomClient:
+        messages = SimpleNamespace(create=lambda **kw: (_ for _ in ()).throw(RuntimeError("api down")))
+
+    service.client = BoomClient()
+    service._categorize_batch([{"date": "", "description": "X", "amount": -10.0}], _accts())
+
+    assert service.last_error is not None
+    assert service.last_unmatched == []
+    assert service.last_matched == 0
+    assert service.last_total == 0
