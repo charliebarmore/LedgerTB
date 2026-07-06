@@ -69,8 +69,15 @@ class JournalEntry:
 
         return errors
 
-    def save(self) -> int:
-        """Save the journal entry and its lines."""
+    def save(self, conn=None) -> int:
+        """Save the journal entry and its lines.
+
+        If ``conn`` is provided, this method participates in the caller's
+        transaction: it uses that connection and does NOT commit, close, or
+        write its own audit-log row (the caller — e.g. services.posting —
+        coordinates the shared transaction and its audit logging). When ``conn``
+        is omitted it manages its own connection exactly as before.
+        """
         from models.audit_log import AuditLog
 
         errors = self.validate()
@@ -86,7 +93,9 @@ class JournalEntry:
                 f"editing entries dated {self.entry_date.isoformat()}."
             )
 
-        conn = get_connection()
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
         cursor = conn.cursor()
 
         is_new = self.id is None
@@ -142,45 +151,50 @@ class JournalEntry:
                 line.id = cursor.lastrowid
                 line.journal_entry_id = self.id
 
-            conn.commit()
+            if owns_conn:
+                conn.commit()
 
-            # Log to audit trail
-            new_values = {
-                'entry_date': self.entry_date.isoformat(),
-                'description': self.description,
-                'source_reference': self.source_reference,
-                'entry_type': self.entry_type,
-                'aje_reference': self.aje_reference,
-                'total_debits': self.total_debits(),
-                'total_credits': self.total_credits()
-            }
+                # Log to audit trail. Only when this method owns the transaction;
+                # a caller that passes `conn` coordinates the shared transaction
+                # and is responsible for its own audit logging.
+                new_values = {
+                    'entry_date': self.entry_date.isoformat(),
+                    'description': self.description,
+                    'source_reference': self.source_reference,
+                    'entry_type': self.entry_type,
+                    'aje_reference': self.aje_reference,
+                    'total_debits': self.total_debits(),
+                    'total_credits': self.total_credits()
+                }
 
-            try:
-                if is_new:
-                    AuditLog.log_change(
-                        client_id=self.client_id,
-                        table_name='journal_entries',
-                        record_id=self.id,
-                        action='INSERT',
-                        new_values=new_values
-                    )
-                else:
-                    AuditLog.log_change(
-                        client_id=self.client_id,
-                        table_name='journal_entries',
-                        record_id=self.id,
-                        action='UPDATE',
-                        old_values=old_values,
-                        new_values=new_values
-                    )
-            except Exception:
-                pass  # Don't fail the save if audit logging fails
+                try:
+                    if is_new:
+                        AuditLog.log_change(
+                            client_id=self.client_id,
+                            table_name='journal_entries',
+                            record_id=self.id,
+                            action='INSERT',
+                            new_values=new_values
+                        )
+                    else:
+                        AuditLog.log_change(
+                            client_id=self.client_id,
+                            table_name='journal_entries',
+                            record_id=self.id,
+                            action='UPDATE',
+                            old_values=old_values,
+                            new_values=new_values
+                        )
+                except Exception:
+                    pass  # Don't fail the save if audit logging fails
 
         except Exception as e:
-            conn.rollback()
+            if owns_conn:
+                conn.rollback()
             raise e
         finally:
-            conn.close()
+            if owns_conn:
+                conn.close()
 
         return self.id
 
@@ -314,49 +328,60 @@ class JournalEntry:
         from models.audit_log import AuditLog
 
         conn = get_connection()
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
 
-        # Get the entry info for audit logging
-        cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
-        row = cursor.fetchone()
+            # Get the entry info for audit logging
+            cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
+            row = cursor.fetchone()
 
-        if row:
-            old_values = {
-                'entry_date': row['entry_date'],
-                'description': row['description'],
-                'source_reference': row['source_reference'],
-                'entry_type': row['entry_type'],
-                'aje_reference': row['aje_reference'] if 'aje_reference' in row.keys() else None
-            }
-            client_id = row['client_id']
+            if row:
+                old_values = {
+                    'entry_date': row['entry_date'],
+                    'description': row['description'],
+                    'source_reference': row['source_reference'],
+                    'entry_type': row['entry_type'],
+                    'aje_reference': row['aje_reference'] if 'aje_reference' in row.keys() else None
+                }
+                client_id = row['client_id']
 
-            # Block deleting entries dated within a closed fiscal year
-            from models.fiscal_period import FiscalPeriod
-            entry_date = date.fromisoformat(row['entry_date'])
-            closed = FiscalPeriod.get_closed_period_for_date(client_id, entry_date)
-            if closed:
-                conn.close()
-                raise ValueError(
-                    f"{closed.period_name} is closed. Reopen the year before deleting "
-                    f"entries dated {entry_date.isoformat()}."
+                # Block deleting entries dated within a closed fiscal year
+                from models.fiscal_period import FiscalPeriod
+                entry_date = date.fromisoformat(row['entry_date'])
+                closed = FiscalPeriod.get_closed_period_for_date(client_id, entry_date)
+                if closed:
+                    raise ValueError(
+                        f"{closed.period_name} is closed. Reopen the year before deleting "
+                        f"entries dated {entry_date.isoformat()}."
+                    )
+
+                # Unlink any imported transactions that reference this entry first.
+                # imported_transactions.journal_entry_id is a RESTRICT foreign key
+                # (no ON DELETE clause) and PRAGMA foreign_keys is ON, so deleting an
+                # import-posted entry without this would raise IntegrityError. This
+                # mirrors ON DELETE SET NULL semantics at the application layer.
+                cursor.execute(
+                    "UPDATE imported_transactions SET journal_entry_id = NULL "
+                    "WHERE journal_entry_id = ?",
+                    (entry_id,)
                 )
 
-            cursor.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
-            conn.commit()
+                cursor.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
+                conn.commit()
 
-            # Log to audit trail
-            try:
-                AuditLog.log_change(
-                    client_id=client_id,
-                    table_name='journal_entries',
-                    record_id=entry_id,
-                    action='DELETE',
-                    old_values=old_values
-                )
-            except Exception:
-                pass  # Don't fail the delete if audit logging fails
-
-        conn.close()
+                # Log to audit trail
+                try:
+                    AuditLog.log_change(
+                        client_id=client_id,
+                        table_name='journal_entries',
+                        record_id=entry_id,
+                        action='DELETE',
+                        old_values=old_values
+                    )
+                except Exception:
+                    pass  # Don't fail the delete if audit logging fails
+        finally:
+            conn.close()
 
     @staticmethod
     def get_next_aje_reference(client_id: int, period_start: date, period_end: date) -> str:
