@@ -9,6 +9,7 @@ from models.account import Account
 from models.client import Client
 from database import init_database
 from utils.client_selector import render_client_selector
+from constants import AccountType
 
 # Initialize database
 init_database()
@@ -45,7 +46,7 @@ with tab1:
         st.info("No accounts found. Add some accounts to get started.")
     else:
         # Group accounts by type
-        account_types = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense']
+        account_types = AccountType.ALL
 
         for account_type in account_types:
             type_accounts = [a for a in accounts if a.type == account_type]
@@ -96,8 +97,8 @@ with tab1:
                     new_name = st.text_input("Account Name", value=account.name)
                     new_type = st.selectbox(
                         "Account Type",
-                        options=['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'],
-                        index=['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'].index(account.type)
+                        options=AccountType.ALL,
+                        index=AccountType.ALL.index(account.type)
                     )
                     new_subtype = st.text_input("Subtype", value=account.subtype or "")
                     new_description = st.text_area(
@@ -154,7 +155,7 @@ with tab2:
         account_name = st.text_input("Account Name", placeholder="e.g., Cash - Operating")
         account_type = st.selectbox(
             "Account Type",
-            options=['Asset', 'Liability', 'Equity', 'Revenue', 'Expense']
+            options=AccountType.ALL
         )
         subtype = st.text_input("Subtype (optional)", placeholder="e.g., Cash, Fixed Asset, etc.")
         description = st.text_area(

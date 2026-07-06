@@ -2,6 +2,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional, List
 from database.connection import get_connection, get_cursor
+from constants import AccountType
 
 
 @dataclass
@@ -287,7 +288,7 @@ class Account:
             total_credits = row['total_credits']
 
         # Calculate balance based on account type
-        if account_type in ('Asset', 'Expense'):
+        if AccountType.is_debit_normal(account_type):
             return total_debits - total_credits
         else:  # Liability, Equity, Revenue
             return total_credits - total_debits

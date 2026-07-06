@@ -11,6 +11,7 @@ from models.client import Client
 from models.journal_entry import JournalEntry, JournalEntryLine
 from database import init_database
 from utils.client_selector import render_client_selector
+from constants import EntryType
 
 # Initialize database
 init_database()
@@ -96,7 +97,7 @@ with tab1:
     account_options.update({a.id: a.display_name() for a in accounts})
 
     # Entry header - use session state values if editing
-    entry_type_options = ['Regular', 'Adjusting', 'Closing', 'Beginning Balance']
+    entry_type_options = EntryType.ALL
 
     # Get default values from session state if editing
     default_date = st.session_state.get('je_entry_date', date.today())
@@ -289,7 +290,7 @@ with tab2:
         filter_end = st.date_input("To Date", value=date.today(), key="filter_end")
 
     with col3:
-        filter_type = st.selectbox("Entry Type", options=['All', 'Regular', 'Adjusting', 'Closing', 'Beginning Balance'], key="filter_type")
+        filter_type = st.selectbox("Entry Type", options=['All'] + EntryType.ALL, key="filter_type")
 
     # Get entries
     entries = JournalEntry.get_all(
