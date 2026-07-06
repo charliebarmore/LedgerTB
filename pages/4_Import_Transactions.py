@@ -788,10 +788,13 @@ elif selected_tab == "Review & Categorize":
 
                 if api_key_input:
                     if st.button("Save & Enable AI", type="primary"):
-                        # Save to .env file
+                        # Save to .env file, replacing any existing key line rather
+                        # than appending (repeated saves used to pile up duplicates).
                         env_path = Path(__file__).parent.parent / ".env"
-                        with open(env_path, "a") as f:
-                            f.write(f"\nANTHROPIC_API_KEY={api_key_input}\n")
+                        existing = env_path.read_text().splitlines() if env_path.exists() else []
+                        kept = [l for l in existing if not l.strip().startswith("ANTHROPIC_API_KEY=")]
+                        kept.append(f"ANTHROPIC_API_KEY={api_key_input}")
+                        env_path.write_text("\n".join(kept) + "\n")
                         st.success("API key saved! Please restart the application for changes to take effect.")
                         st.info("Run: `streamlit run app.py` to restart")
 

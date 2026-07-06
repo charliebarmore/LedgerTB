@@ -12,6 +12,7 @@ from models.client import Client
 from models.reports import ReportGenerator
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils.export import sanitize_df
 
 # Initialize database
 init_database()
@@ -126,7 +127,7 @@ if selected_report == "Trial Balance":
 
         buffer = BytesIO()
         with st.spinner("Preparing export..."):
-            df.to_excel(buffer, index=False, sheet_name="Trial Balance")
+            sanitize_df(df).to_excel(buffer, index=False, sheet_name="Trial Balance")
             buffer.seek(0)
 
         st.download_button(
@@ -218,7 +219,7 @@ elif selected_report == "Income Statement":
     df = ReportGenerator.income_statement_to_dataframe(report)
 
     buffer = BytesIO()
-    df.to_excel(buffer, index=False, sheet_name="Income Statement")
+    sanitize_df(df).to_excel(buffer, index=False, sheet_name="Income Statement")
     buffer.seek(0)
 
     st.download_button(
@@ -329,7 +330,7 @@ elif selected_report == "Balance Sheet":
     df = ReportGenerator.balance_sheet_to_dataframe(report)
 
     buffer = BytesIO()
-    df.to_excel(buffer, index=False, sheet_name="Balance Sheet")
+    sanitize_df(df).to_excel(buffer, index=False, sheet_name="Balance Sheet")
     buffer.seek(0)
 
     st.download_button(
@@ -466,7 +467,7 @@ elif selected_report == "General Ledger":
             df = ReportGenerator.general_ledger_to_dataframe(entries)
 
             buffer = BytesIO()
-            df.to_excel(buffer, index=False, sheet_name="General Ledger")
+            sanitize_df(df).to_excel(buffer, index=False, sheet_name="General Ledger")
             buffer.seek(0)
 
             st.download_button(
