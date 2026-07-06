@@ -120,8 +120,13 @@ class PatternLearner:
 
             for rule in cursor.fetchall():
                 pattern = rule['pattern']
-                # Check if pattern is in normalized description
-                if pattern in normalized or normalized in pattern:
+                # Skip empty/whitespace patterns defensively (also avoids the
+                # ZeroDivision in the word-overlap check below).
+                if not pattern or not pattern.strip():
+                    continue
+                # Substring match, but only for patterns long enough to be
+                # meaningful -- a 1-3 char pattern would match almost anything.
+                if len(pattern) >= 4 and (pattern in normalized or normalized in pattern):
                     return {
                         'account_id': rule['default_account_id'],
                         'account_name': rule['account_name'],
@@ -136,8 +141,9 @@ class PatternLearner:
                 desc_words = set(normalized.split())
                 common_words = pattern_words & desc_words
 
-                # If significant word overlap, consider it a match
-                if len(common_words) >= 2 and len(common_words) / len(pattern_words) > 0.5:
+                # If significant word overlap, consider it a match (guard against
+                # an empty pattern_words set -> ZeroDivision).
+                if pattern_words and len(common_words) >= 2 and len(common_words) / len(pattern_words) > 0.5:
                     return {
                         'account_id': rule['default_account_id'],
                         'account_name': rule['account_name'],

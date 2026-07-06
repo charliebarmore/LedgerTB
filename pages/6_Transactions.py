@@ -12,6 +12,7 @@ from models.transaction import ImportedTransaction
 from models.journal_entry import JournalEntry
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils.export import sanitize_df
 
 # Initialize database
 init_database()
@@ -201,7 +202,7 @@ else:
             })
 
         df = pd.DataFrame(export_data)
-        csv = df.to_csv(index=False)
+        csv = sanitize_df(df).to_csv(index=False)
 
         st.download_button(
             label="Download CSV",
