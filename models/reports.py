@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict
 from datetime import date
 from database.connection import get_cursor
+from constants import AccountType
 import pandas as pd
 
 
@@ -114,7 +115,7 @@ class ReportGenerator:
                 total_credits = row['total_credits']
 
                 # Calculate balance based on normal balance
-                if account_type in ('Asset', 'Expense'):
+                if AccountType.is_debit_normal(account_type):
                     balance = total_debits - total_credits
                     debit = balance if balance >= 0 else 0
                     credit = -balance if balance < 0 else 0
@@ -226,7 +227,7 @@ class ReportGenerator:
         for acct in accounts:
             account_id = acct['id']
             account_type = acct['type']
-            is_debit_normal = account_type in ('Asset', 'Expense')
+            is_debit_normal = AccountType.is_debit_normal(account_type)
 
             beg_total_dr, beg_total_cr = beginning.get(account_id, (0, 0))
             period_debits, period_credits = period.get(account_id, (0, 0))
@@ -519,7 +520,7 @@ class ReportGenerator:
                 return []
 
             account_type = row['type']
-            is_debit_normal = account_type in ('Asset', 'Expense')
+            is_debit_normal = AccountType.is_debit_normal(account_type)
 
             entries = []
             running_balance = 0.0

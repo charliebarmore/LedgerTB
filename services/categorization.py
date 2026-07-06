@@ -1,6 +1,7 @@
 from typing import List, Dict, Optional
 from anthropic import Anthropic
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+from constants import DEFAULT_MISC_EXPENSE_ACCOUNT, DEFAULT_OTHER_INCOME_ACCOUNT
 from models.account import Account
 
 
@@ -156,7 +157,7 @@ Transactions to categorize:
 For each transaction, determine the most appropriate expense or revenue account.
 - Negative amounts are expenses/withdrawals - match to an Expense account
 - Positive amounts are deposits - match to a Revenue account
-- If unsure, use "7500: Miscellaneous Expense" for expenses or "4900: Other Income" for revenue
+- If unsure, use "{DEFAULT_MISC_EXPENSE_ACCOUNT}: Miscellaneous Expense" for expenses or "{DEFAULT_OTHER_INCOME_ACCOUNT}: Other Income" for revenue
 
 Call the categorize_transactions tool with a suggestion for every transaction listed above."""
 
