@@ -5,6 +5,7 @@ from typing import List, Optional, Dict
 from datetime import date
 from database.connection import get_cursor
 from constants import AccountType
+from money import to_dollars
 import pandas as pd
 
 
@@ -129,8 +130,8 @@ class ReportGenerator:
                         account_number=row['account_number'],
                         account_name=row['account_name'],
                         account_type=account_type,
-                        debit=debit,
-                        credit=credit
+                        debit=to_dollars(debit),
+                        credit=to_dollars(credit)
                     ))
 
         return rows
@@ -219,8 +220,8 @@ class ReportGenerator:
                 'aje_reference': a['aje_reference'] or '',
                 'entry_date': date.fromisoformat(a['entry_date']),
                 'description': a['description'] or '',
-                'debit': a['debit'],
-                'credit': a['credit']
+                'debit': to_dollars(a['debit']),
+                'credit': to_dollars(a['credit'])
             })
 
         rows = []
@@ -276,16 +277,16 @@ class ReportGenerator:
                     account_number=acct['account_number'],
                     account_name=acct['name'],
                     account_type=account_type,
-                    beginning_dr=beginning_dr,
-                    beginning_cr=beginning_cr,
-                    period_debits=period_debits,
-                    period_credits=period_credits,
-                    unadjusted_dr=unadjusted_dr,
-                    unadjusted_cr=unadjusted_cr,
-                    aje_debits=aje_debits,
-                    aje_credits=aje_credits,
-                    adjusted_dr=adjusted_dr,
-                    adjusted_cr=adjusted_cr
+                    beginning_dr=to_dollars(beginning_dr),
+                    beginning_cr=to_dollars(beginning_cr),
+                    period_debits=to_dollars(period_debits),
+                    period_credits=to_dollars(period_credits),
+                    unadjusted_dr=to_dollars(unadjusted_dr),
+                    unadjusted_cr=to_dollars(unadjusted_cr),
+                    aje_debits=to_dollars(aje_debits),
+                    aje_credits=to_dollars(aje_credits),
+                    adjusted_dr=to_dollars(adjusted_dr),
+                    adjusted_cr=to_dollars(adjusted_cr)
                 ))
 
         return rows, aje_details_by_account
@@ -346,11 +347,11 @@ class ReportGenerator:
                 {
                     'account_number': row['account_number'],
                     'name': row['name'],
-                    'balance': row['balance']
+                    'balance': row['balance']  # cents
                 }
                 for row in cursor.fetchall()
             ]
-            total_revenue = sum(r['balance'] for r in revenues)
+            total_revenue = sum(r['balance'] for r in revenues)  # cents, exact
 
             # Get expense accounts
             cursor.execute("""
@@ -374,20 +375,26 @@ class ReportGenerator:
                 {
                     'account_number': row['account_number'],
                     'name': row['name'],
-                    'balance': row['balance']
+                    'balance': row['balance']  # cents
                 }
                 for row in cursor.fetchall()
             ]
-            total_expenses = sum(e['balance'] for e in expenses)
+            total_expenses = sum(e['balance'] for e in expenses)  # cents, exact
+
+        # All aggregation above is in exact integer cents; convert to dollars for output.
+        for r in revenues:
+            r['balance'] = to_dollars(r['balance'])
+        for e in expenses:
+            e['balance'] = to_dollars(e['balance'])
 
         return {
             'start_date': start_date,
             'end_date': end_date,
             'revenues': revenues,
-            'total_revenue': total_revenue,
+            'total_revenue': to_dollars(total_revenue),
             'expenses': expenses,
-            'total_expenses': total_expenses,
-            'net_income': total_revenue - total_expenses
+            'total_expenses': to_dollars(total_expenses),
+            'net_income': to_dollars(total_revenue - total_expenses)
         }
 
     @staticmethod
@@ -479,19 +486,24 @@ class ReportGenerator:
                     'balance': current_year_earnings
                 })
 
-            total_assets = sum(a['balance'] for a in assets)
-            total_liabilities = sum(l['balance'] for l in liabilities)
-            total_equity = sum(e['balance'] for e in equity)
+            total_assets = sum(a['balance'] for a in assets)          # cents
+            total_liabilities = sum(l['balance'] for l in liabilities)  # cents
+            total_equity = sum(e['balance'] for e in equity)          # cents
+
+        # All aggregation above is in exact integer cents; convert to dollars for output.
+        for group in (assets, liabilities, equity):
+            for item in group:
+                item['balance'] = to_dollars(item['balance'])
 
         return {
             'as_of_date': as_of_date,
             'assets': assets,
-            'total_assets': total_assets,
+            'total_assets': to_dollars(total_assets),
             'liabilities': liabilities,
-            'total_liabilities': total_liabilities,
+            'total_liabilities': to_dollars(total_liabilities),
             'equity': equity,
-            'total_equity': total_equity,
-            'total_liabilities_equity': total_liabilities + total_equity
+            'total_equity': to_dollars(total_equity),
+            'total_liabilities_equity': to_dollars(total_liabilities + total_equity)
         }
 
     @staticmethod
@@ -523,7 +535,7 @@ class ReportGenerator:
             is_debit_normal = AccountType.is_debit_normal(account_type)
 
             entries = []
-            running_balance = 0.0
+            running_balance = 0  # integer cents (exact) until converted for output
 
             # Calculate beginning balance if start_date is specified
             if start_date:
@@ -553,7 +565,7 @@ class ReportGenerator:
                         source_reference="",
                         debit=0,
                         credit=0,
-                        balance=running_balance,
+                        balance=to_dollars(running_balance),
                         memo=""
                     ))
 
@@ -599,9 +611,9 @@ class ReportGenerator:
                     entry_id=row['entry_id'],
                     description=row['description'] or '',
                     source_reference=row['source_reference'] or '',
-                    debit=debit,
-                    credit=credit,
-                    balance=running_balance,
+                    debit=to_dollars(debit),
+                    credit=to_dollars(credit),
+                    balance=to_dollars(running_balance),
                     memo=row['memo'] or ''
                 ))
 

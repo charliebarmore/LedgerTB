@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List
 from datetime import date
 from database.connection import get_connection, get_cursor
+from money import to_cents, to_dollars
 
 
 @dataclass
@@ -29,10 +30,14 @@ class JournalEntry:
     lines: List[JournalEntryLine] = field(default_factory=list)
 
     def is_balanced(self) -> bool:
-        """Check if total debits equal total credits."""
-        total_debits = sum(line.debit for line in self.lines)
-        total_credits = sum(line.credit for line in self.lines)
-        return abs(total_debits - total_credits) < 0.01  # Allow for floating point
+        """Check if total debits equal total credits.
+
+        Compared in integer cents so the check is exact -- no floating-point
+        tolerance that would let a not-quite-balanced entry (off by < $0.01) pass.
+        """
+        total_debits = sum(to_cents(line.debit) for line in self.lines)
+        total_credits = sum(to_cents(line.credit) for line in self.lines)
+        return total_debits == total_credits
 
     def total_debits(self) -> float:
         return sum(line.debit for line in self.lines)
@@ -146,7 +151,7 @@ class JournalEntry:
                     INSERT INTO journal_entry_lines (journal_entry_id, account_id, debit, credit, memo)
                     VALUES (?, ?, ?, ?, ?)
                     """,
-                    (self.id, line.account_id, line.debit, line.credit, line.memo)
+                    (self.id, line.account_id, to_cents(line.debit), to_cents(line.credit), line.memo)
                 )
                 line.id = cursor.lastrowid
                 line.journal_entry_id = self.id
@@ -206,8 +211,8 @@ class JournalEntry:
             id=row['id'],
             journal_entry_id=row['journal_entry_id'],
             account_id=row['account_id'],
-            debit=row['debit'],
-            credit=row['credit'],
+            debit=to_dollars(row['debit']),
+            credit=to_dollars(row['credit']),
             memo=row['memo'],
             account_name=row['account_name'],
             account_number=row['account_number']
@@ -412,9 +417,9 @@ class JournalEntry:
 
         Returns list of dicts with matching journal entry info.
         """
-        # Look for journal entries on the same date with matching amount
-        # Amount could be in either debit or credit depending on transaction type
-        abs_amount = abs(amount)
+        # Look for journal entries on the same date with matching amount.
+        # Amounts are stored as integer cents, so match exactly on cents.
+        abs_cents = to_cents(abs(amount))
 
         query = """
             SELECT DISTINCT je.id, je.entry_date, je.description, je.source_reference,
@@ -423,9 +428,9 @@ class JournalEntry:
             JOIN journal_entry_lines jel ON je.id = jel.journal_entry_id
             WHERE je.client_id = ?
               AND je.entry_date = ?
-              AND (ABS(jel.debit - ?) < 0.01 OR ABS(jel.credit - ?) < 0.01)
+              AND (jel.debit = ? OR jel.credit = ?)
         """
-        params = [client_id, entry_date.isoformat(), abs_amount, abs_amount]
+        params = [client_id, entry_date.isoformat(), abs_cents, abs_cents]
 
         # Optionally filter by bank account
         if bank_account_id:
@@ -441,6 +446,6 @@ class JournalEntry:
             'entry_date': row['entry_date'],
             'description': row['description'],
             'source_reference': row['source_reference'],
-            'amount': row['debit'] if row['debit'] > 0 else row['credit'],
+            'amount': to_dollars(row['debit'] if row['debit'] > 0 else row['credit']),
             'memo': row['memo']
         } for row in rows]
