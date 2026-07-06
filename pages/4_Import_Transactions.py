@@ -15,6 +15,7 @@ from services.pattern_learning import PatternLearner
 from services.posting import post_transaction
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils.import_review import ensure_row_ids, row_key
 
 # Initialize database
 init_database()
@@ -573,10 +574,13 @@ if selected_tab == "Upload CSV":
 
                                 st.session_state.transactions_to_review = transactions
 
-                                # Pre-populate selectbox session state with AI suggestions
-                                for i, t in enumerate(transactions):
+                                # Assign a stable per-transaction id so per-row widget
+                                # state survives re-sorting, then pre-populate selectbox
+                                # state with AI suggestions.
+                                ensure_row_ids(transactions)
+                                for t in transactions:
                                     if 'suggested_account_id' in t and t['suggested_account_id']:
-                                        st.session_state[f"cat_{i}"] = t['suggested_account_id']
+                                        st.session_state[row_key("cat", t)] = t['suggested_account_id']
 
                                 # Show success message with duplicate warning if applicable
                                 if duplicate_count > 0:
@@ -627,8 +631,10 @@ elif selected_tab == "Review & Categorize":
         account_options = {0: "-- Select Account --"}
         account_options.update({a.id: a.display_name() for a in all_accounts})
 
-        # Initialize include flags if not present
-        for i, t in enumerate(transactions):
+        # Ensure a stable per-transaction id (used to key all per-row widgets so
+        # their state follows the transaction across re-sorts) and include flags.
+        ensure_row_ids(transactions)
+        for t in transactions:
             if 'include' not in t:
                 t['include'] = True
 
@@ -653,15 +659,15 @@ elif selected_tab == "Review & Categorize":
             subcol1, subcol2 = st.columns(2)
             with subcol1:
                 if st.button("Select All", key="select_all_top"):
-                    for i, t in enumerate(transactions):
+                    for t in transactions:
                         t['include'] = True
-                        st.session_state[f"include_{i}"] = True
+                        st.session_state[row_key("include", t)] = True
                     st.rerun()
             with subcol2:
                 if st.button("Deselect All", key="deselect_all_top"):
-                    for i, t in enumerate(transactions):
+                    for t in transactions:
                         t['include'] = False
-                        st.session_state[f"include_{i}"] = False
+                        st.session_state[row_key("include", t)] = False
                     st.rerun()
 
         # Sorting options
@@ -711,14 +717,12 @@ elif selected_tab == "Review & Categorize":
             st.session_state.ai_categorization_result = None
 
         if categorization_service.is_available():
-            # Build list of uncategorized transactions with their indices
-            # Check session state for current selection, not transaction dict
-            uncategorized_with_idx = [
-                (i, t) for i, t in enumerate(transactions)
-                if st.session_state.get(f"cat_{i}", 0) == 0
+            # Build list of uncategorized transactions.
+            # Check session state for current selection, not transaction dict.
+            uncategorized = [
+                t for t in transactions
+                if st.session_state.get(row_key("cat", t), 0) == 0
             ]
-            uncategorized = [t for i, t in uncategorized_with_idx]
-            uncategorized_indices = [i for i, t in uncategorized_with_idx]
 
             if uncategorized:
                 col1, col2 = st.columns([2, 2])
@@ -744,13 +748,13 @@ elif selected_tab == "Review & Categorize":
                                 'total': getattr(categorization_service, 'last_total', 0),
                             }
 
-                        # Update the selectbox session state keys to match AI suggestions
-                        # Only update for transactions that were just categorized
-                        # This preserves manual selections the user already made
-                        for i in uncategorized_indices:
-                            t = transactions[i]
+                        # Update the selectbox session state keys to match AI suggestions.
+                        # Only the transactions that were just categorized (uncategorized
+                        # holds references to the same dicts, now mutated by the AI call),
+                        # so manual selections the user already made are preserved.
+                        for t in uncategorized:
                             if 'suggested_account_id' in t and t['suggested_account_id']:
-                                st.session_state[f"cat_{i}"] = t['suggested_account_id']
+                                st.session_state[row_key("cat", t)] = t['suggested_account_id']
 
                         # Save updated transactions to session state
                         st.session_state.transactions_to_review = transactions
@@ -791,19 +795,19 @@ elif selected_tab == "Review & Categorize":
         sel_col1, sel_col2, sel_col3, sel_col4 = st.columns([1, 1, 1, 2])
         with sel_col1:
             if st.button("Deselect All", key="deselect_bulk"):
-                for i, t in enumerate(transactions):
+                for t in transactions:
                     t['include'] = False
-                    st.session_state[f"include_{i}"] = False
+                    st.session_state[row_key("include", t)] = False
                 st.rerun()
         with sel_col2:
             if st.button("Select All", key="select_bulk"):
-                for i, t in enumerate(transactions):
+                for t in transactions:
                     t['include'] = True
-                    st.session_state[f"include_{i}"] = True
+                    st.session_state[row_key("include", t)] = True
                 st.rerun()
         with sel_col3:
             # Count selected using session state checkbox values
-            selected_count = sum(1 for i in range(len(transactions)) if st.session_state.get(f"include_{i}", True))
+            selected_count = sum(1 for t in transactions if st.session_state.get(row_key("include", t), True))
             st.markdown(f"**{selected_count}** selected")
 
         col1, col2, col3 = st.columns([2, 1, 1])
@@ -820,19 +824,19 @@ elif selected_tab == "Review & Categorize":
                     st.warning("Please select an account first")
                 else:
                     applied_count = 0
-                    for i, t in enumerate(transactions):
+                    for t in transactions:
                         # Check session state for checkbox value
-                        is_selected = st.session_state.get(f"include_{i}", True)
+                        is_selected = st.session_state.get(row_key("include", t), True)
                         if is_selected:
                             t['selected_account_id'] = bulk_account
                             t['suggested_account_id'] = bulk_account
                             # Update the selectbox session state
-                            st.session_state[f"cat_{i}"] = bulk_account
+                            st.session_state[row_key("cat", t)] = bulk_account
                             applied_count += 1
                     # Deselect all checkboxes after applying
-                    for i in range(len(transactions)):
-                        st.session_state[f"include_{i}"] = False
-                        transactions[i]['include'] = False
+                    for t in transactions:
+                        st.session_state[row_key("include", t)] = False
+                        t['include'] = False
                     # Save changes to session state
                     st.session_state.transactions_to_review = transactions
                     if applied_count > 0:
@@ -846,20 +850,20 @@ elif selected_tab == "Review & Categorize":
                     st.warning("Please select an account first")
                 else:
                     applied_count = 0
-                    for i, t in enumerate(transactions):
-                        is_selected = st.session_state.get(f"include_{i}", True)
+                    for t in transactions:
+                        is_selected = st.session_state.get(row_key("include", t), True)
                         # Check session state for current category selection (0 = uncategorized)
-                        current_category = st.session_state.get(f"cat_{i}", 0)
+                        current_category = st.session_state.get(row_key("cat", t), 0)
                         if is_selected and current_category == 0:
                             t['selected_account_id'] = bulk_account
                             t['suggested_account_id'] = bulk_account
                             # Update the selectbox session state
-                            st.session_state[f"cat_{i}"] = bulk_account
+                            st.session_state[row_key("cat", t)] = bulk_account
                             applied_count += 1
                     # Deselect all checkboxes after applying
-                    for i in range(len(transactions)):
-                        st.session_state[f"include_{i}"] = False
-                        transactions[i]['include'] = False
+                    for t in transactions:
+                        st.session_state[row_key("include", t)] = False
+                        t['include'] = False
                     # Save changes to session state
                     st.session_state.transactions_to_review = transactions
                     st.session_state.bulk_result = f"Applied to {applied_count} uncategorized transactions"
@@ -982,14 +986,15 @@ elif selected_tab == "Review & Categorize":
         for i, t in enumerate(transactions):
             col0, col1, col2, col3, col4, col5 = st.columns([0.5, 0.9, 2.2, 1, 0.6, 2])
 
+            include_key = row_key("include", t)
             with col0:
                 # Initialize session state for checkbox if not set
-                if f"include_{i}" not in st.session_state:
-                    st.session_state[f"include_{i}"] = t.get('include', True)
+                if include_key not in st.session_state:
+                    st.session_state[include_key] = t.get('include', True)
 
                 include = st.checkbox(
                     "Select",
-                    key=f"include_{i}",
+                    key=include_key,
                     label_visibility="collapsed"
                 )
                 # Sync back to transaction data
@@ -1023,14 +1028,14 @@ elif selected_tab == "Review & Categorize":
                 is_transfer = st.checkbox(
                     "Xfer",
                     value=t.get('is_transfer', False),
-                    key=f"xfer_{i}",
+                    key=row_key("xfer", t),
                     help="Check if this is a transfer between accounts (e.g., credit card payment)"
                 )
                 transactions[i]['is_transfer'] = is_transfer
 
             with col5:
                 # Initialize session state for this selectbox if not already set
-                cat_key = f"cat_{i}"
+                cat_key = row_key("cat", t)
                 if cat_key not in st.session_state:
                     # Use suggested_account_id if available, otherwise 0
                     st.session_state[cat_key] = t.get('suggested_account_id', 0)
@@ -1071,9 +1076,9 @@ elif selected_tab == "Review & Categorize":
                 skipped = 0
                 errors = []
 
-                for i, t in enumerate(transactions):
+                for t in transactions:
                     # Skip if not included (check session state)
-                    is_selected = st.session_state.get(f"include_{i}", True)
+                    is_selected = st.session_state.get(row_key("include", t), True)
                     if not is_selected:
                         skipped += 1
                         continue
