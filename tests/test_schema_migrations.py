@@ -36,3 +36,34 @@ def test_create_tables_is_idempotent(db):
     cur.execute("SELECT COUNT(*) FROM schema_migrations")
     assert cur.fetchone()[0] == 1
     conn.close()
+
+
+def test_migration_failure_is_atomic(tmp_path, monkeypatch):
+    """M10: if a migration errors partway, neither its partial DDL nor its
+    version record survives -- so it is cleanly retried, never left
+    applied-but-unrecorded."""
+    import pytest
+    from database import connection as dbc
+    from database import schema as schema_mod
+
+    monkeypatch.setattr(dbc, "DATABASE_PATH", tmp_path / "atomic.db")
+
+    migdir = tmp_path / "migs"
+    migdir.mkdir()
+    # First statement succeeds, second (duplicate CREATE, no IF NOT EXISTS) fails.
+    (migdir / "001_boom.sql").write_text(
+        "CREATE TABLE will_rollback (id INTEGER);\n"
+        "CREATE TABLE will_rollback (id INTEGER);\n"
+    )
+    monkeypatch.setattr(schema_mod, "MIGRATIONS_DIR", migdir)
+
+    conn = dbc.get_connection()
+    with pytest.raises(Exception):
+        schema_mod.create_tables(conn)
+
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM schema_migrations WHERE version = '001_boom'")
+    assert cur.fetchone()[0] == 0  # not recorded
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='will_rollback'")
+    assert cur.fetchone() is None  # partial DDL rolled back
+    conn.close()
