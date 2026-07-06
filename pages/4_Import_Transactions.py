@@ -15,7 +15,7 @@ from services.pattern_learning import PatternLearner
 from services.posting import post_transaction
 from database import init_database
 from utils.client_selector import render_client_selector
-from utils.import_review import ensure_row_ids, row_key
+from utils.import_review import ensure_row_ids, row_key, classify_review_rows
 
 # Initialize database
 init_database()
@@ -597,6 +597,17 @@ if selected_tab == "Upload CSV":
 elif selected_tab == "Review & Categorize":
     st.subheader("Review & Categorize Transactions")
 
+    # Show the result of a partial "Create Journal Entries" run (some rows kept).
+    if st.session_state.get('post_result'):
+        _pr = st.session_state.post_result
+        if _pr.get('level') == 'warning':
+            st.warning(_pr['text'])
+        else:
+            st.info(_pr['text'])
+        if _pr.get('errors'):
+            st.error("Errors: " + '; '.join(_pr['errors']))
+        st.session_state.post_result = None
+
     # Check if import just completed - show "What's next?" prompt
     if st.session_state.get('import_complete'):
         st.success(st.session_state.get('import_complete_msg', 'Import complete!'))
@@ -1072,21 +1083,16 @@ elif selected_tab == "Review & Categorize":
 
         with col1:
             if st.button("Create Journal Entries", type="primary"):
+                plan = classify_review_rows(
+                    transactions,
+                    is_included=lambda t: st.session_state.get(row_key("include", t), True),
+                    get_account_id=lambda t: t.get('selected_account_id', 0),
+                )
                 created = 0
-                skipped = 0
                 errors = []
+                failed = []
 
-                for t in transactions:
-                    # Skip if not included (check session state)
-                    is_selected = st.session_state.get(row_key("include", t), True)
-                    if not is_selected:
-                        skipped += 1
-                        continue
-
-                    account_id = t.get('selected_account_id', 0)
-                    if account_id == 0:
-                        continue
-
+                for t in plan.to_post:
                     try:
                         # Post the transaction as a balanced journal entry. The
                         # journal entry, import record, and learned pattern all
@@ -1095,7 +1101,7 @@ elif selected_tab == "Review & Categorize":
                         post_transaction(
                             client_id=client_id,
                             transaction=t,
-                            target_account_id=account_id,
+                            target_account_id=t['selected_account_id'],
                             bank_account_id=t['bank_account_id'],
                             is_transfer=t.get('is_transfer', False),
                             batch_id=t['batch_id'],
@@ -1104,8 +1110,15 @@ elif selected_tab == "Review & Categorize":
 
                     except Exception as e:
                         errors.append(f"{t['description'][:30]}: {e}")
+                        failed.append(t)  # keep failed rows so they can be retried
 
-                if created:
+                # Kept in the review list: included-but-uncategorized + failed rows.
+                remaining = plan.uncategorized + failed
+                uncategorized = len(plan.uncategorized)
+                skipped = len(plan.excluded)
+
+                if not remaining:
+                    # Everything selected was posted; excluded rows acknowledged.
                     msg = f"Created {created} journal entries!"
                     if skipped > 0:
                         msg += f" ({skipped} excluded)"
@@ -1113,9 +1126,25 @@ elif selected_tab == "Review & Categorize":
                     st.session_state.import_complete = True
                     st.session_state.import_complete_msg = msg
                     st.rerun()
-
-                if errors:
-                    st.error(f"Errors: {'; '.join(errors[:3])}")
+                else:
+                    # Partial: keep unresolved rows and report exactly what happened.
+                    st.session_state.transactions_to_review = remaining
+                    parts = []
+                    if created:
+                        parts.append(f"created {created}")
+                    if uncategorized:
+                        parts.append(f"{uncategorized} still need a category")
+                    if errors:
+                        parts.append(f"{len(errors)} failed")
+                    if skipped:
+                        parts.append(f"{skipped} excluded")
+                    st.session_state.post_result = {
+                        'level': 'warning' if created else 'info',
+                        'text': "Journal entries: " + ", ".join(parts)
+                                + ". Transactions needing attention are kept below.",
+                        'errors': errors[:3],
+                    }
+                    st.rerun()
 
         with col2:
             if st.button("Clear All"):
