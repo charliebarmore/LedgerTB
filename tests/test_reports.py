@@ -135,3 +135,75 @@ def test_worksheet_includes_in_period_beginning_balance_and_closing_entries(clie
     plain = ReportGenerator.trial_balance(client_id, date(2025, 12, 31))
     assert total_dr == sum(r.debit for r in plain)
     assert total_cr == sum(r.credit for r in plain)
+
+
+def test_worksheet_grouped_query_exact_values(client_id, accounts):
+    """Lock the exact worksheet output after the grouped-query rewrite (M8):
+    beginning balances, in-period non-adjusting activity (incl. a Beginning
+    Balance entry, per C1), AJE activity, adjusted TB, and AJE details."""
+    from models.account import Account
+    prepaid = Account(client_id=client_id, account_number="1400", name="Prepaid", type="Asset")
+    prepaid.save()
+
+    # Prior-period opening balance (before the period) -> beginning balance.
+    post_entry(client_id, date(2024, 12, 31),
+               [(accounts["cash"], 1000, 0), (accounts["equity"], 0, 1000)],
+               entry_type="Beginning Balance")
+    # Regular in-period revenue.
+    post_entry(client_id, date(2025, 3, 1),
+               [(accounts["cash"], 500, 0), (accounts["revenue"], 0, 500)])
+    # Beginning Balance TYPE dated in-period -> must count as period activity (C1).
+    post_entry(client_id, date(2025, 1, 1),
+               [(prepaid.id, 300, 0), (accounts["cash"], 0, 300)],
+               entry_type="Beginning Balance")
+    # Adjusting entry in-period.
+    post_entry(client_id, date(2025, 6, 30),
+               [(accounts["expense"], 100, 0), (prepaid.id, 0, 100)],
+               entry_type="Adjusting")
+
+    rows, aje_details = ReportGenerator.trial_balance_worksheet(
+        client_id, date(2025, 1, 1), date(2025, 12, 31))
+    by_num = {r.account_number: r for r in rows}
+
+    # cash: beg 1000dr; period +500dr -300cr; adjusted 1200dr
+    assert (by_num["1000"].beginning_dr, by_num["1000"].beginning_cr) == (1000, 0)
+    assert (by_num["1000"].period_debits, by_num["1000"].period_credits) == (500, 300)
+    assert (by_num["1000"].adjusted_dr, by_num["1000"].adjusted_cr) == (1200, 0)
+    # equity: 1000cr throughout
+    assert (by_num["3000"].adjusted_dr, by_num["3000"].adjusted_cr) == (0, 1000)
+    # revenue: 500cr
+    assert (by_num["4000"].adjusted_dr, by_num["4000"].adjusted_cr) == (0, 500)
+    # prepaid: period 300dr, AJE 100cr, adjusted 200dr
+    assert (by_num["1400"].period_debits, by_num["1400"].period_credits) == (300, 0)
+    assert (by_num["1400"].aje_debits, by_num["1400"].aje_credits) == (0, 100)
+    assert (by_num["1400"].adjusted_dr, by_num["1400"].adjusted_cr) == (200, 0)
+    # expense: AJE 100dr, adjusted 100dr
+    assert (by_num["6000"].adjusted_dr, by_num["6000"].adjusted_cr) == (100, 0)
+
+    # Whole worksheet ties out.
+    assert sum(r.adjusted_dr for r in rows) == sum(r.adjusted_cr for r in rows) == 1500
+
+    # AJE details grouped correctly per account.
+    assert prepaid.id in aje_details and len(aje_details[prepaid.id]) == 1
+    assert aje_details[prepaid.id][0]["credit"] == 100
+    assert aje_details[accounts["expense"]][0]["debit"] == 100
+
+
+def test_worksheet_does_not_leak_across_clients(client_id, accounts):
+    """The grouped queries scope on je.client_id -- another client's entries on a
+    same-numbered account must not appear in this client's worksheet."""
+    from models.client import Client
+    from models.account import Account
+
+    post_entry(client_id, date(2025, 3, 1),
+               [(accounts["cash"], 500, 0), (accounts["revenue"], 0, 500)])
+
+    other = Client(name="Other", entity_type="S-Corp", fiscal_year_end_month=12).save(seed_accounts=False)
+    o_cash = Account(client_id=other, account_number="1000", name="O Cash", type="Asset"); o_cash.save()
+    o_rev = Account(client_id=other, account_number="4000", name="O Rev", type="Revenue"); o_rev.save()
+    post_entry(other, date(2025, 3, 1), [(o_cash.id, 9999, 0), (o_rev.id, 0, 9999)])
+
+    rows, _ = ReportGenerator.trial_balance_worksheet(client_id, date(2025, 1, 1), date(2025, 12, 31))
+    by_num = {r.account_number: r for r in rows}
+    assert by_num["1000"].adjusted_dr == 500  # not 500 + 9999
+    assert sum(r.adjusted_dr for r in rows) == 500

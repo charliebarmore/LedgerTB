@@ -52,8 +52,11 @@ st.caption("CPA-focused bookkeeping — trial balance worksheet, adjusting entri
 
 # ---- At-a-glance metrics ----
 clients = Client.get_all()
-total_entries = sum(len(JournalEntry.get_all(c.id, limit=1000)) for c in clients)
-total_accounts = sum(len(Account.get_all(c.id)) for c in clients)
+# Count with COUNT(*) rather than hydrating every entry/account (the old
+# get_all(limit=1000) both loaded thousands of objects and silently undercounted
+# any client with more than 1000 entries).
+total_entries = sum(JournalEntry.count(c.id) for c in clients)
+total_accounts = sum(Account.count(c.id) for c in clients)
 
 m1, m2, m3 = st.columns(3)
 m1.metric("Clients", len(clients))

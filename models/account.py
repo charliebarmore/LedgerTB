@@ -30,6 +30,22 @@ class Account:
         )
 
     @staticmethod
+    def count(client_id: int, active_only: bool = True) -> int:
+        """Count a client's accounts (cheap; no object hydration)."""
+        with get_cursor() as cursor:
+            if active_only:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM accounts WHERE client_id = ? AND is_active = 1",
+                    (client_id,)
+                )
+            else:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM accounts WHERE client_id = ?",
+                    (client_id,)
+                )
+            return cursor.fetchone()[0]
+
+    @staticmethod
     def get_all(client_id: int, active_only: bool = True) -> List['Account']:
         """Get all accounts for a client, optionally filtered by active status."""
         with get_cursor() as cursor:

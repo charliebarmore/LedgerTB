@@ -259,6 +259,16 @@ class JournalEntry:
         return entry
 
     @staticmethod
+    def count(client_id: int) -> int:
+        """Count all journal entries for a client (cheap; no object hydration)."""
+        with get_cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM journal_entries WHERE client_id = ?",
+                (client_id,)
+            )
+            return cursor.fetchone()[0]
+
+    @staticmethod
     def get_all(
         client_id: int,
         start_date: Optional[date] = None,
