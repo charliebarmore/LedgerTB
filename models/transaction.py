@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Optional, List
 from datetime import date
 from database.connection import get_connection, get_cursor
+from money import to_cents, to_dollars
 
 
 @dataclass
@@ -48,7 +49,7 @@ class ImportedTransaction:
                         self.import_batch,
                         self.transaction_date.isoformat() if self.transaction_date else None,
                         self.description,
-                        self.amount,
+                        to_cents(self.amount),
                         self.bank_account_id,
                         self.suggested_account_id,
                         self.status,
@@ -68,7 +69,7 @@ class ImportedTransaction:
                         self.import_batch,
                         self.transaction_date.isoformat() if self.transaction_date else None,
                         self.description,
-                        self.amount,
+                        to_cents(self.amount),
                         self.bank_account_id,
                         self.suggested_account_id,
                         self.status,
@@ -114,7 +115,7 @@ class ImportedTransaction:
             import_batch=row['import_batch'],
             transaction_date=date.fromisoformat(row['transaction_date']) if row['transaction_date'] else None,
             description=row['description'],
-            amount=row['amount'],
+            amount=to_dollars(row['amount']),
             bank_account_id=row['bank_account_id'],
             suggested_account_id=row['suggested_account_id'],
             status=row['status'],
@@ -143,7 +144,7 @@ class ImportedTransaction:
                 t.import_batch,
                 t.transaction_date.isoformat() if t.transaction_date else None,
                 t.description,
-                t.amount,
+                to_cents(t.amount),
                 t.bank_account_id,
                 t.suggested_account_id,
                 t.status,
@@ -227,7 +228,7 @@ class ImportedTransaction:
             import_batch=row['import_batch'],
             transaction_date=date.fromisoformat(row['transaction_date']) if row['transaction_date'] else None,
             description=row['description'],
-            amount=row['amount'],
+            amount=to_dollars(row['amount']),
             bank_account_id=row['bank_account_id'],
             suggested_account_id=row['suggested_account_id'],
             status=row['status'],
