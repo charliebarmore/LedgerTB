@@ -148,6 +148,105 @@ class Account:
         conn.close()
         return count > 0
 
+    @staticmethod
+    def deletion_blockers(account_id: int, conn=None) -> dict:
+        """Return why an account can't be hard-deleted, as ``{reason: count}``.
+
+        Every table that references ``accounts`` is checked -- journal entry
+        lines, categorization rules, and imported transactions -- not just
+        journal entry lines. An empty dict means the account is safe to delete.
+        (The FKs are RESTRICT, so any reference would otherwise make a raw
+        DELETE raise IntegrityError.)
+        """
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
+        try:
+            cursor = conn.cursor()
+
+            def count(sql, *params):
+                return cursor.execute(sql, params).fetchone()[0]
+
+            blockers = {}
+            je = count("SELECT COUNT(*) FROM journal_entry_lines WHERE account_id = ?", account_id)
+            if je:
+                blockers["journal entry lines"] = je
+            rules = count("SELECT COUNT(*) FROM categorization_rules WHERE default_account_id = ?", account_id)
+            if rules:
+                blockers["categorization rules"] = rules
+            imp = count(
+                "SELECT COUNT(*) FROM imported_transactions "
+                "WHERE bank_account_id = ? OR suggested_account_id = ?",
+                account_id, account_id,
+            )
+            if imp:
+                blockers["imported transactions"] = imp
+            return blockers
+        finally:
+            if owns_conn:
+                conn.close()
+
+    @staticmethod
+    def delete(account_id: int, client_id: Optional[int] = None):
+        """Hard-delete an account, with guards, audit logging, and leak safety.
+
+        Raises ValueError if the account does not exist (or does not belong to
+        ``client_id`` when given), or if it is still referenced by any journal
+        entry, categorization rule, or imported transaction -- in which case it
+        should be deactivated instead. Prefer this over a raw DELETE so the
+        referential guard, audit trail, and connection handling always apply.
+        """
+        from models.audit_log import AuditLog
+
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+
+            if client_id is None:
+                cursor.execute("SELECT * FROM accounts WHERE id = ?", (account_id,))
+            else:
+                cursor.execute(
+                    "SELECT * FROM accounts WHERE id = ? AND client_id = ?",
+                    (account_id, client_id)
+                )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError("Account not found.")
+
+            blockers = Account.deletion_blockers(account_id, conn=conn)
+            if blockers:
+                detail = ", ".join(f"{v} {k}" for k, v in blockers.items())
+                raise ValueError(
+                    f"Cannot delete this account — it is still referenced by {detail}. "
+                    f"Deactivate it instead."
+                )
+
+            old_values = {
+                "account_number": row["account_number"],
+                "name": row["name"],
+                "type": row["type"],
+            }
+            acct_client_id = row["client_id"]
+
+            cursor.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+            conn.commit()
+
+            try:
+                AuditLog.log_change(
+                    client_id=acct_client_id,
+                    table_name="accounts",
+                    record_id=account_id,
+                    action="DELETE",
+                    old_values=old_values,
+                )
+            except Exception:
+                pass  # Don't fail the delete if audit logging fails
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def display_name(self) -> str:
         """Return formatted display name with account number."""
         return f"{self.account_number} - {self.name}"

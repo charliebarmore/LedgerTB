@@ -132,19 +132,19 @@ with tab1:
                             st.rerun()
 
                     with col3:
-                        if not Account.has_transactions(account.id):
+                        blockers = Account.deletion_blockers(account.id)
+                        if not blockers:
                             if st.form_submit_button("Delete", type="secondary"):
-                                # Actually delete since no transactions
-                                from database.connection import get_connection
-                                conn = get_connection()
-                                conn.execute("DELETE FROM accounts WHERE id = ?", (account.id,))
-                                conn.commit()
-                                conn.close()
-                                st.success("Account deleted!")
-                                del st.session_state['editing_account']
-                                st.rerun()
+                                try:
+                                    Account.delete(account.id, client_id=client_id)
+                                    st.success("Account deleted!")
+                                    st.session_state.pop('editing_account', None)
+                                    st.rerun()
+                                except ValueError as e:
+                                    st.error(str(e))
                         else:
-                            st.caption("Cannot delete - has transactions")
+                            detail = ", ".join(f"{v} {k}" for k, v in blockers.items())
+                            st.caption(f"Cannot delete — referenced by {detail}")
 
 with tab2:
     st.subheader("Add New Account")
