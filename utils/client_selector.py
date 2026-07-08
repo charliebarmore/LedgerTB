@@ -71,7 +71,8 @@ def render_client_selector() -> Optional[int]:
     clients = Client.get_all(active_only=True)
 
     if not clients:
-        st.sidebar.warning("No clients found. Create one first.")
+        st.sidebar.warning("No clients yet.")
+        st.sidebar.page_link("pages/0_Clients.py", label="Create your first client", icon="➕")
         return None
 
     # Build options dict
@@ -96,6 +97,9 @@ def render_client_selector() -> Optional[int]:
 
     # Update session state
     st.session_state.selected_client_id = selected_id
+
+    # Add-client affordance right where the clients are listed.
+    st.sidebar.page_link("pages/0_Clients.py", label="Add client", icon="➕")
 
     # Client sub-navigation - CPA-focused workflow
     if selected_id:

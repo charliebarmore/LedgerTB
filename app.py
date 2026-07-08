@@ -81,6 +81,8 @@ with n3:
 st.divider()
 
 # ---- Clients ----
+# The create-client action lives in the sidebar (next to the client list); the
+# home page just summarizes.
 if clients:
     st.subheader("Your Clients")
     for c in clients[:5]:
@@ -89,8 +91,7 @@ if clients:
         st.caption(f"…and {len(clients) - 5} more")
     st.page_link("pages/0_Clients.py", label="Manage clients →")
 else:
-    st.info("No clients yet. Create your first client to get started.")
-    st.page_link("pages/0_Clients.py", label="Create first client →")
+    st.caption("No clients yet — use **➕ Create your first client** in the sidebar to get started.")
 
 # ---- AI status (compact, non-intrusive) ----
 st.sidebar.divider()
