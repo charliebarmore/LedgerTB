@@ -76,31 +76,33 @@ with tab1:
                 st.divider()
                 st.subheader(f"Edit Client: {client.name}")
 
-                with st.form("edit_client_form"):
-                    new_name = st.text_input("Client Name", value=client.name)
+                # Prime the edit widgets to this client's values the first time
+                # its modal is shown, so the persistent widget keys don't carry a
+                # previous client's selection over. Keys let the entity/industry
+                # descriptions update live (a plain container, not st.form).
+                if st.session_state.get('_edit_loaded_id') != client.id:
+                    st.session_state['_edit_loaded_id'] = client.id
+                    st.session_state['edit_name'] = client.name
+                    st.session_state['edit_entity_type'] = (
+                        client.entity_type if client.entity_type in ENTITY_TYPE_OPTIONS else ENTITY_TYPE_OPTIONS[0])
+                    st.session_state['edit_business_type'] = (
+                        client.business_type if client.business_type in BUSINESS_TYPE_OPTIONS else BUSINESS_TYPE_OPTIONS[0])
+                    st.session_state['edit_fiscal_month'] = client.fiscal_year_end_month
+                    st.session_state['edit_active'] = bool(client.is_active)
 
-                    # Entity type
-                    entity_index = 0
-                    if client.entity_type in ENTITY_TYPE_OPTIONS:
-                        entity_index = ENTITY_TYPE_OPTIONS.index(client.entity_type)
+                with st.container():
+                    new_name = st.text_input("Client Name", key="edit_name")
 
                     new_entity_type = st.selectbox(
                         "Entity Type (Legal Structure)",
                         options=ENTITY_TYPE_OPTIONS,
-                        index=entity_index,
                         key="edit_entity_type"
                     )
                     st.caption(f"*{ENTITY_TYPES.get(new_entity_type, '')}*")
 
-                    # Business type
-                    business_index = 0
-                    if client.business_type in BUSINESS_TYPE_OPTIONS:
-                        business_index = BUSINESS_TYPE_OPTIONS.index(client.business_type)
-
                     new_business_type = st.selectbox(
                         "Business Type (Industry)",
                         options=BUSINESS_TYPE_OPTIONS,
-                        index=business_index,
                         key="edit_business_type"
                     )
                     st.caption(f"*{BUSINESS_TYPES.get(new_business_type, '')}*")
@@ -109,15 +111,15 @@ with tab1:
                         "Fiscal Year End Month",
                         options=list(range(1, 13)),
                         format_func=lambda x: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][x-1],
-                        index=client.fiscal_year_end_month - 1
+                        key="edit_fiscal_month"
                     )
-                    new_active = st.checkbox("Active", value=client.is_active)
+                    new_active = st.checkbox("Active", key="edit_active")
 
                     st.warning("Note: Changing entity or business type will NOT update the existing chart of accounts. You may need to manually add/remove accounts.")
 
                     col1, col2 = st.columns(2)
                     with col1:
-                        if st.form_submit_button("Save Changes", type="primary"):
+                        if st.button("Save Changes", type="primary", key="edit_save"):
                             client.name = new_name
                             client.entity_type = new_entity_type
                             client.business_type = new_business_type
@@ -128,25 +130,38 @@ with tab1:
                                 client.save(seed_accounts=False)
                                 st.success("Client updated successfully!")
                                 del st.session_state['editing_client']
+                                st.session_state.pop('_edit_loaded_id', None)
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"Error updating client: {e}")
 
                     with col2:
-                        if st.form_submit_button("Cancel"):
+                        if st.button("Cancel", key="edit_cancel"):
                             del st.session_state['editing_client']
+                            st.session_state.pop('_edit_loaded_id', None)
                             st.rerun()
 
 with tab2:
     st.subheader("Add New Client")
+
+    # After a successful add we clear the fields; do it here (before the widgets
+    # render) rather than in the submit handler, so we don't mutate widget state
+    # during the same run the widgets are instantiated.
+    if st.session_state.pop("_clear_add_form", False):
+        for _k in ("add_client_name", "add_entity_type", "add_business_type",
+                   "add_fiscal_month", "add_seed_accounts"):
+            st.session_state.pop(_k, None)
 
     st.markdown("""
     Add a new client to manage their books separately. Select the correct **entity type** (legal structure)
     and **business type** (industry) to get an appropriate chart of accounts.
     """)
 
-    with st.form("add_client_form", clear_on_submit=True):
-        client_name = st.text_input("Client Name", placeholder="e.g., ABC Corporation")
+    # A plain container (NOT st.form) so the entity/industry descriptions and the
+    # account preview update live as the dropdowns change -- inside a form the
+    # selectbox values (and everything derived from them) only refresh on submit.
+    with st.container():
+        client_name = st.text_input("Client Name", placeholder="e.g., ABC Corporation", key="add_client_name")
 
         st.divider()
 
@@ -158,7 +173,8 @@ with tab2:
             "Entity Type",
             options=ENTITY_TYPE_OPTIONS,
             index=0,
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="add_entity_type"
         )
         st.info(f"**{entity_type}**: {ENTITY_TYPES[entity_type]}")
 
@@ -172,7 +188,8 @@ with tab2:
             "Business Type",
             options=BUSINESS_TYPE_OPTIONS,
             index=0,  # Professional Services first
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="add_business_type"
         )
         st.info(f"**{business_type}**: {BUSINESS_TYPES[business_type]}")
 
@@ -245,13 +262,15 @@ with tab2:
             "Fiscal Year End Month",
             options=list(range(1, 13)),
             format_func=lambda x: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][x-1],
-            index=11  # Default to December
+            index=11,  # Default to December
+            key="add_fiscal_month"
         )
 
         seed_accounts = st.checkbox("Create default chart of accounts", value=True,
-                                   help="Uncheck if you want to manually create all accounts")
+                                   help="Uncheck if you want to manually create all accounts",
+                                   key="add_seed_accounts")
 
-        if st.form_submit_button("Add Client", type="primary"):
+        if st.button("Add Client", type="primary", key="add_client_submit"):
             if not client_name:
                 st.error("Client name is required.")
             else:
@@ -270,6 +289,7 @@ with tab2:
                     if seed_accounts:
                         msg += f" Chart of accounts created for {entity_type} / {business_type}."
                     st.session_state['client_added_message'] = msg
+                    st.session_state['_clear_add_form'] = True
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error adding client: {e}")
