@@ -77,8 +77,10 @@ with col1:
         FiscalPeriod.ensure_periods_exist(client_id, current_year, fiscal_year_end)
         available_years.add(current_year)
 
-    # Allow user to add other years (show last 5 years as options)
-    year_col1, year_col2 = st.columns([3, 1])
+    # Allow user to add other years (show last 5 years as options).
+    # bottom-align so the "Add Year" popover lines up with the selectbox box
+    # (it has no label above it, unlike the selectbox).
+    year_col1, year_col2 = st.columns([3, 1], vertical_alignment="bottom")
 
     with year_col1:
         # Sort years descending
@@ -93,7 +95,6 @@ with col1:
 
     with year_col2:
         # Add year button with popover for year selection
-        st.write("")  # Spacing to align with selectbox
         with st.popover("+ Add Year"):
             # Show years that aren't already available
             potential_years = [y for y in range(current_year, current_year - 10, -1) if y not in available_years]
