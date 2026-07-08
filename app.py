@@ -44,7 +44,12 @@ st.set_page_config(
 
 # Same persistent client selector + nav every other page shows, so the
 # sidebar doesn't disappear/reappear when landing on or leaving Home.
-render_client_selector()
+selected_client_id = render_client_selector()
+
+# When a client is selected, the Dashboard is the landing page for that client.
+# The overview below is only shown before any client exists.
+if selected_client_id:
+    st.switch_page("pages/7_Dashboard.py")
 
 # ---- Header ----
 st.title(f"📚 {APP_NAME}")

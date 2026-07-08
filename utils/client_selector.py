@@ -108,7 +108,8 @@ def render_client_selector() -> Optional[int]:
         # Get pending count for badge
         pending_count = ImportedTransaction.get_pending_count(selected_id)
 
-        # Primary navigation - CPA workflow order
+        # Primary navigation - Dashboard first (client landing), then CPA workflow
+        st.sidebar.page_link("pages/7_Dashboard.py", label="Dashboard", icon="🏠")
         st.sidebar.page_link("pages/1_Trial_Balance_Worksheet.py", label="Trial Balance Worksheet", icon="📊")
         st.sidebar.page_link("pages/2_Journal_Entries.py", label="Journal Entries", icon="📝")
         st.sidebar.page_link("pages/3_Chart_of_Accounts.py", label="Chart of Accounts", icon="📋")
@@ -121,7 +122,6 @@ def render_client_selector() -> Optional[int]:
 
         st.sidebar.page_link("pages/5_Reports.py", label="Reports", icon="📈")
         st.sidebar.page_link("pages/6_Transactions.py", label="Transactions", icon="💳")
-        st.sidebar.page_link("pages/7_Dashboard.py", label="Dashboard", icon="🏠")
         st.sidebar.page_link("pages/8_Audit_Trail.py", label="Audit Trail", icon="📜")
 
         # Quick report links (collapsible)
