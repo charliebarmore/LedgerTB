@@ -1,25 +1,50 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
+import platformdirs
 
 load_dotenv()
 
 # Base directory
 BASE_DIR = Path(__file__).parent
 
+# A PyInstaller bundle is read-only, so a frozen build must keep its writable
+# data (database, saved API key) in a per-user app-data directory. Running from
+# source keeps everything in the repo -- unchanged dev/test behavior.
+_IS_FROZEN = getattr(sys, "frozen", False)
+if _IS_FROZEN:
+    USER_DATA_DIR = Path(platformdirs.user_data_dir("ProBooks", "LedgerLabs"))
+else:
+    USER_DATA_DIR = BASE_DIR / "data"
+USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 # Database.
-# Defaults to a repo-local file for development/test data (gitignored). The
-# location is overridable via the PROBOOKS_DB_PATH env var.
+# Defaults to USER_DATA_DIR (repo-local `data/` in source; app-data dir when
+# frozen). Overridable via the PROBOOKS_DB_PATH env var.
 #
 # IMPORTANT (FTC Safeguards): before this app holds REAL client financial data,
 # point PROBOOKS_DB_PATH at a file under ~/Practice so the database is covered by
 # the sanctioned Backblaze encrypted backup with the customer-managed key. The
-# default repo-local path under ~/LedgerLabs is for test/seed data only and is
-# NOT a sanctioned location for client PII.
-DATABASE_PATH = Path(os.getenv("PROBOOKS_DB_PATH", BASE_DIR / "data" / "accounting.db"))
+# default location is for test/seed data only and is NOT a sanctioned location
+# for client PII.
+DATABASE_PATH = Path(os.getenv("PROBOOKS_DB_PATH", USER_DATA_DIR / "accounting.db"))
 
-# Anthropic API
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+# Anthropic API key.
+# Priority: environment/.env (dev), then a key file saved by the in-app setup
+# form. The key file lives in USER_DATA_DIR so it stays writable in a read-only
+# bundle. (data/ is gitignored, so the key is never committed.)
+API_KEY_FILE = USER_DATA_DIR / "anthropic_api_key"
+
+
+def _read_saved_api_key() -> str:
+    try:
+        return API_KEY_FILE.read_text().strip()
+    except Exception:
+        return ""
+
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "") or _read_saved_api_key()
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 
 # Application settings

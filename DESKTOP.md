@@ -54,3 +54,43 @@ The Dock icon is `ProBooks.app/Contents/Resources/ProBooks.icns`, built from
 ```bash
 python scripts/make_icon.py
 ```
+
+---
+
+# Standalone app (no Python required)
+
+The above `ProBooks.app` is a thin wrapper that still needs Python + the deps
+installed. You can also build a **fully standalone** `ProBooks.app` that bundles
+Python and every dependency — installable on a Mac with no Python at all (e.g.
+to hand to a colleague).
+
+## Build
+
+```bash
+pip install -r requirements-desktop.txt      # includes pyinstaller
+pyinstaller ProBooks.spec --noconfirm
+```
+
+Output: `dist/ProBooks.app` (~1.2 GB — it bundles Python, Streamlit, pandas,
+etc.). Double-click it, or `open dist/ProBooks.app`.
+
+## How the standalone build works
+
+- `run_probooks.py` is the entry point. The one binary runs in two modes: the
+  parent shows the pywebview window; it re-launches *itself* in `server` mode
+  (a child process) to run Streamlit as that process's main thread.
+- `ProBooks.spec` bundles the app source (`app.py`, `pages/`, `models/`,
+  `services/`, `database/` incl. the migration `.sql`, `utils/`, `.streamlit/`)
+  as data, plus Streamlit and all deps.
+- **Data location (frozen):** because the app bundle is read-only, a standalone
+  build keeps its database and saved API key in
+  `~/Library/Application Support/ProBooks/`. (Running from source still uses the
+  repo `data/` folder.) Set `PROBOOKS_DB_PATH` to a `~/Practice` file before
+  storing real client data, as always.
+- **First open:** unsigned/un-notarized, so macOS Gatekeeper will warn. Right-click
+  `dist/ProBooks.app` → **Open** once. To distribute without the warning you'd
+  sign + notarize with an Apple Developer ID (`codesign` + `notarytool`) — not
+  needed for personal use.
+
+`build/` and `dist/` are gitignored (build artifacts); the spec and entry point
+are the committed source.

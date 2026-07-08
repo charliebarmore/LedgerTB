@@ -788,18 +788,16 @@ elif selected_tab == "Review & Categorize":
 
                 if api_key_input:
                     if st.button("Save & Enable AI", type="primary"):
-                        # Save to .env file, replacing any existing key line rather
-                        # than appending (repeated saves used to pile up duplicates).
-                        env_path = Path(__file__).parent.parent / ".env"
-                        existing = env_path.read_text().splitlines() if env_path.exists() else []
-                        kept = [l for l in existing if not l.strip().startswith("ANTHROPIC_API_KEY=")]
-                        kept.append(f"ANTHROPIC_API_KEY={api_key_input}")
-                        env_path.write_text("\n".join(kept) + "\n")
-                        st.success("API key saved! Please restart the application for changes to take effect.")
-                        st.info("Run: `streamlit run app.py` to restart")
+                        # Save to a local key file in the app's data directory
+                        # (writable even when running as a packaged app; data/ is
+                        # gitignored so the key is never committed).
+                        from config import API_KEY_FILE
+                        API_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+                        API_KEY_FILE.write_text(api_key_input.strip() + "\n")
+                        st.success("API key saved! Please restart ProBooks for the change to take effect.")
 
                 st.caption(
-                    "Your API key is stored locally in the .env file. When you run AI "
+                    "Your API key is stored locally on this machine. When you run AI "
                     "categorization, transaction descriptions and amounts are sent to "
                     "Anthropic's API to suggest accounts."
                 )
