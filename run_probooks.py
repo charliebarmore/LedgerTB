@@ -102,7 +102,31 @@ def _stop(proc: subprocess.Popen) -> None:
             pass
 
 
+def _selfcheck() -> int:
+    """Import the app's key runtime deps and report — verifies the (trimmed)
+    bundle didn't drop anything the app needs. Run: PROBOOKS_MODE=selfcheck <bin>"""
+    os.chdir(BUNDLE)
+    sys.path.insert(0, str(BUNDLE))
+    mods = ["streamlit", "pandas", "numpy", "pyarrow", "altair", "openpyxl",
+            "anthropic", "pydantic", "pydantic_core", "dotenv", "platformdirs",
+            "config", "constants", "money", "models.journal_entry",
+            "services.categorization"]
+    failed = []
+    for m in mods:
+        try:
+            __import__(m)
+        except Exception as e:
+            failed.append(f"{m}: {e}")
+    if failed:
+        print("SELFCHECK FAIL:\n  " + "\n  ".join(failed))
+        return 1
+    print("SELFCHECK OK — all", len(mods), "modules import")
+    return 0
+
+
 def main() -> int:
+    if os.environ.get("PROBOOKS_MODE") == "selfcheck":
+        return _selfcheck()
     if os.environ.get("PROBOOKS_MODE") == "server":
         return _run_server()
 
@@ -122,7 +146,9 @@ def main() -> int:
 
         import webview
         webview.create_window(WINDOW_TITLE, url, width=1360, height=900, min_size=(1024, 720))
-        webview.start()
+        # Force the native macOS backend (Cocoa/WebKit) so the build can safely
+        # exclude the Qt toolkits from the bundle.
+        webview.start(gui="cocoa")
         return 0
     finally:
         _stop(proc)

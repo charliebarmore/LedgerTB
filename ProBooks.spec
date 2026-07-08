@@ -12,7 +12,31 @@ deps those modules use are frozen normally (imported in run_probooks.py so the
 analysis sees them).
 """
 
+import os
+
 from PyInstaller.utils.hooks import collect_all, copy_metadata
+
+# Set PROBOOKS_CODESIGN_ID to a Developer ID Application identity to have
+# PyInstaller sign the bundle (inside-out, hardened runtime) during the build;
+# leave unset for a normal ad-hoc-signed local build.
+CODESIGN_ID = os.environ.get("PROBOOKS_CODESIGN_ID") or None
+
+# Modules the app never uses but that get dragged in from a large Anaconda env.
+# Trimming these takes the bundle from ~1.2 GB to a fraction of that.
+EXCLUDES = [
+    "tkinter", "pytest", "_pytest",
+    # heavy scientific / ML stack (unused)
+    "scipy", "sklearn", "skimage", "statsmodels", "sympy",
+    "numba", "llvmlite", "h5py", "tables", "netCDF4",
+    "matplotlib", "seaborn", "bokeh", "plotly",
+    # notebook / IPython stack (unused)
+    "IPython", "ipykernel", "jupyter", "jupyter_client", "jupyter_core",
+    "notebook", "nbconvert", "nbformat", "qtconsole",
+    # Qt GUI toolkits — pywebview uses the native Cocoa backend on macOS
+    "PyQt5", "PyQt6", "PySide2", "PySide6", "qtpy",
+    # dev tooling
+    "mypy", "sphinx", "docutils",
+]
 
 # --- app source, bundled as data (loaded from disk at runtime) ---
 app_datas = [
@@ -56,7 +80,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "pytest"],
+    excludes=EXCLUDES,
     noarchive=False,
 )
 
@@ -70,21 +94,21 @@ exe = EXE(
     name="ProBooks",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
+    strip=True,
     upx=False,
     console=False,          # windowed (no terminal)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    codesign_identity=CODESIGN_ID,
+    entitlements_file="scripts/entitlements.plist",
 )
 
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    strip=False,
+    strip=True,
     upx=False,
     name="ProBooks",
 )
