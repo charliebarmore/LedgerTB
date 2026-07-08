@@ -5,11 +5,14 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import pandas as pd
+
 from models.account import Account
 from models.client import Client
 from database import init_database
 from utils.client_selector import render_client_selector
 from constants import AccountType
+from services.coa_import import parse_coa_csv
 
 # Initialize database
 init_database()
@@ -30,8 +33,8 @@ if not client_id:
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
 
-# Tabs for viewing and adding accounts
-tab1, tab2 = st.tabs(["View Accounts", "Add Account"])
+# Tabs for viewing, adding, and importing accounts
+tab1, tab2, tab3 = st.tabs(["View Accounts", "Add Account", "Import CSV"])
 
 with tab1:
     # Filter options
@@ -185,3 +188,67 @@ with tab2:
                         st.error("An account with this number already exists for this client.")
                     else:
                         st.error(f"Error adding account: {e}")
+
+with tab3:
+    st.subheader("Import Chart of Accounts")
+    st.caption(
+        "Upload a CSV with columns **Account Number**, **Name**, and **Type** "
+        "(Asset / Liability / Equity / Revenue / Expense), plus optional **Subtype** "
+        "and **Description**. Accounts whose number already exists are skipped."
+    )
+
+    _template = (
+        "Account Number,Name,Type,Subtype,Description\n"
+        "1000,Cash - Operating,Asset,Cash,\n"
+        "2000,Accounts Payable,Liability,Payable,\n"
+        "3000,Owner's Equity,Equity,,\n"
+        "4000,Service Revenue,Revenue,,\n"
+        "6000,Office Expense,Expense,,\n"
+    )
+    st.download_button("⬇ Download template CSV", data=_template,
+                       file_name="chart_of_accounts_template.csv", mime="text/csv")
+
+    uploaded = st.file_uploader("Chart of accounts CSV", type=["csv"], key="coa_upload")
+    if uploaded is not None:
+        content = uploaded.getvalue().decode("utf-8-sig", "ignore")
+        parsed, errors = parse_coa_csv(content)
+
+        for e in errors[:15]:
+            st.error(e)
+        if len(errors) > 15:
+            st.caption(f"…and {len(errors) - 15} more issue(s).")
+
+        if parsed:
+            existing = {a.account_number for a in Account.get_all(client_id, active_only=False)}
+            preview = pd.DataFrame([{
+                "Acct #": a["number"], "Name": a["name"], "Type": a["type"],
+                "Subtype": a["subtype"] or "", "Description": a["description"] or "",
+                "Status": "exists — skip" if a["number"] in existing else "new",
+            } for a in parsed])
+            st.dataframe(preview, use_container_width=True, hide_index=True)
+
+            new_count = sum(1 for a in parsed if a["number"] not in existing)
+            skip_count = len(parsed) - new_count
+            st.caption(f"{new_count} new account(s); {skip_count} already exist (will be skipped).")
+
+            if st.button(f"Import {new_count} account(s)", type="primary",
+                         disabled=(new_count == 0), key="coa_import_btn"):
+                created = 0
+                failed = []
+                for a in parsed:
+                    if a["number"] in existing:
+                        continue
+                    try:
+                        Account(client_id=client_id, account_number=a["number"], name=a["name"],
+                                type=a["type"], subtype=a["subtype"], description=a["description"]).save()
+                        existing.add(a["number"])
+                        created += 1
+                    except Exception as ex:
+                        failed.append(f"#{a['number']}: {ex}")
+                msg = f"Imported {created} account(s)."
+                if skip_count:
+                    msg += f" Skipped {skip_count} that already existed."
+                st.success(msg)
+                if failed:
+                    st.error("Some failed: " + "; ".join(failed[:3]))
+                st.rerun()
