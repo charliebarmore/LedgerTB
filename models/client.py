@@ -13,17 +13,40 @@ class Client:
     business_type: Optional[str] = None
     fiscal_year_end_month: int = 12
     is_active: bool = True
+    # Extended client info (migration 003)
+    tax_id: Optional[str] = None            # EIN / SSN
+    dba_name: Optional[str] = None          # "doing business as" / trade name
+    address_line1: Optional[str] = None
+    address_city: Optional[str] = None
+    address_state: Optional[str] = None
+    address_zip: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    notes: Optional[str] = None
 
     @staticmethod
     def _from_row(row) -> 'Client':
         """Build a Client from a DB row (single source of the row mapping)."""
+        def g(key):
+            return row[key] if key in row.keys() else None
         return Client(
             id=row['id'],
             name=row['name'],
             entity_type=row['entity_type'],
-            business_type=row['business_type'] if 'business_type' in row.keys() else None,
+            business_type=g('business_type'),
             fiscal_year_end_month=row['fiscal_year_end_month'],
-            is_active=bool(row['is_active'])
+            is_active=bool(row['is_active']),
+            tax_id=g('tax_id'),
+            dba_name=g('dba_name'),
+            address_line1=g('address_line1'),
+            address_city=g('address_city'),
+            address_state=g('address_state'),
+            address_zip=g('address_zip'),
+            contact_name=g('contact_name'),
+            contact_email=g('contact_email'),
+            contact_phone=g('contact_phone'),
+            notes=g('notes'),
         )
 
     @staticmethod
@@ -62,13 +85,22 @@ class Client:
         try:
             cursor = conn.cursor()
 
+            extended = (
+                self.tax_id, self.dba_name, self.address_line1, self.address_city,
+                self.address_state, self.address_zip, self.contact_name,
+                self.contact_email, self.contact_phone, self.notes,
+            )
             if is_new:
                 cursor.execute(
                     """
-                    INSERT INTO clients (name, entity_type, business_type, fiscal_year_end_month, is_active)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO clients
+                        (name, entity_type, business_type, fiscal_year_end_month, is_active,
+                         tax_id, dba_name, address_line1, address_city, address_state,
+                         address_zip, contact_name, contact_email, contact_phone, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (self.name, self.entity_type, self.business_type, self.fiscal_year_end_month, int(self.is_active))
+                    (self.name, self.entity_type, self.business_type,
+                     self.fiscal_year_end_month, int(self.is_active)) + extended
                 )
                 self.id = cursor.lastrowid
             else:
@@ -85,10 +117,13 @@ class Client:
                 cursor.execute(
                     """
                     UPDATE clients
-                    SET name = ?, entity_type = ?, business_type = ?, fiscal_year_end_month = ?, is_active = ?
+                    SET name = ?, entity_type = ?, business_type = ?, fiscal_year_end_month = ?, is_active = ?,
+                        tax_id = ?, dba_name = ?, address_line1 = ?, address_city = ?, address_state = ?,
+                        address_zip = ?, contact_name = ?, contact_email = ?, contact_phone = ?, notes = ?
                     WHERE id = ?
                     """,
-                    (self.name, self.entity_type, self.business_type, self.fiscal_year_end_month, int(self.is_active), self.id)
+                    (self.name, self.entity_type, self.business_type,
+                     self.fiscal_year_end_month, int(self.is_active)) + extended + (self.id,)
                 )
 
             conn.commit()

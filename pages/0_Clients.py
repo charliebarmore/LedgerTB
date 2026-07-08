@@ -26,6 +26,36 @@ st.caption("Each client keeps its own separate set of books.")
 ENTITY_TYPE_OPTIONS = list(ENTITY_TYPES.keys())
 BUSINESS_TYPE_OPTIONS = list(BUSINESS_TYPES.keys())
 
+MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
+
+# All add-form widget keys (cleared after a successful add).
+ADD_FORM_KEYS = [
+    "add_client_name", "add_dba_name", "add_tax_id", "add_entity_type",
+    "add_business_type", "add_fiscal_month", "add_address_line1", "add_address_city",
+    "add_address_state", "add_address_zip", "add_contact_name", "add_contact_email",
+    "add_contact_phone", "add_notes", "add_seed_accounts",
+]
+
+
+def _mask_tax_id(tax_id):
+    """Show only the last 4 digits of an EIN/SSN in the UI (per security rules)."""
+    if not tax_id:
+        return None
+    digits = ''.join(ch for ch in str(tax_id) if ch.isdigit())
+    return f"••-•••{digits[-4:]}" if len(digits) >= 4 else "••••"
+
+
+def _format_address(client):
+    """One-line address, e.g. '123 Main St, Evans, GA 30809' (parts optional)."""
+    csz = " ".join(p for p in [
+        f"{client.address_city}," if client.address_city else "",
+        client.address_state or "",
+        client.address_zip or "",
+    ] if p).strip()
+    parts = [p for p in [client.address_line1, csz] if p]
+    return ", ".join(parts) if parts else None
+
 # Show success message if client was just added
 if 'client_added_message' in st.session_state:
     st.success(st.session_state.pop('client_added_message'))
@@ -55,15 +85,24 @@ with tab1:
                 col1, col2, col3 = st.columns([2, 2, 1])
 
                 with col1:
+                    if client.dba_name:
+                        st.text(f"DBA: {client.dba_name}")
                     st.text(f"Entity Type: {client.entity_type or 'Not specified'}")
                     st.text(f"Business Type: {client.business_type or 'Not specified'}")
-                    st.text(f"Fiscal Year End: Month {client.fiscal_year_end_month}")
+                    st.text(f"Fiscal Year End: {MONTH_NAMES[client.fiscal_year_end_month - 1]}")
+                    if client.tax_id:
+                        st.text(f"Tax ID: {_mask_tax_id(client.tax_id)}")
 
                 with col2:
-                    if Client.has_transactions(client.id):
-                        st.caption("Has transactions recorded")
-                    else:
-                        st.caption("No transactions yet")
+                    contact_bits = [b for b in (client.contact_name, client.contact_email, client.contact_phone) if b]
+                    if contact_bits:
+                        st.text("Contact: " + " · ".join(contact_bits))
+                    addr = _format_address(client)
+                    if addr:
+                        st.text(addr)
+                    if client.notes:
+                        st.caption(f"📝 {client.notes}")
+                    st.caption("Has transactions recorded" if Client.has_transactions(client.id) else "No transactions yet")
 
                 with col3:
                     if st.button("Edit", key=f"edit_{client.id}"):
@@ -89,9 +128,24 @@ with tab1:
                         client.business_type if client.business_type in BUSINESS_TYPE_OPTIONS else BUSINESS_TYPE_OPTIONS[0])
                     st.session_state['edit_fiscal_month'] = client.fiscal_year_end_month
                     st.session_state['edit_active'] = bool(client.is_active)
+                    st.session_state['edit_dba_name'] = client.dba_name or ""
+                    st.session_state['edit_tax_id'] = client.tax_id or ""
+                    st.session_state['edit_address_line1'] = client.address_line1 or ""
+                    st.session_state['edit_address_city'] = client.address_city or ""
+                    st.session_state['edit_address_state'] = client.address_state or ""
+                    st.session_state['edit_address_zip'] = client.address_zip or ""
+                    st.session_state['edit_contact_name'] = client.contact_name or ""
+                    st.session_state['edit_contact_email'] = client.contact_email or ""
+                    st.session_state['edit_contact_phone'] = client.contact_phone or ""
+                    st.session_state['edit_notes'] = client.notes or ""
 
                 with st.container():
-                    new_name = st.text_input("Client Name", key="edit_name")
+                    new_name = st.text_input("Legal Name", key="edit_name")
+                    ecol_dba, ecol_tax = st.columns(2)
+                    with ecol_dba:
+                        new_dba_name = st.text_input("DBA / Trade Name", key="edit_dba_name")
+                    with ecol_tax:
+                        new_tax_id = st.text_input("Tax ID (EIN / SSN)", key="edit_tax_id")
 
                     new_entity_type = st.selectbox(
                         "Entity Type (Legal Structure)",
@@ -110,10 +164,28 @@ with tab1:
                     new_fiscal_month = st.selectbox(
                         "Fiscal Year End Month",
                         options=list(range(1, 13)),
-                        format_func=lambda x: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][x-1],
+                        format_func=lambda x: MONTH_NAMES[x - 1],
                         key="edit_fiscal_month"
                     )
                     new_active = st.checkbox("Active", key="edit_active")
+
+                    st.markdown("**Contact & Address**")
+                    new_address_line1 = st.text_input("Street Address", key="edit_address_line1")
+                    ec_city, ec_state, ec_zip = st.columns([2, 1, 1])
+                    with ec_city:
+                        new_address_city = st.text_input("City", key="edit_address_city")
+                    with ec_state:
+                        new_address_state = st.text_input("State", max_chars=2, key="edit_address_state")
+                    with ec_zip:
+                        new_address_zip = st.text_input("ZIP", key="edit_address_zip")
+                    ec1, ec2, ec3 = st.columns(3)
+                    with ec1:
+                        new_contact_name = st.text_input("Contact Name", key="edit_contact_name")
+                    with ec2:
+                        new_contact_email = st.text_input("Contact Email", key="edit_contact_email")
+                    with ec3:
+                        new_contact_phone = st.text_input("Contact Phone", key="edit_contact_phone")
+                    new_notes = st.text_area("Notes", key="edit_notes")
 
                     st.warning("Note: Changing entity or business type will NOT update the existing chart of accounts. You may need to manually add/remove accounts.")
 
@@ -125,6 +197,16 @@ with tab1:
                             client.business_type = new_business_type
                             client.fiscal_year_end_month = new_fiscal_month
                             client.is_active = new_active
+                            client.dba_name = new_dba_name or None
+                            client.tax_id = new_tax_id or None
+                            client.address_line1 = new_address_line1 or None
+                            client.address_city = new_address_city or None
+                            client.address_state = new_address_state or None
+                            client.address_zip = new_address_zip or None
+                            client.contact_name = new_contact_name or None
+                            client.contact_email = new_contact_email or None
+                            client.contact_phone = new_contact_phone or None
+                            client.notes = new_notes or None
 
                             try:
                                 client.save(seed_accounts=False)
@@ -148,8 +230,7 @@ with tab2:
     # render) rather than in the submit handler, so we don't mutate widget state
     # during the same run the widgets are instantiated.
     if st.session_state.pop("_clear_add_form", False):
-        for _k in ("add_client_name", "add_entity_type", "add_business_type",
-                   "add_fiscal_month", "add_seed_accounts"):
+        for _k in ADD_FORM_KEYS:
             st.session_state.pop(_k, None)
 
     st.markdown("""
@@ -161,7 +242,13 @@ with tab2:
     # account preview update live as the dropdowns change -- inside a form the
     # selectbox values (and everything derived from them) only refresh on submit.
     with st.container():
-        client_name = st.text_input("Client Name", placeholder="e.g., ABC Corporation", key="add_client_name")
+        client_name = st.text_input("Legal Name", placeholder="e.g., ABC Corporation", key="add_client_name")
+        col_dba, col_tax = st.columns(2)
+        with col_dba:
+            dba_name = st.text_input("DBA / Trade Name (optional)", placeholder="e.g., ABC", key="add_dba_name")
+        with col_tax:
+            tax_id = st.text_input("Tax ID (EIN / SSN)", placeholder="XX-XXXXXXX", key="add_tax_id",
+                                   help="Stored locally on this machine.")
 
         st.divider()
 
@@ -261,10 +348,35 @@ with tab2:
         fiscal_month = st.selectbox(
             "Fiscal Year End Month",
             options=list(range(1, 13)),
-            format_func=lambda x: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][x-1],
+            format_func=lambda x: MONTH_NAMES[x - 1],
             index=11,  # Default to December
             key="add_fiscal_month"
         )
+
+        st.divider()
+
+        # Contact & Address
+        st.markdown("### Contact & Address")
+        address_line1 = st.text_input("Street Address", key="add_address_line1")
+        col_city, col_state, col_zip = st.columns([2, 1, 1])
+        with col_city:
+            address_city = st.text_input("City", key="add_address_city")
+        with col_state:
+            address_state = st.text_input("State", max_chars=2, placeholder="GA", key="add_address_state")
+        with col_zip:
+            address_zip = st.text_input("ZIP", key="add_address_zip")
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            contact_name = st.text_input("Contact Name", key="add_contact_name")
+        with c2:
+            contact_email = st.text_input("Contact Email", key="add_contact_email")
+        with c3:
+            contact_phone = st.text_input("Contact Phone", key="add_contact_phone")
+
+        notes = st.text_area("Notes", placeholder="Engagement notes, deadlines, key personnel…", key="add_notes")
+
+        st.divider()
 
         seed_accounts = st.checkbox("Create default chart of accounts", value=True,
                                    help="Uncheck if you want to manually create all accounts",
@@ -278,7 +390,17 @@ with tab2:
                     name=client_name,
                     entity_type=entity_type,
                     business_type=business_type,
-                    fiscal_year_end_month=fiscal_month
+                    fiscal_year_end_month=fiscal_month,
+                    tax_id=tax_id or None,
+                    dba_name=dba_name or None,
+                    address_line1=address_line1 or None,
+                    address_city=address_city or None,
+                    address_state=address_state or None,
+                    address_zip=address_zip or None,
+                    contact_name=contact_name or None,
+                    contact_email=contact_email or None,
+                    contact_phone=contact_phone or None,
+                    notes=notes or None,
                 )
 
                 try:
