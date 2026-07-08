@@ -36,3 +36,8 @@ data/
 
 # Logs
 *.log
+
+# PyInstaller build artifacts (Tier 2 desktop packaging)
+/build/
+/dist/
+*.pyc
