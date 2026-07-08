@@ -71,8 +71,14 @@ pip install -r requirements-desktop.txt      # includes pyinstaller
 pyinstaller ProBooks.spec --noconfirm
 ```
 
-Output: `dist/ProBooks.app` (~1.2 GB — it bundles Python, Streamlit, pandas,
+Output: `dist/ProBooks.app` (~530 MB — it bundles Python, Streamlit, pandas,
 etc.). Double-click it, or `open dist/ProBooks.app`.
+
+The spec trims the bundle by excluding heavy libraries the app never uses
+(scipy, scikit-learn, Qt, LLVM, matplotlib, the Jupyter stack, …) — see
+`EXCLUDES` in `ProBooks.spec`. `PROBOOKS_MODE=selfcheck dist/ProBooks.app/Contents/MacOS/ProBooks`
+imports every runtime dependency and reports, to confirm a trim didn't drop
+anything.
 
 ## How the standalone build works
 
@@ -87,10 +93,33 @@ etc.). Double-click it, or `open dist/ProBooks.app`.
   `~/Library/Application Support/ProBooks/`. (Running from source still uses the
   repo `data/` folder.) Set `PROBOOKS_DB_PATH` to a `~/Practice` file before
   storing real client data, as always.
-- **First open:** unsigned/un-notarized, so macOS Gatekeeper will warn. Right-click
-  `dist/ProBooks.app` → **Open** once. To distribute without the warning you'd
-  sign + notarize with an Apple Developer ID (`codesign` + `notarytool`) — not
-  needed for personal use.
+- **First open (unsigned build):** a plain build is ad-hoc signed, so macOS
+  Gatekeeper will warn. Right-click `dist/ProBooks.app` → **Open** once. Fine for
+  personal use.
 
-`build/` and `dist/` are gitignored (build artifacts); the spec and entry point
-are the committed source.
+`build/` and `dist/` are gitignored (build artifacts); the spec, entry point,
+and signing scripts are the committed source.
+
+## Signing + notarization (distribute without warnings)
+
+To hand the app to others with **no** Gatekeeper warning, sign it with an Apple
+**Developer ID** and notarize it. This needs an Apple Developer Program
+membership ($99/yr) — everything else is wired up:
+
+- `scripts/entitlements.plist` — the Hardened Runtime entitlements a bundled
+  Python needs (JIT / unsigned executable memory / library validation off /
+  outbound network).
+- `ProBooks.spec` signs the bundle **during the build** (inside-out, hardened
+  runtime) when `PROBOOKS_CODESIGN_ID` is set.
+- `scripts/notarize.sh` verifies, submits to Apple's notary service, and staples
+  the ticket.
+
+One-time setup and the two commands are documented at the top of
+`scripts/notarize.sh`. In short:
+
+```bash
+# after a one-time cert + notarytool credential setup:
+PROBOOKS_CODESIGN_ID="Developer ID Application: Your Name (TEAMID)" \
+  pyinstaller ProBooks.spec --noconfirm
+./scripts/notarize.sh
+```
