@@ -254,7 +254,8 @@ class AuditLog:
         table_name: Optional[str] = None,
         action: Optional[str] = None,
         search_term: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        offset: int = 0,
     ) -> List['AuditLog']:
         """
         Get audit log entries with optional filters.
@@ -271,36 +272,12 @@ class AuditLog:
         Returns:
             List of AuditLog entries, ordered by time descending
         """
-        query = "SELECT * FROM audit_log WHERE client_id = ?"
-        params: List[Any] = [client_id]
-
-        # changed_at is stored as SQLite's CURRENT_TIMESTAMP format
-        # ("YYYY-MM-DD HH:MM:SS", space-separated), so the filter values must
-        # match that format -- datetime.isoformat() uses a "T" separator,
-        # which sorts after the space and silently excludes same-day rows.
-        if start_date:
-            query += " AND changed_at >= ?"
-            params.append(start_date.strftime("%Y-%m-%d %H:%M:%S"))
-
-        if end_date:
-            query += " AND changed_at <= ?"
-            params.append(end_date.strftime("%Y-%m-%d %H:%M:%S"))
-
-        if table_name:
-            query += " AND table_name = ?"
-            params.append(table_name)
-
-        if action:
-            query += " AND action = ?"
-            params.append(action)
-
-        if search_term:
-            query += " AND (old_values LIKE ? OR new_values LIKE ?)"
-            search_pattern = f"%{search_term}%"
-            params.extend([search_pattern, search_pattern])
-
-        query += " ORDER BY changed_at DESC, id DESC LIMIT ?"
-        params.append(limit)
+        where, params = AuditLog._filter_sql(
+            client_id, start_date, end_date, table_name, action, search_term,
+        )
+        query = "SELECT * FROM audit_log" + where
+        query += " ORDER BY changed_at DESC, id DESC LIMIT ? OFFSET ?"
+        params.extend([max(1, int(limit)), max(0, int(offset))])
 
         with get_cursor() as cursor:
             cursor.execute(query, params)
@@ -320,6 +297,65 @@ class AuditLog:
                 ))
 
         return logs
+
+    @staticmethod
+    def _filter_sql(
+        client_id: int,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        table_name: Optional[str] = None,
+        action: Optional[str] = None,
+        search_term: Optional[str] = None,
+    ):
+        clauses = ["client_id = ?"]
+        params: List[Any] = [client_id]
+        # SQLite CURRENT_TIMESTAMP uses a space separator, not ISO's "T".
+        if start_date:
+            clauses.append("changed_at >= ?")
+            params.append(start_date.strftime("%Y-%m-%d %H:%M:%S"))
+        if end_date:
+            clauses.append("changed_at <= ?")
+            params.append(end_date.strftime("%Y-%m-%d %H:%M:%S"))
+        if table_name:
+            clauses.append("table_name = ?")
+            params.append(table_name)
+        if action:
+            clauses.append("action = ?")
+            params.append(action)
+        if search_term:
+            clauses.append("(old_values LIKE ? OR new_values LIKE ?)")
+            search_pattern = f"%{search_term}%"
+            params.extend([search_pattern, search_pattern])
+        return " WHERE " + " AND ".join(clauses), params
+
+    @staticmethod
+    def get_filtered_counts(
+        client_id: int,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        table_name: Optional[str] = None,
+        action: Optional[str] = None,
+        search_term: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """Return SQL-backed counts for the complete filtered audit result."""
+        where, params = AuditLog._filter_sql(
+            client_id, start_date, end_date, table_name, action, search_term,
+        )
+        with get_cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COUNT(*) total,
+                       SUM(CASE WHEN action = 'INSERT' THEN 1 ELSE 0 END) inserts,
+                       SUM(CASE WHEN action = 'UPDATE' THEN 1 ELSE 0 END) updates,
+                       SUM(CASE WHEN action = 'DELETE' THEN 1 ELSE 0 END) deletes,
+                       SUM(CASE WHEN action NOT IN ('INSERT', 'UPDATE', 'DELETE')
+                                THEN 1 ELSE 0 END) events
+                FROM audit_log
+                """ + where,
+                params,
+            )
+            row = cursor.fetchone()
+        return {key: int(row[key] or 0) for key in ("total", "inserts", "updates", "deletes", "events")}
 
     @staticmethod
     def get_entry_changes(

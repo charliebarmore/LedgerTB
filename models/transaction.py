@@ -269,6 +269,7 @@ class ImportedTransaction:
         bank_account_id: int = None,
         limit: int = 500,
         cleared: Optional[bool] = None,
+        offset: int = 0,
     ) -> List['ImportedTransaction']:
         """Get all imported transactions for a client with optional filters."""
         query = """
@@ -319,8 +320,8 @@ class ImportedTransaction:
         elif cleared is False:
             query += " AND c.reconciliation_id IS NULL"
 
-        query += " ORDER BY it.transaction_date DESC, it.id DESC LIMIT ?"
-        params.append(limit)
+        query += " ORDER BY it.transaction_date DESC, it.id DESC LIMIT ? OFFSET ?"
+        params.extend([max(1, int(limit)), max(0, int(offset))])
 
         with get_cursor() as cursor:
             cursor.execute(query, params)
@@ -344,6 +345,65 @@ class ImportedTransaction:
             reconciliation_status=row['reconciliation_status'],
             statement_end_date=date.fromisoformat(row['statement_end_date']) if row['statement_end_date'] else None,
         ) for row in rows]
+
+    @staticmethod
+    def get_filtered_summary(
+        client_id: int,
+        start_date: date = None,
+        end_date: date = None,
+        status: str = None,
+        bank_account_id: int = None,
+        cleared: Optional[bool] = None,
+    ) -> dict:
+        """Return counts and money totals across the entire filtered result."""
+        clauses = ["it.client_id = ?"]
+        params = [client_id]
+        if start_date:
+            clauses.append("it.transaction_date >= ?")
+            params.append(start_date.isoformat())
+        if end_date:
+            clauses.append("it.transaction_date <= ?")
+            params.append(end_date.isoformat())
+        if status:
+            clauses.append("it.status = ?")
+            params.append(status)
+        if bank_account_id:
+            clauses.append("it.bank_account_id = ?")
+            params.append(bank_account_id)
+
+        clearance_exists = """
+            EXISTS (
+                SELECT 1
+                FROM journal_entry_lines jel
+                JOIN bank_reconciliation_items bri ON bri.journal_entry_line_id = jel.id
+                WHERE jel.journal_entry_id = it.journal_entry_id
+                  AND jel.account_id = it.bank_account_id
+            )
+        """
+        if cleared is True:
+            clauses.append(clearance_exists)
+        elif cleared is False:
+            clauses.append("NOT " + clearance_exists)
+
+        query = """
+            SELECT COUNT(*) total_count,
+                   COALESCE(SUM(CASE WHEN it.amount > 0 THEN it.amount ELSE 0 END), 0) deposits,
+                   COALESCE(SUM(CASE WHEN it.amount < 0 THEN it.amount ELSE 0 END), 0) withdrawals,
+                   SUM(CASE WHEN it.status = 'Posted' THEN 1 ELSE 0 END) posted_count,
+                   SUM(CASE WHEN it.status = 'Pending' THEN 1 ELSE 0 END) pending_count
+            FROM imported_transactions it
+            WHERE
+        """ + " AND ".join(clauses)
+        with get_cursor() as cursor:
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+        return {
+            "total_count": int(row["total_count"] or 0),
+            "total_deposits": to_dollars(row["deposits"] or 0),
+            "total_withdrawals": to_dollars(row["withdrawals"] or 0),
+            "posted_count": int(row["posted_count"] or 0),
+            "pending_count": int(row["pending_count"] or 0),
+        }
 
     @staticmethod
     def get_count(client_id: int) -> int:

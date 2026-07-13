@@ -109,10 +109,30 @@ with col1:
 
 st.divider()
 
-# Get transactions
 status_param = None if status_filter == "All" else status_filter
 bank_param = None if selected_bank == 0 else selected_bank
 cleared_param = None if clearance_filter == "All" else clearance_filter == "Cleared"
+
+# Reset paging when the filter set changes.
+filter_signature = (
+    start_date, end_date, status_param, bank_param, cleared_param,
+)
+if st.session_state.get("transactions_filter_signature") != filter_signature:
+    st.session_state.transactions_filter_signature = filter_signature
+    st.session_state.transactions_page = 1
+
+page_size = 50
+summary = ImportedTransaction.get_filtered_summary(
+    client_id=client_id,
+    start_date=start_date,
+    end_date=end_date,
+    status=status_param,
+    bank_account_id=bank_param,
+    cleared=cleared_param,
+)
+page_count = max(1, (summary["total_count"] + page_size - 1) // page_size)
+current_page = min(max(1, st.session_state.get("transactions_page", 1)), page_count)
+st.session_state.transactions_page = current_page
 
 transactions = ImportedTransaction.get_all(
     client_id=client_id,
@@ -121,24 +141,38 @@ transactions = ImportedTransaction.get_all(
     status=status_param,
     bank_account_id=bank_param,
     cleared=cleared_param,
+    limit=page_size,
+    offset=(current_page - 1) * page_size,
 )
 
 # Summary metrics
 col1, col2, col3, col4 = st.columns(4)
 
-total_deposits = sum(t.amount for t in transactions if t.amount > 0)
-total_withdrawals = sum(t.amount for t in transactions if t.amount < 0)
-posted_count = sum(1 for t in transactions if t.status == 'Posted')
-pending_count = sum(1 for t in transactions if t.status == 'Pending')
-
 with col1:
-    st.metric("Total Transactions", len(transactions))
+    st.metric("Filtered Transactions", summary["total_count"])
 with col2:
-    st.metric("Deposits", f"${total_deposits:,.2f}")
+    st.metric("Deposits", f"${summary['total_deposits']:,.2f}")
 with col3:
-    st.metric("Withdrawals", f"${abs(total_withdrawals):,.2f}")
+    st.metric("Withdrawals", f"${abs(summary['total_withdrawals']):,.2f}")
 with col4:
-    st.metric("Posted / Pending", f"{posted_count} / {pending_count}")
+    st.metric("Posted / Pending", f"{summary['posted_count']} / {summary['pending_count']}")
+
+nav_left, nav_status, nav_right = st.columns([1, 2, 1])
+with nav_left:
+    if st.button("Previous", disabled=current_page <= 1, key="transactions_previous"):
+        st.session_state.transactions_page = current_page - 1
+        st.rerun()
+with nav_status:
+    first_row = (current_page - 1) * page_size + 1 if summary["total_count"] else 0
+    last_row = min(current_page * page_size, summary["total_count"])
+    st.caption(
+        f"Page {current_page} of {page_count} · showing {first_row}–{last_row} "
+        f"of {summary['total_count']}"
+    )
+with nav_right:
+    if st.button("Next", disabled=current_page >= page_count, key="transactions_next"):
+        st.session_state.transactions_page = current_page + 1
+        st.rerun()
 
 st.divider()
 
@@ -211,8 +245,13 @@ else:
         import pandas as pd
         from io import StringIO
 
+        export_transactions = ImportedTransaction.get_all(
+            client_id=client_id, start_date=start_date, end_date=end_date,
+            status=status_param, bank_account_id=bank_param, cleared=cleared_param,
+            limit=max(1, summary["total_count"]),
+        )
         export_data = []
-        for t in transactions:
+        for t in export_transactions:
             export_data.append({
                 'Date': t.transaction_date.isoformat() if t.transaction_date else '',
                 'Description': t.description,
@@ -237,6 +276,6 @@ else:
             args=(client_id, "EXPORT", "transactions_export", {
                 "format": "csv", "start_date": start_date, "end_date": end_date,
                 "status": status_param or "All", "account_id": bank_param,
-                "reconciliation": clearance_filter, "row_count": len(transactions),
+                "reconciliation": clearance_filter, "row_count": len(export_transactions),
             }),
         )

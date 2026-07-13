@@ -302,12 +302,53 @@ with tab2:
     with col3:
         filter_type = st.selectbox("Entry Type", options=['All'] + EntryType.ALL, key="filter_type")
 
-    # Get entries
+    entry_type_param = filter_type if filter_type != 'All' else None
+    filter_signature = (filter_start, filter_end, entry_type_param)
+    if st.session_state.get("journal_filter_signature") != filter_signature:
+        st.session_state.journal_filter_signature = filter_signature
+        st.session_state.journal_page = 1
+
+    page_size = 25
+    summary = JournalEntry.get_filtered_summary(
+        client_id=client_id, start_date=filter_start, end_date=filter_end,
+        entry_type=entry_type_param,
+    )
+    page_count = max(1, (summary["total_count"] + page_size - 1) // page_size)
+    current_page = min(max(1, st.session_state.get("journal_page", 1)), page_count)
+    st.session_state.journal_page = current_page
+
+    metric_cols = st.columns(3)
+    with metric_cols[0]:
+        st.metric("Filtered Entries", summary["total_count"])
+    with metric_cols[1]:
+        st.metric("Total Debits", f"${summary['total_debits']:,.2f}")
+    with metric_cols[2]:
+        st.metric("Total Credits", f"${summary['total_credits']:,.2f}")
+
+    nav_left, nav_status, nav_right = st.columns([1, 2, 1])
+    with nav_left:
+        if st.button("Previous", disabled=current_page <= 1, key="journal_previous"):
+            st.session_state.journal_page = current_page - 1
+            st.rerun()
+    with nav_status:
+        first_row = (current_page - 1) * page_size + 1 if summary["total_count"] else 0
+        last_row = min(current_page * page_size, summary["total_count"])
+        st.caption(
+            f"Page {current_page} of {page_count} · showing {first_row}–{last_row} "
+            f"of {summary['total_count']}"
+        )
+    with nav_right:
+        if st.button("Next", disabled=current_page >= page_count, key="journal_next"):
+            st.session_state.journal_page = current_page + 1
+            st.rerun()
+
     entries = JournalEntry.get_all(
         client_id=client_id,
         start_date=filter_start,
         end_date=filter_end,
-        entry_type=filter_type if filter_type != 'All' else None
+        entry_type=entry_type_param,
+        limit=page_size,
+        offset=(current_page - 1) * page_size,
     )
 
     if not entries:
