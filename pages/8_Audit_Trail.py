@@ -84,7 +84,7 @@ with filter_cols[3]:
         "Action",
         options=[
             "All", "INSERT", "UPDATE", "DELETE", "REVERSE", "CLOSE",
-            "REOPEN", "EXPORT", "BACKUP", "RESTORE",
+            "REOPEN", "EXPORT", "BACKUP", "RESTORE", "OVERRIDE",
         ],
         index=0,
         key="action_filter"
@@ -174,6 +174,7 @@ else:
             "EXPORT": "Exported",
             "BACKUP": "Backed up",
             "RESTORE": "Restored",
+            "OVERRIDE": "Overrode duplicate warning for",
         }.get(log.action, log.action.title())
 
         header = f"{action_label} · {log.table_name} #{log.record_id}"

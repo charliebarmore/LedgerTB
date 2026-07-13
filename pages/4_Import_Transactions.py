@@ -14,6 +14,7 @@ from services.csv_import import CSVImporter
 from services.categorization import CategorizationService
 from services.pattern_learning import PatternLearner
 from services.posting import post_transaction
+from services.import_identity import classify_import_duplicates, hash_source
 from services.document_import import (
     extract_document, parse_statement_text, parse_statement_with_ai,
 )
@@ -45,6 +46,29 @@ st.caption(f"Viewing: **{client.name}**")
 # Initialize services
 categorization_service = CategorizationService()
 importer = CSVImporter()
+
+
+def apply_duplicate_checks(transactions):
+    """Apply durable import checks, then flag possible manual journal matches."""
+    duplicate_count = classify_import_duplicates(transactions, client_id)
+    for transaction in transactions:
+        if transaction.get("is_duplicate"):
+            continue
+        duplicates = JournalEntry.find_potential_duplicates(
+            client_id=client_id,
+            entry_date=transaction["date"],
+            amount=transaction["amount"],
+            bank_account_id=transaction.get("bank_account_id"),
+        )
+        if duplicates:
+            transaction["is_duplicate"] = True
+            transaction["duplicate_kind"] = "journal_match"
+            transaction["duplicate_info"] = duplicates[0]
+            transaction["duplicate_override"] = False
+            transaction["duplicate_override_reason"] = ""
+            transaction["include"] = False
+            duplicate_count += 1
+    return duplicate_count
 
 # Initialize session state
 if 'imported_data' not in st.session_state:
@@ -493,7 +517,9 @@ if selected_tab == "Upload CSV":
                             amount_column=amount_col,
                             debit_column=debit_col,
                             credit_column=credit_col,
-                            source_account_column=source_account_col if multi_account_mode else None
+                            source_account_column=source_account_col if multi_account_mode else None,
+                            source_id=hash_source(content.encode("utf-8")),
+                            source_filename=st.session_state.get("csv_filename"),
                         )
 
                         if not transactions:
@@ -543,28 +569,13 @@ if selected_tab == "Upload CSV":
                             if not transactions:
                                 st.error("No valid transactions after applying account mapping.")
                             else:
-                                # First check learned patterns and duplicates
-                                duplicate_count = 0
+                                # First check learned patterns; durable duplicate
+                                # classification runs after account assignment.
                                 for t in transactions:
                                     # Set bank account for single-account mode or multi-account without source column
                                     if not multi_account_mode or (multi_account_mode and source_account_col is None):
                                         t['bank_account_id'] = selected_bank
                                     t['client_id'] = client_id
-
-                                    # Check for potential duplicates
-                                    duplicates = JournalEntry.find_potential_duplicates(
-                                        client_id=client_id,
-                                        entry_date=t['date'],
-                                        amount=t['amount'],
-                                        bank_account_id=t.get('bank_account_id')
-                                    )
-                                    if duplicates:
-                                        t['is_duplicate'] = True
-                                        t['duplicate_info'] = duplicates[0]  # Store first match info
-                                        t['include'] = False  # Auto-deselect duplicates
-                                        duplicate_count += 1
-                                    else:
-                                        t['is_duplicate'] = False
 
                                     # Check learned patterns
                                     match = PatternLearner.find_match(client_id, t['description'])
@@ -572,6 +583,8 @@ if selected_tab == "Upload CSV":
                                         t['suggested_account_id'] = match['account_id']
                                         t['confidence'] = f"{match['confidence']:.0%}"
                                         t['reason'] = f"Learned pattern: {match['pattern']}"
+
+                                duplicate_count = apply_duplicate_checks(transactions)
 
                                 # Then use Claude API for unmatched
                                 unmatched = [t for t in transactions if 'suggested_account_id' not in t]
@@ -800,7 +813,7 @@ elif selected_tab == "Upload Statement":
                             raise ValueError("At least one transaction is required.")
                         batch_id = str(parsed_document_rows[0].get("batch_id", "document"))
                         review_transactions = []
-                        for _, row in edited_frame.iterrows():
+                        for row_position, (_, row) in enumerate(edited_frame.iterrows(), start=1):
                             row_date = row["Date"]
                             if hasattr(row_date, "date") and not isinstance(row_date, date):
                                 row_date = row_date.date()
@@ -818,24 +831,13 @@ elif selected_tab == "Upload Statement":
                                 "amount": amount, "batch_id": batch_id,
                                 "bank_account_id": document_bank_id,
                                 "client_id": client_id,
+                                "source_id": hash_source(st.session_state.document_bytes),
+                                "source_filename": st.session_state.get("document_name"),
+                                "source_row_number": row_position,
                             })
 
-                        duplicate_count = 0
+                        duplicate_count = apply_duplicate_checks(review_transactions)
                         for transaction in review_transactions:
-                            duplicates = JournalEntry.find_potential_duplicates(
-                                client_id=client_id,
-                                entry_date=transaction["date"],
-                                amount=transaction["amount"],
-                                bank_account_id=document_bank_id,
-                            )
-                            if duplicates:
-                                transaction["is_duplicate"] = True
-                                transaction["duplicate_info"] = duplicates[0]
-                                transaction["include"] = False
-                                duplicate_count += 1
-                            else:
-                                transaction["is_duplicate"] = False
-
                             match = PatternLearner.find_match(client_id, transaction["description"])
                             if match:
                                 transaction["suggested_account_id"] = match["account_id"]
@@ -944,8 +946,16 @@ elif selected_tab == "Review & Categorize":
             with subcol1:
                 if st.button("Select All", key="select_all_top"):
                     for t in transactions:
-                        t['include'] = True
-                        st.session_state[row_key("include", t)] = True
+                        duplicate_allowed = (
+                            not t.get("is_duplicate")
+                            or (
+                                t.get("duplicate_override")
+                                and str(t.get("duplicate_override_reason", "")).strip()
+                                and not t.get("duplicate_info", {}).get("exact_retry")
+                            )
+                        )
+                        t['include'] = bool(duplicate_allowed)
+                        st.session_state[row_key("include", t)] = bool(duplicate_allowed)
                     st.rerun()
             with subcol2:
                 if st.button("Deselect All", key="deselect_all_top"):
@@ -1272,6 +1282,63 @@ elif selected_tab == "Review & Categorize":
         transfer_options.update({a.id: a.display_name() for a in transfer_accounts})
 
         for i, t in enumerate(transactions):
+            duplicate_select_disabled = False
+            if t.get("is_duplicate"):
+                duplicate_kind = t.get("duplicate_kind")
+                duplicate_info = t.get("duplicate_info", {})
+                if duplicate_kind == "within_upload":
+                    duplicate_message = "Duplicate row in this upload"
+                    matched_row = duplicate_info.get("source_row_number") or duplicate_info.get("upload_position")
+                    duplicate_detail = f"Matches an earlier upload row ({matched_row})."
+                elif duplicate_kind == "previous_import":
+                    duplicate_message = "Previously imported transaction"
+                    duplicate_detail = (
+                        f"Matches transaction #{duplicate_info.get('transaction_id', '?')}"
+                        f" / journal entry #{duplicate_info.get('entry_id', '?')}."
+                    )
+                else:
+                    duplicate_message = "Possible journal-entry duplicate"
+                    duplicate_detail = (
+                        f"Matches journal entry #{duplicate_info.get('entry_id', '?')} "
+                        f"on {duplicate_info.get('entry_date', '?')}."
+                    )
+
+                with st.container(border=True):
+                    st.warning(duplicate_message)
+                    st.caption(duplicate_detail)
+                    if duplicate_info.get("exact_retry"):
+                        st.info(
+                            "This is the same source row as a prior import. It cannot be posted twice; "
+                            "the existing journal entry remains unchanged."
+                        )
+                        transactions[i]["duplicate_override"] = False
+                        transactions[i]["duplicate_override_reason"] = ""
+                        duplicate_select_disabled = True
+                    else:
+                        override = st.checkbox(
+                            "Post this transaction anyway",
+                            value=bool(t.get("duplicate_override", False)),
+                            key=row_key("duplicate_override", t),
+                            help="Use only when the statement truly contains a separate, legitimate transaction.",
+                        )
+                        reason = ""
+                        if override:
+                            reason = st.text_input(
+                                "Reason for duplicate override",
+                                value=t.get("duplicate_override_reason", ""),
+                                key=row_key("duplicate_reason", t),
+                                placeholder="Example: Two separate purchases for the same amount",
+                            ).strip()
+                            if not reason:
+                                st.caption("A reason is required before this row can be selected.")
+                        transactions[i]["duplicate_override"] = override
+                        transactions[i]["duplicate_override_reason"] = reason
+                        duplicate_select_disabled = not (override and reason)
+
+                if duplicate_select_disabled:
+                    transactions[i]["include"] = False
+                    st.session_state[row_key("include", t)] = False
+
             col0, col1, col2, col3, col4, col5 = st.columns([0.5, 0.9, 2.2, 1, 0.6, 2])
 
             include_key = row_key("include", t)
@@ -1283,6 +1350,7 @@ elif selected_tab == "Review & Categorize":
                 include = st.checkbox(
                     "Select",
                     key=include_key,
+                    disabled=duplicate_select_disabled,
                     label_visibility="collapsed"
                 )
                 # Sync back to transaction data
@@ -1292,12 +1360,6 @@ elif selected_tab == "Review & Categorize":
                 st.text(str(t['date']))
 
             with col2:
-                # Show duplicate warning if applicable
-                if t.get('is_duplicate'):
-                    st.markdown(f":orange[**POSSIBLE DUPLICATE**]")
-                    dup_info = t.get('duplicate_info', {})
-                    st.caption(f"Matches JE #{dup_info.get('entry_id', '?')} on {dup_info.get('entry_date', '?')}")
-
                 st.text(t['description'][:35])
                 # Show source account if from multi-account import
                 if t.get('source_account'):
@@ -1382,6 +1444,8 @@ elif selected_tab == "Review & Categorize":
                             bank_account_id=t['bank_account_id'],
                             is_transfer=t.get('is_transfer', False),
                             batch_id=t['batch_id'],
+                            duplicate_override=t.get('duplicate_override', False),
+                            duplicate_override_reason=t.get('duplicate_override_reason'),
                         )
                         created += 1
 

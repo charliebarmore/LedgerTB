@@ -92,3 +92,24 @@ def test_unbalanced_trial_balance_is_a_hard_close_block(client_id, accounts):
             confirmation={"explicit_confirmation": True, "warnings_acknowledged": True},
         )
     assert FiscalPeriod.get_by_id(period.id).is_closed is False
+
+
+def test_reasoned_duplicate_override_is_not_an_unresolved_close_item(client_id, accounts):
+    period = _period(client_id)
+    first = ImportedTransaction(
+        client_id=client_id, transaction_date=date(2026, 2, 1),
+        description="IDENTICAL LEGITIMATE CHARGE", amount=-10,
+        bank_account_id=accounts["cash"], status="Posted",
+    )
+    first.save()
+    second = ImportedTransaction(
+        client_id=client_id, transaction_date=date(2026, 2, 1),
+        description="IDENTICAL LEGITIMATE CHARGE", amount=-10,
+        bank_account_id=accounts["cash"], status="Posted",
+        duplicate_override=True, duplicate_override_reason="Two separate receipts",
+        duplicate_of_id=first.id,
+    )
+    second.save()
+
+    checklist = FiscalPeriod.get_close_checklist(period.id, client_id)
+    assert checklist["unresolved_duplicates"] == 0

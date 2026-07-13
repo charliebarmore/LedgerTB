@@ -177,15 +177,18 @@ class FiscalPeriod:
         imports = cursor.fetchone()
         cursor.execute(
             """
-            SELECT COALESCE(SUM(group_count - 1), 0) unresolved_duplicates
+            SELECT COUNT(*) unresolved_duplicates
             FROM (
-                SELECT COUNT(*) group_count
+                SELECT duplicate_override,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY transaction_date, amount, UPPER(TRIM(description)),
+                                        COALESCE(bank_account_id, -1)
+                           ORDER BY id
+                       ) duplicate_number
                 FROM imported_transactions
                 WHERE client_id = ? AND transaction_date BETWEEN ? AND ?
-                GROUP BY transaction_date, amount, UPPER(TRIM(description)),
-                         COALESCE(bank_account_id, -1)
-                HAVING COUNT(*) > 1
             ) duplicates
+            WHERE duplicate_number > 1 AND duplicate_override = 0
             """,
             (client_id, start, end),
         )
