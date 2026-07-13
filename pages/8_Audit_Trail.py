@@ -1,12 +1,4 @@
-"""
-Audit Trail - View history of all changes to journal entries
-
-This page displays the audit log with filters for:
-- Date range
-- Entry type (Journal Entries, etc.)
-- Action type (INSERT, UPDATE, DELETE)
-- Search by description or reference
-"""
+"""Audit Trail - View accounting changes and sensitive operational events."""
 
 import streamlit as st
 import sys
@@ -72,7 +64,14 @@ with filter_cols[1]:
 with filter_cols[2]:
     table_filter = st.selectbox(
         "Table",
-        options=["All", "journal_entries"],
+        options=[
+            "All", "clients", "accounts", "journal_entries",
+            "imported_transactions", "categorization_rules", "fiscal_periods",
+            "bank_reconciliations", "transactions_export", "trial_balance_export",
+            "trial_balance_worksheet_export", "adjusted_trial_balance_export",
+            "income_statement_export", "balance_sheet_export", "general_ledger_export",
+            "database_backup", "database_restore",
+        ],
         index=0,
         key="table_filter"
     )
@@ -80,7 +79,10 @@ with filter_cols[2]:
 with filter_cols[3]:
     action_filter = st.selectbox(
         "Action",
-        options=["All", "INSERT", "UPDATE", "DELETE"],
+        options=[
+            "All", "INSERT", "UPDATE", "DELETE", "REVERSE", "CLOSE",
+            "REOPEN", "EXPORT", "BACKUP", "RESTORE",
+        ],
         index=0,
         key="action_filter"
     )
@@ -120,13 +122,13 @@ else:
             "INSERT": "Created",
             "UPDATE": "Updated",
             "DELETE": "Deleted",
+            "REVERSE": "Reversed",
+            "CLOSE": "Closed",
+            "REOPEN": "Reopened",
+            "EXPORT": "Exported",
+            "BACKUP": "Backed up",
+            "RESTORE": "Restored",
         }.get(log.action, log.action.title())
-
-        action_color = {
-            "INSERT": "green",
-            "UPDATE": "orange",
-            "DELETE": "red"
-        }.get(log.action, "gray")
 
         header = f"{action_label} · {log.table_name} #{log.record_id}"
         if log.changed_at:
@@ -176,6 +178,19 @@ else:
                     else:
                         st.text("  (no values recorded)")
 
+                else:
+                    st.markdown("**Event Details:**")
+                    if log.old_values:
+                        st.markdown("Before")
+                        for key, value in log.old_values.items():
+                            st.text(f"  {key}: {value}")
+                    if log.new_values:
+                        st.markdown("After / details")
+                        for key, value in log.new_values.items():
+                            st.text(f"  {key}: {value}")
+                    if not log.old_values and not log.new_values:
+                        st.text("  (no values recorded)")
+
             # Link to view the entry if it still exists (for INSERT and UPDATE)
             if log.action != "DELETE" and log.table_name == "journal_entries":
                 st.markdown("---")
@@ -187,11 +202,12 @@ else:
     st.markdown("---")
     st.subheader("Summary")
 
-    summary_cols = st.columns(4)
+    summary_cols = st.columns(5)
 
     insert_count = sum(1 for l in logs if l.action == "INSERT")
     update_count = sum(1 for l in logs if l.action == "UPDATE")
     delete_count = sum(1 for l in logs if l.action == "DELETE")
+    event_count = len(logs) - insert_count - update_count - delete_count
 
     with summary_cols[0]:
         st.metric("Total Changes", len(logs))
@@ -204,3 +220,6 @@ else:
 
     with summary_cols[3]:
         st.metric("Deletes", delete_count)
+
+    with summary_cols[4]:
+        st.metric("Other Events", event_count)

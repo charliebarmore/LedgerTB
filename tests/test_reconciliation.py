@@ -3,6 +3,7 @@ from datetime import date
 import pytest
 
 from models.account import Account
+from models.audit_log import AuditLog
 from models.client import Client
 from models.journal_entry import JournalEntry
 from models.reconciliation import BankReconciliation
@@ -40,6 +41,16 @@ def test_asset_reconciliation_clears_gl_lines_and_completes(client_id, accounts)
     assert reconciliation.cleared_balance() == 900
     assert reconciliation.difference() == 0
     reconciliation.complete()
+
+    actions = [
+        log.action for log in AuditLog.get_history("bank_reconciliations", reconciliation.id)
+    ]
+    assert actions == ["CLOSE", "UPDATE", "INSERT"]
+    selection = next(
+        log for log in AuditLog.get_history("bank_reconciliations", reconciliation.id)
+        if log.action == "UPDATE"
+    )
+    assert selection.new_values["cleared_line_count"] == 2
 
     completed = BankReconciliation.get_by_id(reconciliation.id, client_id)
     assert completed.status == "Completed"

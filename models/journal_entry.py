@@ -78,10 +78,8 @@ class JournalEntry:
         """Save the journal entry and its lines.
 
         If ``conn`` is provided, this method participates in the caller's
-        transaction: it uses that connection and does NOT commit, close, or
-        write its own audit-log row (the caller — e.g. services.posting —
-        coordinates the shared transaction and its audit logging). When ``conn``
-        is omitted it manages its own connection exactly as before.
+        transaction: it uses that connection and does not commit or close it.
+        The audit row is always written on that same connection.
         """
         from models.audit_log import AuditLog
 
@@ -156,6 +154,22 @@ class JournalEntry:
                     'entry_type': old_row['entry_type'],
                     'aje_reference': old_row['aje_reference'] if 'aje_reference' in old_row.keys() else None
                 }
+                cursor.execute(
+                    """
+                    SELECT account_id, debit, credit, memo
+                    FROM journal_entry_lines WHERE journal_entry_id = ? ORDER BY id
+                    """,
+                    (self.id,),
+                )
+                old_values["lines"] = [
+                    {
+                        "account_id": row["account_id"],
+                        "debit": to_dollars(row["debit"]),
+                        "credit": to_dollars(row["credit"]),
+                        "memo": row["memo"],
+                    }
+                    for row in cursor.fetchall()
+                ]
 
                 cursor.execute(
                     """
@@ -198,30 +212,32 @@ class JournalEntry:
                 line.id = cursor.lastrowid
                 line.journal_entry_id = self.id
 
+            new_values = {
+                'entry_date': self.entry_date.isoformat(),
+                'description': self.description,
+                'source_reference': self.source_reference,
+                'entry_type': self.entry_type,
+                'aje_reference': self.aje_reference,
+                'total_debits': self.total_debits(),
+                'total_credits': self.total_credits(),
+                'lines': [
+                    {
+                        'account_id': line.account_id,
+                        'debit': line.debit,
+                        'credit': line.credit,
+                        'memo': line.memo,
+                    }
+                    for line in self.lines
+                ],
+            }
+            AuditLog.write(
+                cursor, self.client_id, 'journal_entries', self.id,
+                'INSERT' if is_new else 'UPDATE',
+                old_values=old_values, new_values=new_values,
+            )
+
             if owns_conn:
                 conn.commit()
-
-                # Log to audit trail. Only when this method owns the transaction;
-                # a caller that passes `conn` coordinates the shared transaction
-                # and is responsible for its own audit logging.
-                new_values = {
-                    'entry_date': self.entry_date.isoformat(),
-                    'description': self.description,
-                    'source_reference': self.source_reference,
-                    'entry_type': self.entry_type,
-                    'aje_reference': self.aje_reference,
-                    'total_debits': self.total_debits(),
-                    'total_credits': self.total_credits()
-                }
-
-                AuditLog.log_change_safe(
-                    client_id=self.client_id,
-                    table_name='journal_entries',
-                    record_id=self.id,
-                    action='INSERT' if is_new else 'UPDATE',
-                    old_values=None if is_new else old_values,
-                    new_values=new_values,
-                )
 
         except Exception as e:
             if owns_conn:
@@ -374,6 +390,22 @@ class JournalEntry:
                     'aje_reference': row['aje_reference'] if 'aje_reference' in row.keys() else None
                 }
                 client_id = row['client_id']
+                cursor.execute(
+                    """
+                    SELECT account_id, debit, credit, memo
+                    FROM journal_entry_lines WHERE journal_entry_id = ? ORDER BY id
+                    """,
+                    (entry_id,),
+                )
+                old_values["lines"] = [
+                    {
+                        "account_id": line["account_id"],
+                        "debit": to_dollars(line["debit"]),
+                        "credit": to_dollars(line["credit"]),
+                        "memo": line["memo"],
+                    }
+                    for line in cursor.fetchall()
+                ]
 
                 # Block deleting entries dated within a closed fiscal year
                 from models.fiscal_period import FiscalPeriod
@@ -407,22 +439,93 @@ class JournalEntry:
                 # import-posted entry without this would raise IntegrityError. This
                 # mirrors ON DELETE SET NULL semantics at the application layer.
                 cursor.execute(
+                    "SELECT * FROM imported_transactions WHERE journal_entry_id = ?",
+                    (entry_id,),
+                )
+                linked_imports = cursor.fetchall()
+                cursor.execute(
                     "UPDATE imported_transactions SET journal_entry_id = NULL "
                     "WHERE journal_entry_id = ?",
                     (entry_id,)
                 )
 
                 cursor.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
-                conn.commit()
-
-                # Log to audit trail (best-effort; logged if it fails)
-                AuditLog.log_change_safe(
-                    client_id=client_id,
-                    table_name='journal_entries',
-                    record_id=entry_id,
-                    action='DELETE',
-                    old_values=old_values
+                for imported in linked_imports:
+                    AuditLog.write(
+                        cursor, client_id, "imported_transactions", imported["id"], "UPDATE",
+                        old_values={"journal_entry_id": entry_id, "status": imported["status"]},
+                        new_values={"journal_entry_id": None, "status": imported["status"]},
+                    )
+                AuditLog.write(
+                    cursor, client_id, 'journal_entries', entry_id, 'DELETE',
+                    old_values=old_values,
                 )
+                conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def reverse(entry_id: int, client_id: int, reversal_date: date) -> 'JournalEntry':
+        """Post an equal-and-opposite entry without altering accounting history."""
+        from models.audit_log import AuditLog
+
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM journal_entries WHERE id = ? AND client_id = ?",
+                (entry_id, client_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError("Journal entry not found for the selected client.")
+            reference = f"Reversal of JE #{entry_id}"
+            cursor.execute(
+                "SELECT id FROM journal_entries WHERE client_id = ? AND source_reference = ? LIMIT 1",
+                (client_id, reference),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                raise ValueError(f"This entry was already reversed by JE #{existing['id']}.")
+            cursor.execute(
+                """
+                SELECT account_id, debit, credit, memo
+                FROM journal_entry_lines WHERE journal_entry_id = ? ORDER BY id
+                """,
+                (entry_id,),
+            )
+            source_lines = cursor.fetchall()
+            reversal = JournalEntry(
+                client_id=client_id,
+                entry_date=reversal_date,
+                description=f"Reversal: {row['description'] or f'Journal Entry #{entry_id}'}"[:200],
+                source_reference=reference,
+                entry_type="Regular",
+                lines=[
+                    JournalEntryLine(
+                        account_id=line["account_id"],
+                        debit=to_dollars(line["credit"]),
+                        credit=to_dollars(line["debit"]),
+                        memo=f"Reversal of JE #{entry_id}",
+                    )
+                    for line in source_lines
+                ],
+            )
+            reversal.save(conn=conn)
+            AuditLog.write(
+                cursor, client_id, "journal_entries", entry_id, "REVERSE",
+                old_values={"reversed": False},
+                new_values={
+                    "reversed": True,
+                    "reversal_entry_id": reversal.id,
+                    "reversal_date": reversal_date.isoformat(),
+                },
+            )
+            conn.commit()
+            return reversal
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 

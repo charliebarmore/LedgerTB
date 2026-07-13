@@ -112,7 +112,7 @@ class Account:
                 self.id = cursor.lastrowid
             else:
                 cursor.execute(
-                    "SELECT account_number, name, type, subtype, is_active "
+                    "SELECT account_number, name, type, subtype, description, is_active "
                     "FROM accounts WHERE id = ? AND client_id = ?",
                     (self.id, self.client_id),
                 )
@@ -124,6 +124,7 @@ class Account:
                     'name': prev['name'],
                     'type': prev['type'],
                     'subtype': prev['subtype'],
+                    'description': prev['description'],
                     'is_active': bool(prev['is_active']),
                 }
                 cursor.execute(
@@ -136,21 +137,19 @@ class Account:
                      self.description, int(self.is_active), self.id, self.client_id)
                 )
 
-        new_values = {
-            'account_number': self.account_number,
-            'name': self.name,
-            'type': self.type,
-            'subtype': self.subtype,
-            'is_active': self.is_active,
-        }
-        AuditLog.log_change_safe(
-            client_id=self.client_id,
-            table_name='accounts',
-            record_id=self.id,
-            action='INSERT' if is_new else 'UPDATE',
-            old_values=old_values,
-            new_values=new_values,
-        )
+            new_values = {
+                'account_number': self.account_number,
+                'name': self.name,
+                'type': self.type,
+                'subtype': self.subtype,
+                'description': self.description,
+                'is_active': self.is_active,
+            }
+            AuditLog.write(
+                cursor, self.client_id, 'accounts', self.id,
+                'INSERT' if is_new else 'UPDATE',
+                old_values=old_values, new_values=new_values,
+            )
         return self.id
 
     def deactivate(self):
@@ -245,19 +244,17 @@ class Account:
                 "account_number": row["account_number"],
                 "name": row["name"],
                 "type": row["type"],
+                "subtype": row["subtype"],
+                "description": row["description"],
             }
             acct_client_id = row["client_id"]
 
             cursor.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
-            conn.commit()
-
-            AuditLog.log_change_safe(
-                client_id=acct_client_id,
-                table_name="accounts",
-                record_id=account_id,
-                action="DELETE",
+            AuditLog.write(
+                cursor, acct_client_id, "accounts", account_id, "DELETE",
                 old_values=old_values,
             )
+            conn.commit()
         except Exception:
             conn.rollback()
             raise

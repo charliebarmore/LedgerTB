@@ -1,4 +1,3 @@
-import sqlite3
 import re
 from typing import Optional, List, Dict
 from database.connection import get_connection, get_cursor
@@ -28,11 +27,18 @@ class PatternLearner:
         if owns_conn:
             conn = get_connection()
         cursor = conn.cursor()
+        from models.audit_log import AuditLog
 
         try:
+            cursor.execute(
+                "SELECT id FROM accounts WHERE id = ? AND client_id = ?",
+                (account_id, client_id),
+            )
+            if not cursor.fetchone():
+                raise ValueError("Categorization account does not belong to the selected client.")
             # Check if this pattern already exists for this client
             cursor.execute(
-                "SELECT id, times_used FROM categorization_rules WHERE client_id = ? AND pattern = ?",
+                "SELECT id, default_account_id, times_used FROM categorization_rules WHERE client_id = ? AND pattern = ?",
                 (client_id, normalized)
             )
             existing = cursor.fetchone()
@@ -47,6 +53,20 @@ class PatternLearner:
                     """,
                     (account_id, existing['id'])
                 )
+                AuditLog.write(
+                    cursor, client_id, "categorization_rules", existing["id"], "UPDATE",
+                    old_values={
+                        "pattern": normalized,
+                        "default_account_id": existing["default_account_id"],
+                        "times_used": existing["times_used"],
+                    },
+                    new_values={
+                        "pattern": normalized,
+                        "default_account_id": account_id,
+                        "times_used": existing["times_used"] + 1,
+                        "source": "transaction_learning",
+                    },
+                )
             else:
                 # Create new rule
                 cursor.execute(
@@ -55,6 +75,15 @@ class PatternLearner:
                     VALUES (?, ?, ?, 1.0, 1)
                     """,
                     (client_id, normalized, account_id)
+                )
+                rule_id = cursor.lastrowid
+                AuditLog.write(
+                    cursor, client_id, "categorization_rules", rule_id, "INSERT",
+                    new_values={
+                        "pattern": normalized, "default_account_id": account_id,
+                        "confidence": 1.0, "times_used": 1,
+                        "source": "transaction_learning",
+                    },
                 )
 
             if owns_conn:
@@ -186,16 +215,54 @@ class PatternLearner:
             return rules
 
     @staticmethod
-    def delete_rule(rule_id: int):
+    def delete_rule(rule_id: int, client_id: int):
         """Delete a categorization rule."""
-        with get_cursor(commit=True) as cursor:
-            cursor.execute("DELETE FROM categorization_rules WHERE id = ?", (rule_id,))
-
-    @staticmethod
-    def update_rule(rule_id: int, account_id: int):
-        """Update the account for a categorization rule."""
+        from models.audit_log import AuditLog
         with get_cursor(commit=True) as cursor:
             cursor.execute(
-                "UPDATE categorization_rules SET default_account_id = ? WHERE id = ?",
-                (account_id, rule_id)
+                "SELECT * FROM categorization_rules WHERE id = ? AND client_id = ?",
+                (rule_id, client_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError("Categorization rule not found for the selected client.")
+            cursor.execute(
+                "DELETE FROM categorization_rules WHERE id = ? AND client_id = ?",
+                (rule_id, client_id),
+            )
+            AuditLog.write(
+                cursor, client_id, "categorization_rules", rule_id, "DELETE",
+                old_values={
+                    "pattern": row["pattern"],
+                    "default_account_id": row["default_account_id"],
+                    "confidence": row["confidence"], "times_used": row["times_used"],
+                },
+            )
+
+    @staticmethod
+    def update_rule(rule_id: int, account_id: int, client_id: int):
+        """Update the account for a categorization rule."""
+        from models.audit_log import AuditLog
+        with get_cursor(commit=True) as cursor:
+            cursor.execute(
+                "SELECT id FROM accounts WHERE id = ? AND client_id = ?",
+                (account_id, client_id),
+            )
+            if not cursor.fetchone():
+                raise ValueError("Categorization account does not belong to the selected client.")
+            cursor.execute(
+                "SELECT * FROM categorization_rules WHERE id = ? AND client_id = ?",
+                (rule_id, client_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError("Categorization rule not found for the selected client.")
+            cursor.execute(
+                "UPDATE categorization_rules SET default_account_id = ? WHERE id = ? AND client_id = ?",
+                (account_id, rule_id, client_id)
+            )
+            AuditLog.write(
+                cursor, client_id, "categorization_rules", rule_id, "UPDATE",
+                old_values={"default_account_id": row["default_account_id"]},
+                new_values={"default_account_id": account_id},
             )

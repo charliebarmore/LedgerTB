@@ -6,6 +6,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import APP_VERSION, DATABASE_PATH
 from database import init_database
+from models.audit_log import AuditLog
+from models.client import Client
 from services.backups import backup_health, create_backup, list_backups, restore_backup
 from services.production_readiness import get_readiness_checks, is_production_ready
 from utils.client_selector import render_client_selector
@@ -13,7 +15,21 @@ from utils import icons
 
 init_database()
 st.set_page_config(page_title="Data Safety", page_icon=icons.SECURITY, layout="wide")
-render_client_selector()
+client_id = render_client_selector()
+
+
+def audit_safety_event(action, event_name, details):
+    """Record a filesystem operation against a visible client audit stream."""
+    audit_client = Client.get_by_id(client_id) if client_id else None
+    if not audit_client:
+        audit_client = Client.get_first()
+    if not audit_client:
+        st.warning("Operation succeeded, but no client exists to receive its audit event.")
+        return
+    try:
+        AuditLog.log_event(audit_client.id, action, event_name, details)
+    except Exception as exc:
+        st.warning(f"Operation succeeded, but its audit event could not be recorded: {exc}")
 
 st.title("Data Safety")
 st.caption(f"ProBooks {APP_VERSION} · Database: {DATABASE_PATH}")
@@ -43,6 +59,11 @@ else:
 if st.button("Create verified backup", type="primary"):
     try:
         record = create_backup()
+        audit_safety_event("BACKUP", "database_backup", {
+            "reason": "manual", "backup_file": record.database_path.name,
+            "sha256": record.sha256, "size_bytes": record.size_bytes,
+            "integrity_verified": record.integrity_ok,
+        })
         st.success(f"Backup created: {record.database_path.name}")
         st.rerun()
     except Exception as exc:
@@ -63,6 +84,13 @@ if backups:
     if st.button("Restore selected backup", disabled=confirm != "RESTORE"):
         try:
             safety_copy = restore_backup(selected)
+            # The restored database may contain a different client set, so the
+            # helper resolves the audit client again after replacement.
+            audit_safety_event("RESTORE", "database_restore", {
+                "restored_from": selected.name,
+                "pre_restore_backup": safety_copy.name,
+                "integrity_verified": True,
+            })
             st.success(f"Restore complete. Pre-restore safety copy: {safety_copy.name}")
             st.rerun()
         except Exception as exc:
