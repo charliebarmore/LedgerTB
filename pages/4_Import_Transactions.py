@@ -486,11 +486,11 @@ if selected_tab == "Upload CSV":
 
                 # Show first few and last few rows for confirmation
                 st.caption("**First 3 rows:**")
-                st.dataframe(summary_df.head(3), use_container_width=True, hide_index=True)
+                st.dataframe(summary_df.head(3), width="stretch", hide_index=True)
 
                 if total_rows > 6:
                     st.caption("**Last 3 rows:**")
-                    st.dataframe(summary_df.tail(3), use_container_width=True, hide_index=True)
+                    st.dataframe(summary_df.tail(3), width="stretch", hide_index=True)
 
             except Exception as e:
                 st.error(f"Error reading CSV: {e}")
@@ -790,7 +790,7 @@ elif selected_tab == "Upload Statement":
                 edited_frame = st.data_editor(
                     parsed_frame,
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                     num_rows="dynamic",
                     column_config={
                         "Date": st.column_config.DateColumn("Date", required=True),
@@ -892,7 +892,7 @@ elif selected_tab == "Review & Categorize":
 
         col1, col2, col3 = st.columns([1, 1, 2])
         with col1:
-            if st.button("Import More Transactions", type="primary", use_container_width=True):
+            if st.button("Import More Transactions", type="primary", width="stretch"):
                 st.session_state.import_complete = False
                 st.session_state.import_complete_msg = None
                 st.session_state.csv_content = None
@@ -900,7 +900,7 @@ elif selected_tab == "Review & Categorize":
                 st.session_state.import_active_tab = "Upload CSV"
                 st.rerun()
         with col2:
-            if st.button("Done - Go to Dashboard", type="secondary", use_container_width=True):
+            if st.button("Done - Go to Dashboard", type="secondary", width="stretch"):
                 st.session_state.import_complete = False
                 st.session_state.import_complete_msg = None
                 st.switch_page("pages/7_Dashboard.py")

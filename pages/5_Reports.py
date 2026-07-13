@@ -97,7 +97,7 @@ if selected_report == "Trial Balance":
             with cols[0]:
                 st.text(row.account_number)
             with cols[1]:
-                # Make account name clickable. No use_container_width here --
+                # Make account name clickable. No width="stretch" here --
                 # a full-width bordered button reads as a text input; a
                 # content-width one reads as a link.
                 account_id = account_id_lookup.get(row.account_number)
@@ -463,7 +463,7 @@ elif selected_report == "General Ledger":
                         st.text("")  # Beginning balance has no entry
                     else:
                         # Make entry # clickable to edit (use idx for unique key).
-                        # No use_container_width, for the same reason as the other
+                        # No width="stretch", for the same reason as the other
                         # drill-down links: content-width reads as a compact tag,
                         # full-width reads as an empty input field.
                         if st.button(f"#{e.entry_id}", key=f"gl_je_{idx}"):

@@ -226,7 +226,7 @@ with tab3:
                 "Subtype": a["subtype"] or "", "Description": a["description"] or "",
                 "Status": "exists — skip" if a["number"] in existing else "new",
             } for a in parsed])
-            st.dataframe(preview, use_container_width=True, hide_index=True)
+            st.dataframe(preview, width="stretch", hide_index=True)
 
             new_count = sum(1 for a in parsed if a["number"] not in existing)
             skip_count = len(parsed) - new_count

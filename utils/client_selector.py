@@ -54,11 +54,9 @@ section[data-testid="stSidebar"] [data-testid="stPageLink"] p {
     padding-left: 0 !important;
 }
 
-/* Sidebar buttons ("Add client", Quick Reports) styled like the st.page_link
-   nav entries around them: flat, left-aligned, subtle hover — not boxed. */
-section[data-testid="stSidebar"] .stButton button {
-    background: transparent;
-    border: none;
+/* Sidebar tertiary buttons ("Add client", Quick Reports) styled like the
+   st.page_link nav entries around them: left-aligned, full row, subtle hover. */
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-tertiary"] {
     justify-content: flex-start;
     text-align: left;
     padding: 0.25rem 0.5rem;
@@ -66,12 +64,12 @@ section[data-testid="stSidebar"] .stButton button {
     font-weight: 400;
     color: inherit;
 }
-section[data-testid="stSidebar"] .stButton button:hover {
-    background: rgba(151, 166, 195, 0.15);
-    border: none;
-    color: inherit;
+/* The button's inner flex wrapper centers its content; left-align it too. */
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-tertiary"] > div {
+    justify-content: flex-start;
 }
-section[data-testid="stSidebar"] .stButton button:focus:not(:active) {
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-tertiary"]:hover {
+    background: rgba(151, 166, 195, 0.15);
     color: inherit;
 }
 </style>
@@ -103,7 +101,7 @@ def render_client_selector() -> Optional[int]:
     if not clients:
         st.sidebar.warning("No clients yet.")
         if st.sidebar.button(f"{icons.ADD_CLIENT} Create your first client",
-                             key="nav_create_first_client", use_container_width=True):
+                             key="nav_create_first_client", type="tertiary", width="stretch"):
             st.session_state['_clients_view_pending'] = "Add Client"
             st.switch_page("pages/0_Clients.py")
         return None
@@ -135,7 +133,7 @@ def render_client_selector() -> Optional[int]:
     # than a page_link so it can land on the Add Client view directly — a
     # page_link can only open the page's default (View Clients) view.
     if st.sidebar.button(f"{icons.ADD_CLIENT} Add client",
-                         key="nav_add_client", use_container_width=True):
+                         key="nav_add_client", type="tertiary", width="stretch"):
         st.session_state['_clients_view_pending'] = "Add Client"
         st.switch_page("pages/0_Clients.py")
 
@@ -165,16 +163,16 @@ def render_client_selector() -> Optional[int]:
 
         # Quick report links (collapsible)
         with st.sidebar.expander("Quick Reports"):
-            if st.button("Trial Balance", key="qr_tb", use_container_width=True):
+            if st.button("Trial Balance", key="qr_tb", type="tertiary", width="stretch"):
                 st.session_state.active_report = "Trial Balance"
                 st.switch_page("pages/5_Reports.py")
-            if st.button("Income Statement", key="qr_is", use_container_width=True):
+            if st.button("Income Statement", key="qr_is", type="tertiary", width="stretch"):
                 st.session_state.active_report = "Income Statement"
                 st.switch_page("pages/5_Reports.py")
-            if st.button("Balance Sheet", key="qr_bs", use_container_width=True):
+            if st.button("Balance Sheet", key="qr_bs", type="tertiary", width="stretch"):
                 st.session_state.active_report = "Balance Sheet"
                 st.switch_page("pages/5_Reports.py")
-            if st.button("General Ledger", key="qr_gl", use_container_width=True):
+            if st.button("General Ledger", key="qr_gl", type="tertiary", width="stretch"):
                 st.session_state.active_report = "General Ledger"
                 st.switch_page("pages/5_Reports.py")
 
