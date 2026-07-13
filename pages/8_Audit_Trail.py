@@ -97,23 +97,62 @@ with filter_cols[4]:
 # Apply filters
 start_datetime = datetime.combine(start_date, datetime.min.time())
 end_datetime = datetime.combine(end_date, datetime.max.time())
+table_param = table_filter if table_filter != "All" else None
+action_param = action_filter if action_filter != "All" else None
+search_param = search_term if search_term else None
+
+filter_signature = (start_date, end_date, table_param, action_param, search_param)
+if st.session_state.get("audit_filter_signature") != filter_signature:
+    st.session_state.audit_filter_signature = filter_signature
+    st.session_state.audit_page = 1
+
+page_size = 50
+summary = AuditLog.get_filtered_counts(
+    client_id=client_id,
+    start_date=start_datetime,
+    end_date=end_datetime,
+    table_name=table_param,
+    action=action_param,
+    search_term=search_param,
+)
+page_count = max(1, (summary["total"] + page_size - 1) // page_size)
+current_page = min(max(1, st.session_state.get("audit_page", 1)), page_count)
+st.session_state.audit_page = current_page
 
 logs = AuditLog.get_all(
     client_id=client_id,
     start_date=start_datetime,
     end_date=end_datetime,
-    table_name=table_filter if table_filter != "All" else None,
-    action=action_filter if action_filter != "All" else None,
-    search_term=search_term if search_term else None,
-    limit=500
+    table_name=table_param,
+    action=action_param,
+    search_term=search_param,
+    limit=page_size,
+    offset=(current_page - 1) * page_size,
 )
 
 st.markdown("---")
 
+nav_left, nav_status, nav_right = st.columns([1, 2, 1])
+with nav_left:
+    if st.button("Previous", disabled=current_page <= 1, key="audit_previous"):
+        st.session_state.audit_page = current_page - 1
+        st.rerun()
+with nav_status:
+    first_row = (current_page - 1) * page_size + 1 if summary["total"] else 0
+    last_row = min(current_page * page_size, summary["total"])
+    st.caption(
+        f"Page {current_page} of {page_count} · showing {first_row}–{last_row} "
+        f"of {summary['total']}"
+    )
+with nav_right:
+    if st.button("Next", disabled=current_page >= page_count, key="audit_next"):
+        st.session_state.audit_page = current_page + 1
+        st.rerun()
+
 if not logs:
     st.info("No audit log entries found for the selected filters.")
 else:
-    st.write(f"Showing {len(logs)} audit log entries")
+    st.write(f"Showing {len(logs)} audit log entries on this page")
 
     # Display logs
     for log in logs:
@@ -204,22 +243,17 @@ else:
 
     summary_cols = st.columns(5)
 
-    insert_count = sum(1 for l in logs if l.action == "INSERT")
-    update_count = sum(1 for l in logs if l.action == "UPDATE")
-    delete_count = sum(1 for l in logs if l.action == "DELETE")
-    event_count = len(logs) - insert_count - update_count - delete_count
-
     with summary_cols[0]:
-        st.metric("Total Changes", len(logs))
+        st.metric("Total Changes", summary["total"])
 
     with summary_cols[1]:
-        st.metric("Inserts", insert_count)
+        st.metric("Inserts", summary["inserts"])
 
     with summary_cols[2]:
-        st.metric("Updates", update_count)
+        st.metric("Updates", summary["updates"])
 
     with summary_cols[3]:
-        st.metric("Deletes", delete_count)
+        st.metric("Deletes", summary["deletes"])
 
     with summary_cols[4]:
-        st.metric("Other Events", event_count)
+        st.metric("Other Events", summary["events"])

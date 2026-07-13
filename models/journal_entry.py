@@ -325,7 +325,8 @@ class JournalEntry:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         entry_type: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
+        offset: int = 0,
     ) -> List['JournalEntry']:
         """Get journal entries for a client with optional filters."""
         with get_cursor() as cursor:
@@ -344,19 +345,85 @@ class JournalEntry:
                 query += " AND entry_type = ?"
                 params.append(entry_type)
 
-            query += " ORDER BY entry_date DESC, id DESC LIMIT ?"
-            params.append(limit)
+            query += " ORDER BY entry_date DESC, id DESC LIMIT ? OFFSET ?"
+            params.extend([max(1, int(limit)), max(0, int(offset))])
 
             cursor.execute(query, params)
             rows = cursor.fetchall()
 
-            entries = []
-            for row in rows:
-                entry = JournalEntry._entry_from_row(row)
-                cursor.execute(JournalEntry._LINES_SQL, (entry.id,))
-                entry.lines = [JournalEntry._line_from_row(r) for r in cursor.fetchall()]
-                entries.append(entry)
+            entries = [JournalEntry._entry_from_row(row) for row in rows]
+            if entries:
+                entry_by_id = {entry.id: entry for entry in entries}
+                placeholders = ", ".join("?" for _ in entries)
+                cursor.execute(
+                    f"""
+                    SELECT jel.*, a.name as account_name, a.account_number
+                    FROM journal_entry_lines jel
+                    JOIN accounts a ON jel.account_id = a.id
+                    WHERE jel.journal_entry_id IN ({placeholders})
+                    ORDER BY jel.journal_entry_id, jel.id
+                    """,
+                    list(entry_by_id),
+                )
+                for line_row in cursor.fetchall():
+                    entry_by_id[line_row["journal_entry_id"]].lines.append(
+                        JournalEntry._line_from_row(line_row)
+                    )
         return entries
+
+    @staticmethod
+    def get_filtered_summary(
+        client_id: int,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+        entry_type: Optional[str] = None,
+    ) -> dict:
+        """Return SQL-backed counts and totals for all matching entries."""
+        clauses = ["client_id = ?"]
+        params = [client_id]
+        if start_date:
+            clauses.append("entry_date >= ?")
+            params.append(start_date.isoformat())
+        if end_date:
+            clauses.append("entry_date <= ?")
+            params.append(end_date.isoformat())
+        if entry_type:
+            clauses.append("entry_type = ?")
+            params.append(entry_type)
+
+        with get_cursor() as cursor:
+            cursor.execute(
+                """
+                WITH filtered AS (
+                    SELECT id, entry_type FROM journal_entries
+                    WHERE
+                """ + " AND ".join(clauses) + """
+                ), line_totals AS (
+                    SELECT journal_entry_id, SUM(debit) debits, SUM(credit) credits
+                    FROM journal_entry_lines
+                    WHERE journal_entry_id IN (SELECT id FROM filtered)
+                    GROUP BY journal_entry_id
+                )
+                SELECT COUNT(f.id) total_count,
+                       COALESCE(SUM(lt.debits), 0) total_debits,
+                       COALESCE(SUM(lt.credits), 0) total_credits,
+                       SUM(CASE WHEN f.entry_type = 'Regular' THEN 1 ELSE 0 END) regular_count,
+                       SUM(CASE WHEN f.entry_type = 'Adjusting' THEN 1 ELSE 0 END) adjusting_count,
+                       SUM(CASE WHEN f.entry_type = 'Beginning Balance' THEN 1 ELSE 0 END) beginning_count
+                FROM filtered f
+                LEFT JOIN line_totals lt ON lt.journal_entry_id = f.id
+                """,
+                params,
+            )
+            row = cursor.fetchone()
+        return {
+            "total_count": int(row["total_count"] or 0),
+            "total_debits": to_dollars(row["total_debits"] or 0),
+            "total_credits": to_dollars(row["total_credits"] or 0),
+            "regular_count": int(row["regular_count"] or 0),
+            "adjusting_count": int(row["adjusting_count"] or 0),
+            "beginning_count": int(row["beginning_count"] or 0),
+        }
 
     @staticmethod
     def delete(entry_id: int, client_id: Optional[int] = None):
