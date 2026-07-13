@@ -6,6 +6,9 @@ primaryColor = "#1f3a5f"            # navy — buttons, accents, active nav
 backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#eef2f7" # sidebar / cards
 textColor = "#1a2330"
+linkColor = "#1f3a5f"
+borderColor = "#d8dee8"             # inputs, dataframes, dividers
+baseRadius = "0.5rem"
 font = "sans serif"
 
 [client]

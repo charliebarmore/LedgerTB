@@ -192,14 +192,17 @@ with col1:
         st.info("No journal entries yet. Create one to get started.")
     else:
         for entry in recent_entries:
-            with st.container():
-                col_a, col_b = st.columns([3, 1])
-                with col_a:
-                    st.markdown(f"**#{entry.id}** - {entry.entry_date}")
-                    st.caption(entry.description or "No description")
-                with col_b:
-                    st.text(f"${entry.total_debits():,.2f}")
-                st.divider()
+            col_a, col_b = st.columns([3, 1], vertical_alignment="center")
+            with col_a:
+                st.markdown(f"**#{entry.id}** · {entry.entry_date}  \n"
+                            f"{entry.description or 'No description'}")
+            with col_b:
+                # Right-aligned so amounts line up as a column. Inside an HTML
+                # block markdown skips LaTeX, so the $ needs no escaping.
+                st.markdown(
+                    f"<div style='text-align: right'>${entry.total_debits():,.2f}</div>",
+                    unsafe_allow_html=True,
+                )
 
     st.page_link("pages/2_Journal_Entries.py", label="View all entries", icon=icons.JOURNAL_ENTRIES)
 

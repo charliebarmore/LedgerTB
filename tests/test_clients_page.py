@@ -18,8 +18,9 @@ def _run_clients_page(monkeypatch, view="Add Client"):
     from streamlit.testing.v1 import AppTest
     at = AppTest.from_file("pages/0_Clients.py", default_timeout=30)
     # The page defaults to the View Clients list; only the selected view
-    # renders (unlike the old st.tabs, which rendered both).
-    at.session_state["_clients_view_pending"] = view
+    # renders (unlike the old st.tabs, which rendered both). The switcher
+    # follows the plain session var (see utils/ui.view_switcher).
+    at.session_state["clients_view"] = view
     at.run()
     assert not at.exception
     return at
@@ -57,11 +58,11 @@ def test_add_client_industry_description_tracks_selection(db, monkeypatch):
 def test_view_switcher_deep_link_and_default(db, monkeypatch):
     # Default view is the client list -- the add form is not rendered.
     at = _run_clients_page(monkeypatch, view="View Clients")
-    assert at.radio(key="clients_view").value == "View Clients"
+    assert at.radio(key="_clients_view_widget").value == "View Clients"
     assert not any(v.startswith("**S-Corporation**") for v in _infos(at))
 
-    # A queued view (what the sidebar "Add client" button sets before
+    # A programmatic view (what the sidebar "Add client" button sets before
     # switch_page) must land directly on the add form.
     at = _run_clients_page(monkeypatch, view="Add Client")
-    assert at.radio(key="clients_view").value == "Add Client"
+    assert at.radio(key="_clients_view_widget").value == "Add Client"
     assert any(v.startswith("**S-Corporation**") for v in _infos(at))

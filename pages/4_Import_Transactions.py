@@ -21,6 +21,7 @@ from services.document_import import (
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils.ui import view_switcher
 from utils import icons
 from utils.import_review import ensure_row_ids, row_key, classify_review_rows
 
@@ -102,16 +103,11 @@ SIGN_CONVENTIONS = {
 if 'import_active_tab' not in st.session_state:
     st.session_state.import_active_tab = "Upload CSV"
 
-# Navigation using radio buttons (allows programmatic control)
+# Navigation (segmented tabs; programmatically controllable via
+# st.session_state.import_active_tab, e.g. jumping to Review after an upload).
 tab_options = ["Upload CSV", "Upload Statement", "Review & Categorize", "Learned Patterns"]
-selected_tab = st.radio(
-    "Navigation",
-    options=tab_options,
-    index=tab_options.index(st.session_state.import_active_tab),
-    horizontal=True,
-    label_visibility="collapsed"
-)
-st.session_state.import_active_tab = selected_tab
+selected_tab = view_switcher(tab_options, key="import_active_tab",
+                             label="Navigation")
 
 st.divider()
 

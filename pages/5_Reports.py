@@ -13,6 +13,7 @@ from models.audit_log import AuditLog
 from models.reports import ReportGenerator
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils.ui import view_switcher
 from utils import icons
 from utils.export import sanitize_df
 from utils.fiscal_dates import fiscal_year_bounds
@@ -43,15 +44,10 @@ if 'active_report' not in st.session_state:
 
 report_options = ["Trial Balance", "Income Statement", "Balance Sheet", "General Ledger"]
 
-# Report selector using radio buttons (allows programmatic control from sidebar)
-selected_report = st.radio(
-    "Select Report",
-    options=report_options,
-    index=report_options.index(st.session_state.active_report),
-    horizontal=True,
-    label_visibility="collapsed"
-)
-st.session_state.active_report = selected_report
+# Report selector (segmented tabs; programmatically controllable via
+# st.session_state.active_report from the sidebar quick links and GL drills).
+selected_report = view_switcher(report_options, key="active_report",
+                                label="Select Report")
 
 st.divider()
 

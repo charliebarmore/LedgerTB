@@ -76,8 +76,15 @@ section[data-testid="stSidebar"] button[data-testid="stBaseButton-tertiary"]:hov
 """
 
 
+_ASSETS_DIR = Path(__file__).parent.parent / "assets"
+
+
 def apply_sidebar_style():
-    """Inject the narrow-sidebar CSS. Safe to call on every page."""
+    """Inject the narrow-sidebar CSS and the app logo. Safe to call on every page."""
+    wordmark = _ASSETS_DIR / "probooks-wordmark.png"
+    if wordmark.exists():
+        st.logo(str(wordmark), size="large",
+                icon_image=str(_ASSETS_DIR / "probooks-mark.png"))
     st.markdown(_SIDEBAR_CSS, unsafe_allow_html=True)
 
 
@@ -102,7 +109,7 @@ def render_client_selector() -> Optional[int]:
         st.sidebar.warning("No clients yet.")
         if st.sidebar.button(f"{icons.ADD_CLIENT} Create your first client",
                              key="nav_create_first_client", type="tertiary", width="stretch"):
-            st.session_state['_clients_view_pending'] = "Add Client"
+            st.session_state['clients_view'] = "Add Client"
             st.switch_page("pages/0_Clients.py")
         return None
 
@@ -134,7 +141,7 @@ def render_client_selector() -> Optional[int]:
     # page_link can only open the page's default (View Clients) view.
     if st.sidebar.button(f"{icons.ADD_CLIENT} Add client",
                          key="nav_add_client", type="tertiary", width="stretch"):
-        st.session_state['_clients_view_pending'] = "Add Client"
+        st.session_state['clients_view'] = "Add Client"
         st.switch_page("pages/0_Clients.py")
 
     # Client sub-navigation - CPA-focused workflow
