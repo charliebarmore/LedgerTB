@@ -18,6 +18,14 @@ class ImportedTransaction:
     suggested_account_id: Optional[int] = None
     status: str = "Pending"  # Pending, Categorized, Posted
     journal_entry_id: Optional[int] = None
+    source_id: Optional[str] = None
+    source_filename: Optional[str] = None
+    source_row_number: Optional[int] = None
+    row_fingerprint: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    duplicate_override: bool = False
+    duplicate_override_reason: Optional[str] = None
+    duplicate_of_id: Optional[int] = None
 
     # Display fields (not stored)
     bank_account_name: Optional[str] = None
@@ -48,8 +56,10 @@ class ImportedTransaction:
                     """
                     INSERT INTO imported_transactions
                     (client_id, import_batch, transaction_date, description, amount, bank_account_id,
-                     suggested_account_id, status, journal_entry_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     suggested_account_id, status, journal_entry_id, source_id, source_filename,
+                     source_row_number, row_fingerprint, idempotency_key, duplicate_override,
+                     duplicate_override_reason, duplicate_of_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         self.client_id,
@@ -60,7 +70,15 @@ class ImportedTransaction:
                         self.bank_account_id,
                         self.suggested_account_id,
                         self.status,
-                        self.journal_entry_id
+                        self.journal_entry_id,
+                        self.source_id,
+                        self.source_filename,
+                        self.source_row_number,
+                        self.row_fingerprint,
+                        self.idempotency_key,
+                        int(self.duplicate_override),
+                        self.duplicate_override_reason,
+                        self.duplicate_of_id,
                     )
                 )
                 self.id = cursor.lastrowid
@@ -81,12 +99,23 @@ class ImportedTransaction:
                     "suggested_account_id": old["suggested_account_id"],
                     "status": old["status"],
                     "journal_entry_id": old["journal_entry_id"],
+                    "source_id": old["source_id"],
+                    "source_filename": old["source_filename"],
+                    "source_row_number": old["source_row_number"],
+                    "row_fingerprint": old["row_fingerprint"],
+                    "idempotency_key": old["idempotency_key"],
+                    "duplicate_override": bool(old["duplicate_override"]),
+                    "duplicate_override_reason": old["duplicate_override_reason"],
+                    "duplicate_of_id": old["duplicate_of_id"],
                 }
                 cursor.execute(
                     """
                     UPDATE imported_transactions
                     SET import_batch = ?, transaction_date = ?, description = ?, amount = ?,
-                        bank_account_id = ?, suggested_account_id = ?, status = ?, journal_entry_id = ?
+                        bank_account_id = ?, suggested_account_id = ?, status = ?, journal_entry_id = ?,
+                        source_id = ?, source_filename = ?, source_row_number = ?, row_fingerprint = ?,
+                        idempotency_key = ?, duplicate_override = ?, duplicate_override_reason = ?,
+                        duplicate_of_id = ?
                     WHERE id = ? AND client_id = ?
                     """,
                     (
@@ -98,6 +127,14 @@ class ImportedTransaction:
                         self.suggested_account_id,
                         self.status,
                         self.journal_entry_id,
+                        self.source_id,
+                        self.source_filename,
+                        self.source_row_number,
+                        self.row_fingerprint,
+                        self.idempotency_key,
+                        int(self.duplicate_override),
+                        self.duplicate_override_reason,
+                        self.duplicate_of_id,
                         self.id, self.client_id
                     )
                 )
@@ -111,6 +148,14 @@ class ImportedTransaction:
                 "suggested_account_id": self.suggested_account_id,
                 "status": self.status,
                 "journal_entry_id": self.journal_entry_id,
+                "source_id": self.source_id,
+                "source_filename": self.source_filename,
+                "source_row_number": self.source_row_number,
+                "row_fingerprint": self.row_fingerprint,
+                "idempotency_key": self.idempotency_key,
+                "duplicate_override": self.duplicate_override,
+                "duplicate_override_reason": self.duplicate_override_reason,
+                "duplicate_of_id": self.duplicate_of_id,
             }
             AuditLog.write(
                 cursor, self.client_id, "imported_transactions", self.id,
@@ -160,6 +205,14 @@ class ImportedTransaction:
             suggested_account_id=row['suggested_account_id'],
             status=row['status'],
             journal_entry_id=row['journal_entry_id'],
+            source_id=row['source_id'],
+            source_filename=row['source_filename'],
+            source_row_number=row['source_row_number'],
+            row_fingerprint=row['row_fingerprint'],
+            idempotency_key=row['idempotency_key'],
+            duplicate_override=bool(row['duplicate_override']),
+            duplicate_override_reason=row['duplicate_override_reason'],
+            duplicate_of_id=row['duplicate_of_id'],
             bank_account_name=row['bank_account_name'],
             suggested_account_name=row['suggested_account_name']
         ) for row in rows]
@@ -185,8 +238,10 @@ class ImportedTransaction:
                     """
                     INSERT INTO imported_transactions
                     (client_id, import_batch, transaction_date, description, amount, bank_account_id,
-                     suggested_account_id, status, journal_entry_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     suggested_account_id, status, journal_entry_id, source_id, source_filename,
+                     source_row_number, row_fingerprint, idempotency_key, duplicate_override,
+                     duplicate_override_reason, duplicate_of_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         transaction.client_id, transaction.import_batch,
@@ -194,6 +249,10 @@ class ImportedTransaction:
                         transaction.description, to_cents(transaction.amount),
                         transaction.bank_account_id, transaction.suggested_account_id,
                         transaction.status, transaction.journal_entry_id,
+                        transaction.source_id, transaction.source_filename,
+                        transaction.source_row_number, transaction.row_fingerprint,
+                        transaction.idempotency_key, int(transaction.duplicate_override),
+                        transaction.duplicate_override_reason, transaction.duplicate_of_id,
                     ),
                 )
                 transaction.id = cursor.lastrowid
@@ -208,6 +267,14 @@ class ImportedTransaction:
                         "suggested_account_id": transaction.suggested_account_id,
                         "status": transaction.status,
                         "journal_entry_id": transaction.journal_entry_id,
+                        "source_id": transaction.source_id,
+                        "source_filename": transaction.source_filename,
+                        "source_row_number": transaction.source_row_number,
+                        "row_fingerprint": transaction.row_fingerprint,
+                        "idempotency_key": transaction.idempotency_key,
+                        "duplicate_override": transaction.duplicate_override,
+                        "duplicate_override_reason": transaction.duplicate_override_reason,
+                        "duplicate_of_id": transaction.duplicate_of_id,
                     },
                 )
 
@@ -340,6 +407,14 @@ class ImportedTransaction:
             suggested_account_id=row['suggested_account_id'],
             status=row['status'],
             journal_entry_id=row['journal_entry_id'],
+            source_id=row['source_id'],
+            source_filename=row['source_filename'],
+            source_row_number=row['source_row_number'],
+            row_fingerprint=row['row_fingerprint'],
+            idempotency_key=row['idempotency_key'],
+            duplicate_override=bool(row['duplicate_override']),
+            duplicate_override_reason=row['duplicate_override_reason'],
+            duplicate_of_id=row['duplicate_of_id'],
             bank_account_name=row['bank_account_name'],
             suggested_account_name=row['suggested_account_name'],
             is_cleared=row['reconciliation_id'] is not None,

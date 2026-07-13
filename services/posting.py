@@ -10,8 +10,11 @@ or roll back together — no orphaned journal entries on partial failure.
 from typing import Optional, Tuple
 
 from database.connection import get_connection
+from models.audit_log import AuditLog
 from models.journal_entry import JournalEntry, JournalEntryLine
 from models.transaction import ImportedTransaction
+from money import to_dollars
+from services.import_identity import ensure_import_identity
 
 
 def build_journal_entry(
@@ -92,6 +95,8 @@ def post_transaction(
     is_transfer: bool = False,
     batch_id: Optional[str] = None,
     learn: bool = True,
+    duplicate_override: bool = False,
+    duplicate_override_reason: Optional[str] = None,
 ) -> Tuple[JournalEntry, ImportedTransaction]:
     """Post one categorized bank transaction as a balanced journal entry.
 
@@ -104,6 +109,11 @@ def post_transaction(
     validation failure, a closed fiscal period, or any DB error (nothing is
     committed in that case).
     """
+    ensure_import_identity(transaction, client_id, bank_account_id)
+    override_reason = (duplicate_override_reason or "").strip()
+    if duplicate_override and not override_reason:
+        raise ValueError("A reason is required to post a potential duplicate.")
+
     entry = build_journal_entry(
         client_id=client_id,
         transaction=transaction,
@@ -115,6 +125,51 @@ def post_transaction(
 
     conn = get_connection()
     try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM imported_transactions
+            WHERE client_id = ? AND idempotency_key = ?
+            """,
+            (client_id, transaction["idempotency_key"]),
+        )
+        existing = cursor.fetchone()
+        if existing:
+            existing_entry = JournalEntry.get_by_id(existing["journal_entry_id"], client_id=client_id)
+            if existing_entry is None:
+                raise ValueError("The prior import exists but its journal entry could not be found.")
+            return existing_entry, ImportedTransaction(
+                id=existing["id"], client_id=existing["client_id"],
+                import_batch=existing["import_batch"],
+                transaction_date=transaction["date"], description=existing["description"],
+                amount=to_dollars(existing["amount"]),
+                bank_account_id=existing["bank_account_id"],
+                suggested_account_id=existing["suggested_account_id"],
+                status=existing["status"], journal_entry_id=existing["journal_entry_id"],
+                source_id=existing["source_id"], source_filename=existing["source_filename"],
+                source_row_number=existing["source_row_number"],
+                row_fingerprint=existing["row_fingerprint"],
+                idempotency_key=existing["idempotency_key"],
+                duplicate_override=bool(existing["duplicate_override"]),
+                duplicate_override_reason=existing["duplicate_override_reason"],
+                duplicate_of_id=existing["duplicate_of_id"],
+            )
+
+        cursor.execute(
+            """
+            SELECT id, journal_entry_id FROM imported_transactions
+            WHERE client_id = ? AND row_fingerprint = ?
+            ORDER BY id LIMIT 1
+            """,
+            (client_id, transaction["row_fingerprint"]),
+        )
+        duplicate = cursor.fetchone()
+        if duplicate and not duplicate_override:
+            raise ValueError(
+                "This transaction matches a previously imported row. "
+                "Review it and provide an override reason to post it again."
+            )
+
         entry.save(conn=conn)
 
         imported_txn = ImportedTransaction(
@@ -127,8 +182,29 @@ def post_transaction(
             suggested_account_id=target_account_id,
             status="Posted",
             journal_entry_id=entry.id,
+            source_id=transaction.get("source_id"),
+            source_filename=transaction.get("source_filename"),
+            source_row_number=transaction.get("source_row_number"),
+            row_fingerprint=transaction["row_fingerprint"],
+            idempotency_key=transaction["idempotency_key"],
+            duplicate_override=duplicate_override,
+            duplicate_override_reason=override_reason or None,
+            duplicate_of_id=duplicate["id"] if duplicate else None,
         )
         imported_txn.save(conn=conn)
+
+        if duplicate_override:
+            AuditLog.write(
+                cursor, client_id, "imported_transactions", imported_txn.id, "OVERRIDE",
+                new_values={
+                    "reason": override_reason,
+                    "duplicate_of_id": imported_txn.duplicate_of_id,
+                    "duplicate_of_journal_entry_id": duplicate["journal_entry_id"] if duplicate else None,
+                    "source_filename": imported_txn.source_filename,
+                    "source_row_number": imported_txn.source_row_number,
+                    "row_fingerprint": imported_txn.row_fingerprint,
+                },
+            )
 
         # Transfers are not expense/revenue patterns, so we don't learn from them.
         if learn and not is_transfer:

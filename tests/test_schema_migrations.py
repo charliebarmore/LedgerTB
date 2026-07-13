@@ -24,7 +24,7 @@ def test_create_tables_records_migrations(db):
     cur.execute("SELECT version FROM schema_migrations ORDER BY version")
     assert [row[0] for row in cur.fetchall()] == [
         "001_initial_schema", "002_money_to_cents", "003_client_info",
-        "004_bank_reconciliation", "005_audit_events"]
+        "004_bank_reconciliation", "005_audit_events", "006_import_idempotency"]
     conn.close()
 
 
@@ -37,7 +37,7 @@ def test_create_tables_is_idempotent(db):
 
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM schema_migrations")
-    assert cur.fetchone()[0] == 5
+    assert cur.fetchone()[0] == 6
     conn.close()
 
 

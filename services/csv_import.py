@@ -95,7 +95,9 @@ class CSVImporter:
         debit_column: Optional[str] = None,
         credit_column: Optional[str] = None,
         source_account_column: Optional[str] = None,
-        header_row: int = 0
+        header_row: int = 0,
+        source_id: Optional[str] = None,
+        source_filename: Optional[str] = None,
     ) -> List[Dict]:
         """
         Parse a CSV file into a list of transaction dictionaries.
@@ -118,7 +120,7 @@ class CSVImporter:
         transactions = []
         batch_id = str(uuid.uuid4())[:8]
 
-        for _, row in df.iterrows():
+        for row_position, (_, row) in enumerate(df.iterrows(), start=1):
             # Parse date
             parsed_date = CSVImporter.parse_date(row[date_column])
             if not parsed_date:
@@ -166,7 +168,11 @@ class CSVImporter:
                 'date': parsed_date.date(),
                 'description': description,
                 'amount': amount,
-                'batch_id': batch_id
+                'batch_id': batch_id,
+                # Human-friendly physical CSV line number (header is line 1).
+                'source_row_number': header_row + row_position + 1,
+                'source_id': source_id,
+                'source_filename': source_filename,
             }
 
             # Add source account if column specified
