@@ -53,6 +53,27 @@ section[data-testid="stSidebar"] [data-testid="stPageLink"] p {
 [data-testid="stExpanderDetails"] {
     padding-left: 0 !important;
 }
+
+/* Sidebar buttons ("Add client", Quick Reports) styled like the st.page_link
+   nav entries around them: flat, left-aligned, subtle hover — not boxed. */
+section[data-testid="stSidebar"] .stButton button {
+    background: transparent;
+    border: none;
+    justify-content: flex-start;
+    text-align: left;
+    padding: 0.25rem 0.5rem;
+    min-height: 2rem;
+    font-weight: 400;
+    color: inherit;
+}
+section[data-testid="stSidebar"] .stButton button:hover {
+    background: rgba(151, 166, 195, 0.15);
+    border: none;
+    color: inherit;
+}
+section[data-testid="stSidebar"] .stButton button:focus:not(:active) {
+    color: inherit;
+}
 </style>
 """
 
@@ -81,7 +102,10 @@ def render_client_selector() -> Optional[int]:
 
     if not clients:
         st.sidebar.warning("No clients yet.")
-        st.sidebar.page_link("pages/0_Clients.py", label="Create your first client", icon=icons.ADD_CLIENT)
+        if st.sidebar.button(f"{icons.ADD_CLIENT} Create your first client",
+                             key="nav_create_first_client", use_container_width=True):
+            st.session_state['_clients_view_pending'] = "Add Client"
+            st.switch_page("pages/0_Clients.py")
         return None
 
     # Build options dict
@@ -107,8 +131,13 @@ def render_client_selector() -> Optional[int]:
     # Update session state
     st.session_state.selected_client_id = selected_id
 
-    # Add-client affordance right where the clients are listed.
-    st.sidebar.page_link("pages/0_Clients.py", label="Add client", icon=icons.ADD_CLIENT)
+    # Add-client affordance right where the clients are listed. A button rather
+    # than a page_link so it can land on the Add Client view directly — a
+    # page_link can only open the page's default (View Clients) view.
+    if st.sidebar.button(f"{icons.ADD_CLIENT} Add client",
+                         key="nav_add_client", use_container_width=True):
+        st.session_state['_clients_view_pending'] = "Add Client"
+        st.switch_page("pages/0_Clients.py")
 
     # Client sub-navigation - CPA-focused workflow
     if selected_id:
