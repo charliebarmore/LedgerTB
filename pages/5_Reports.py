@@ -15,6 +15,7 @@ from database import init_database
 from utils.client_selector import render_client_selector
 from utils import icons
 from utils.export import sanitize_df
+from utils.fiscal_dates import fiscal_year_bounds
 
 # Initialize database
 init_database()
@@ -34,6 +35,7 @@ if not client_id:
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
+current_fy_start, _ = fiscal_year_bounds(date.today(), client.fiscal_year_end_month)
 
 # Track active report in session state for sidebar navigation
 if 'active_report' not in st.session_state:
@@ -101,7 +103,9 @@ if selected_report == "Trial Balance":
                 account_id = account_id_lookup.get(row.account_number)
                 if account_id and st.button(row.account_name, key=f"tb_acct_{row.account_number}"):
                     st.session_state.gl_account_id = account_id
-                    st.session_state.gl_start_date = date(as_of_date.year, 1, 1)
+                    st.session_state.gl_start_date = fiscal_year_bounds(
+                        as_of_date, client.fiscal_year_end_month
+                    )[0]
                     st.session_state.gl_end_date = as_of_date
                     st.session_state.active_report = "General Ledger"
                     st.rerun()
@@ -150,9 +154,13 @@ elif selected_report == "Income Statement":
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
-        is_start = st.date_input("Start Date", value=date.today().replace(month=1, day=1), key="is_start")
+        is_start = st.date_input("Start Date", value=current_fy_start, key="is_start")
     with col2:
         is_end = st.date_input("End Date", value=date.today(), key="is_end")
+
+    if is_start > is_end:
+        st.error("Income statement start date cannot be after the end date.")
+        st.stop()
 
     report = ReportGenerator.income_statement(client_id, is_start, is_end)
 
@@ -264,7 +272,9 @@ elif selected_report == "Balance Sheet":
             if account_id:
                 if st.button(f"  {account_number} - {account_name}", key=f"{key_prefix}_{account_number}"):
                     st.session_state.gl_account_id = account_id
-                    st.session_state.gl_start_date = date(bs_date.year, 1, 1)
+                    st.session_state.gl_start_date = fiscal_year_bounds(
+                        bs_date, client.fiscal_year_end_month
+                    )[0]
                     st.session_state.gl_end_date = bs_date
                     st.session_state.active_report = "General Ledger"
                     st.rerun()
@@ -369,7 +379,7 @@ elif selected_report == "General Ledger":
 
     # Check for drill-down from another report
     default_account = st.session_state.get('gl_account_id', None)
-    default_start = st.session_state.get('gl_start_date', date(date.today().year - 1, 1, 1))
+    default_start = st.session_state.get('gl_start_date', current_fy_start)
     default_end = st.session_state.get('gl_end_date', date.today())
 
     # Clear the session state after using it
@@ -404,6 +414,10 @@ elif selected_report == "General Ledger":
 
     with col3:
         gl_end = st.date_input("End Date", value=default_end, key="gl_end")
+
+    if gl_start > gl_end:
+        st.error("General ledger start date cannot be after the end date.")
+        st.stop()
 
     if selected_account:
         entries = ReportGenerator.general_ledger(selected_account, gl_start, gl_end, client_id=client_id)

@@ -5,6 +5,7 @@ from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from database.connection import get_cursor
+from utils.fiscal_dates import require_valid_range
 
 logger = logging.getLogger(__name__)
 
@@ -307,6 +308,7 @@ class AuditLog:
         action: Optional[str] = None,
         search_term: Optional[str] = None,
     ):
+        require_valid_range(start_date, end_date, "Audit filter")
         clauses = ["client_id = ?"]
         params: List[Any] = [client_id]
         # SQLite CURRENT_TIMESTAMP uses a space separator, not ISO's "T".

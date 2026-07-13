@@ -159,6 +159,10 @@ with col4:
         key="period_end"
     )
 
+if period_start > period_end:
+    st.error("Worksheet period start date cannot be after the end date.")
+    st.stop()
+
 # Show all accounts toggle
 show_all = st.checkbox("Show all accounts (default: only accounts with activity)", value=False, key="show_all_accounts")
 

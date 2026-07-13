@@ -3,6 +3,7 @@ from typing import Optional, List
 from datetime import date
 from database.connection import get_connection, get_cursor
 from money import to_cents, to_dollars
+from utils.fiscal_dates import require_valid_range
 
 
 @dataclass
@@ -272,6 +273,7 @@ class ImportedTransaction:
         offset: int = 0,
     ) -> List['ImportedTransaction']:
         """Get all imported transactions for a client with optional filters."""
+        require_valid_range(start_date, end_date, "Transaction filter")
         query = """
             WITH clearance AS (
                 SELECT jel.journal_entry_id, jel.account_id,
@@ -356,6 +358,7 @@ class ImportedTransaction:
         cleared: Optional[bool] = None,
     ) -> dict:
         """Return counts and money totals across the entire filtered result."""
+        require_valid_range(start_date, end_date, "Transaction filter")
         clauses = ["it.client_id = ?"]
         params = [client_id]
         if start_date:

@@ -5,6 +5,7 @@ from calendar import monthrange
 from database.connection import get_cursor
 from models.audit_log import AuditLog
 from money import to_dollars
+from utils.fiscal_dates import require_valid_range
 
 
 @dataclass
@@ -19,6 +20,7 @@ class FiscalPeriod:
 
     def save(self) -> int:
         """Save the fiscal period to the database."""
+        require_valid_range(self.start_date, self.end_date, "Fiscal period")
         with get_cursor(commit=True) as cursor:
             if self.id is None:
                 cursor.execute(

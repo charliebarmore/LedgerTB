@@ -7,6 +7,7 @@ from typing import Optional
 from database.connection import get_connection, get_cursor
 from models.audit_log import AuditLog
 from money import to_cents, to_dollars
+from utils.fiscal_dates import fiscal_year_bounds
 
 
 @dataclass
@@ -190,7 +191,15 @@ class BankReconciliation:
                 (client_id, account_id),
             )
             latest = cursor.fetchone()["latest"]
-        return date.fromisoformat(latest) + timedelta(days=1) if latest else date(date.today().year, 1, 1)
+            cursor.execute(
+                "SELECT fiscal_year_end_month FROM clients WHERE id = ?",
+                (client_id,),
+            )
+            client = cursor.fetchone()
+        if latest:
+            return date.fromisoformat(latest) + timedelta(days=1)
+        fiscal_year_end_month = client["fiscal_year_end_month"] if client else 12
+        return fiscal_year_bounds(date.today(), fiscal_year_end_month)[0]
 
     def update_statement(self, start_date, end_date, ending_balance):
         self._validate_dates(start_date, end_date)

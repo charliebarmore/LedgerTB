@@ -4,6 +4,7 @@ from typing import Optional, List
 from datetime import date
 from database.connection import get_connection, get_cursor
 from money import to_cents, to_dollars
+from utils.fiscal_dates import require_valid_range
 
 
 @dataclass
@@ -329,6 +330,7 @@ class JournalEntry:
         offset: int = 0,
     ) -> List['JournalEntry']:
         """Get journal entries for a client with optional filters."""
+        require_valid_range(start_date, end_date, "Journal entry filter")
         with get_cursor() as cursor:
             query = "SELECT * FROM journal_entries WHERE client_id = ?"
             params = [client_id]
@@ -379,6 +381,7 @@ class JournalEntry:
         entry_type: Optional[str] = None,
     ) -> dict:
         """Return SQL-backed counts and totals for all matching entries."""
+        require_valid_range(start_date, end_date, "Journal entry filter")
         clauses = ["client_id = ?"]
         params = [client_id]
         if start_date:
@@ -610,6 +613,7 @@ class JournalEntry:
         Returns:
             Next available AJE reference (e.g., "AJE-001")
         """
+        require_valid_range(period_start, period_end, "AJE period")
         with get_cursor() as cursor:
             cursor.execute("""
                 SELECT aje_reference FROM journal_entries

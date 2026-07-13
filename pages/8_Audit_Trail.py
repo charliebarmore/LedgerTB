@@ -3,7 +3,7 @@
 import streamlit as st
 import sys
 from pathlib import Path
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -13,6 +13,7 @@ from utils.client_selector import render_client_selector, get_selected_client
 from utils import icons
 from models.client import Client
 from models.audit_log import AuditLog
+from utils.fiscal_dates import fiscal_year_bounds
 
 init_database()
 
@@ -45,7 +46,9 @@ filter_cols = st.columns([2, 2, 1, 1, 2])
 # Default "From Date" to the client's earliest activity rather than a fixed
 # 30-day window, so older audit history isn't hidden on first view.
 earliest_activity = AuditLog.get_earliest_date(client_id)
-default_start_date = earliest_activity.date() if earliest_activity else date.today() - timedelta(days=30)
+default_start_date = earliest_activity.date() if earliest_activity else fiscal_year_bounds(
+    date.today(), client.fiscal_year_end_month
+)[0]
 
 with filter_cols[0]:
     start_date = st.date_input(
@@ -93,6 +96,10 @@ with filter_cols[4]:
         placeholder="Search in values...",
         key="audit_search"
     )
+
+if start_date > end_date:
+    st.error("Audit filter start date cannot be after the end date.")
+    st.stop()
 
 # Apply filters
 start_datetime = datetime.combine(start_date, datetime.min.time())
