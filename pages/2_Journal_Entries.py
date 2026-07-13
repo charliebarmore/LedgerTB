@@ -1,7 +1,7 @@
 import streamlit as st
 import sys
 from pathlib import Path
-from datetime import date, timedelta
+from datetime import date
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -13,6 +13,7 @@ from database import init_database
 from utils.client_selector import render_client_selector
 from utils import icons
 from constants import EntryType
+from utils.fiscal_dates import fiscal_year_bounds
 
 # Initialize database
 init_database()
@@ -35,6 +36,7 @@ if not client_id:
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
+current_fy_start, _ = fiscal_year_bounds(date.today(), client.fiscal_year_end_month)
 
 # Initialize session state
 if 'je_lines' not in st.session_state:
@@ -294,13 +296,17 @@ with tab2:
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        filter_start = st.date_input("From Date", value=date.today() - timedelta(days=365), key="filter_start")
+        filter_start = st.date_input("From Date", value=current_fy_start, key="filter_start")
 
     with col2:
         filter_end = st.date_input("To Date", value=date.today(), key="filter_end")
 
     with col3:
         filter_type = st.selectbox("Entry Type", options=['All'] + EntryType.ALL, key="filter_type")
+
+    if filter_start > filter_end:
+        st.error("Journal entry filter start date cannot be after the end date.")
+        st.stop()
 
     entry_type_param = filter_type if filter_type != 'All' else None
     filter_signature = (filter_start, filter_end, entry_type_param)

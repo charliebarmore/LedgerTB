@@ -1,24 +1,17 @@
 import sqlite3
-import calendar
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 from datetime import date
 from database.connection import get_cursor
 from constants import AccountType
 from money import to_dollars
+from utils.fiscal_dates import fiscal_year_bounds, require_valid_range
 import pandas as pd
 
 
 def _fiscal_year_start(as_of_date: date, fiscal_year_end_month: int) -> date:
     """Return the first day of the fiscal year that as_of_date falls in."""
-    last_day = calendar.monthrange(as_of_date.year, fiscal_year_end_month)[1]
-    fye_this_year = date(as_of_date.year, fiscal_year_end_month, last_day)
-    fy_end_year = as_of_date.year if as_of_date <= fye_this_year else as_of_date.year + 1
-
-    start_month = fiscal_year_end_month + 1
-    if start_month > 12:
-        return date(fy_end_year, 1, 1)
-    return date(fy_end_year - 1, start_month, 1)
+    return fiscal_year_bounds(as_of_date, fiscal_year_end_month)[0]
 
 
 @dataclass
@@ -155,6 +148,7 @@ class ReportGenerator:
         Returns:
             Tuple of (list of TrialBalanceWorksheetRow, list of AJE details by account)
         """
+        require_valid_range(period_start, period_end, "Worksheet period")
         ps, pe = period_start.isoformat(), period_end.isoformat()
 
         with get_cursor() as cursor:
@@ -332,6 +326,7 @@ class ReportGenerator:
         end_date: date
     ) -> Dict:
         """Generate an income statement for a client."""
+        require_valid_range(start_date, end_date, "Income statement")
         with get_cursor() as cursor:
             # Get revenue accounts. The date range must be applied on the join between
             # journal_entry_lines and journal_entries, not on journal_entries alone,
@@ -528,6 +523,7 @@ class ReportGenerator:
         If ``client_id`` is given, a ledger is produced only when the account
         belongs to that client; a cross-client id returns an empty ledger.
         """
+        require_valid_range(start_date, end_date, "General ledger")
         with get_cursor() as cursor:
             # Get account type for balance calculation (scoped to the client when given)
             if client_id is None:

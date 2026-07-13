@@ -15,6 +15,7 @@ from database import init_database
 from utils.client_selector import render_client_selector
 from utils import icons
 from utils.export import sanitize_df
+from utils.fiscal_dates import fiscal_year_bounds, previous_fiscal_year_bounds
 
 # Initialize database
 init_database()
@@ -34,6 +35,11 @@ if not client_id:
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
+today = date.today()
+current_fy_start, current_fy_end = fiscal_year_bounds(today, client.fiscal_year_end_month)
+previous_fy_start, previous_fy_end = previous_fiscal_year_bounds(
+    today, client.fiscal_year_end_month
+)
 
 # Filters
 st.subheader("Filters")
@@ -44,7 +50,10 @@ with col1:
     # freshly-imported or older book of transactions isn't hidden on first view.
     date_range = st.selectbox(
         "Date Range",
-        options=["All Time", "Last 30 days", "Last 90 days", "This Year", "Last Year", "Custom"],
+        options=[
+            "All Time", "Last 30 days", "Last 90 days",
+            "This Fiscal Year", "Last Fiscal Year", "Custom",
+        ],
         index=0
     )
 
@@ -76,22 +85,25 @@ with col5:
     )
 
 # Calculate date range
-today = date.today()
 if date_range == "Last 30 days":
     start_date = today - timedelta(days=30)
     end_date = today
 elif date_range == "Last 90 days":
     start_date = today - timedelta(days=90)
     end_date = today
-elif date_range == "This Year":
-    start_date = date(today.year, 1, 1)
-    end_date = today
-elif date_range == "Last Year":
-    start_date = date(today.year - 1, 1, 1)
-    end_date = date(today.year - 1, 12, 31)
+elif date_range == "This Fiscal Year":
+    start_date = current_fy_start
+    end_date = min(today, current_fy_end)
+elif date_range == "Last Fiscal Year":
+    start_date = previous_fy_start
+    end_date = previous_fy_end
 elif date_range == "All Time":
     start_date = None
     end_date = None
+
+if start_date and end_date and start_date > end_date:
+    st.error("Transaction filter start date cannot be after the end date.")
+    st.stop()
 
 # Bank account filter
 col1, col2 = st.columns([1, 3])

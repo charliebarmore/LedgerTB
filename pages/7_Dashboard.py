@@ -1,7 +1,7 @@
 import streamlit as st
 import sys
 from pathlib import Path
-from datetime import date, timedelta
+from datetime import date
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -14,6 +14,7 @@ from models.reports import ReportGenerator
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils import icons
+from utils.fiscal_dates import fiscal_year_bounds
 
 # Initialize database
 init_database()
@@ -49,10 +50,10 @@ total_assets = sum(bal for _, _, bal in asset_accounts)
 total_liabilities = sum(bal for _, _, bal in liability_accounts)
 total_equity = sum(bal for _, _, bal in equity_accounts)
 
-# Income statement for YTD
+# Income statement for fiscal year-to-date
 today = date.today()
-year_start = date(today.year, 1, 1)
-income_report = ReportGenerator.income_statement(client_id, year_start, today)
+fiscal_start, fiscal_end = fiscal_year_bounds(today, client.fiscal_year_end_month)
+income_report = ReportGenerator.income_statement(client_id, fiscal_start, min(today, fiscal_end))
 
 # Initialize expanded state
 if 'dashboard_expanded' not in st.session_state:
@@ -90,7 +91,7 @@ with col2:
 
 with col3:
     if st.button(
-        f"**YTD Net Income** {_toggle_icon('income')}\n\n${income_report['net_income']:,.2f}",
+        f"**Fiscal YTD Net Income** {_toggle_icon('income')}\n\n${income_report['net_income']:,.2f}",
         key="btn_income",
         use_container_width=True,
         type="secondary" if st.session_state.dashboard_expanded != 'income' else "primary"
@@ -262,7 +263,7 @@ with col1:
         st.caption("No liabilities with balances")
 
 with col2:
-    st.markdown("**Revenue (YTD)**")
+    st.markdown("**Revenue (Fiscal YTD)**")
     if balance_data['Revenue']:
         for name, bal in sorted(balance_data['Revenue'], key=lambda x: -x[1])[:5]:
             col_a, col_b = st.columns([3, 1])
@@ -273,7 +274,7 @@ with col2:
     else:
         st.caption("No revenue recorded")
 
-    st.markdown("**Expenses (YTD)**")
+    st.markdown("**Expenses (Fiscal YTD)**")
     if balance_data['Expenses']:
         for name, bal in sorted(balance_data['Expenses'], key=lambda x: -x[1])[:5]:
             col_a, col_b = st.columns([3, 1])
