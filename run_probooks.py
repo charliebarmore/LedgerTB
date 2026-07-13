@@ -31,7 +31,12 @@ import openpyxl        # noqa: F401
 import anthropic       # noqa: F401
 import dotenv          # noqa: F401
 import platformdirs    # noqa: F401
+import keyring         # noqa: F401
 import altair          # noqa: F401  (streamlit dependency used for charts)
+import fitz             # noqa: F401  (PDF text extraction and page rendering)
+import PIL              # noqa: F401  (image metadata/packaging support)
+if sys.platform == "darwin":
+    import Quartz       # noqa: F401  (native image decoding for Apple Vision OCR)
 
 
 def bundle_dir() -> Path:
@@ -107,16 +112,50 @@ def _selfcheck() -> int:
     bundle didn't drop anything the app needs. Run: PROBOOKS_MODE=selfcheck <bin>"""
     os.chdir(BUNDLE)
     sys.path.insert(0, str(BUNDLE))
-    mods = ["streamlit", "pandas", "numpy", "pyarrow", "altair", "openpyxl",
+    # Import database.connection before config to mirror app.py's real cold-start
+    # path and catch package-level circular imports in the frozen bundle.
+    mods = ["database.connection", "streamlit", "pandas", "numpy", "pyarrow", "altair", "openpyxl",
             "anthropic", "pydantic", "pydantic_core", "dotenv", "platformdirs",
-            "config", "constants", "money", "models.journal_entry",
-            "services.categorization"]
+            "config", "constants", "money", "models.journal_entry", "models.reconciliation",
+            "services.categorization", "services.document_import", "fitz", "PIL",
+            "keyring", "version"]
     failed = []
     for m in mods:
         try:
             __import__(m)
         except Exception as e:
             failed.append(f"{m}: {e}")
+    try:
+        import keyring
+        backend = keyring.get_keyring()
+        if sys.platform == "darwin" and type(backend).__module__ != "keyring.backends.macOS":
+            failed.append(
+                f"keyring backend: unexpected {type(backend).__module__}.{type(backend).__name__}"
+            )
+    except Exception as e:
+        failed.append(f"keyring backend: {e}")
+    if sys.platform == "darwin":
+        try:
+            # Exercise the dynamically-loaded Vision framework, not just the
+            # Python imports. PyInstaller cannot discover these Objective-C
+            # classes statically, so a real recognition catches a broken OCR
+            # bundle before it is installed.
+            import io
+            from PIL import Image, ImageDraw, ImageFont
+            from services.document_import import _vision_ocr
+
+            sample = Image.new("RGB", (900, 180), "white")
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 48)
+            ImageDraw.Draw(sample).text(
+                (30, 60), "PROBOOKS OCR 123.45", font=font, fill="black"
+            )
+            encoded = io.BytesIO()
+            sample.save(encoded, format="PNG")
+            recognized = _vision_ocr(encoded.getvalue()).upper()
+            if "PROBOOKS" not in recognized:
+                failed.append(f"Apple Vision OCR: unexpected result {recognized!r}")
+        except Exception as e:
+            failed.append(f"Apple Vision OCR: {e}")
     if failed:
         print("SELFCHECK FAIL:\n  " + "\n  ".join(failed))
         return 1

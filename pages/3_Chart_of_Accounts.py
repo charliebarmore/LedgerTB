@@ -11,18 +11,19 @@ from models.account import Account
 from models.client import Client
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils import icons
 from constants import AccountType
 from services.coa_import import parse_coa_csv
 
 # Initialize database
 init_database()
 
-st.set_page_config(page_title="Chart of Accounts", page_icon="📋", layout="wide")
+st.set_page_config(page_title="Chart of Accounts", page_icon=icons.CHART_OF_ACCOUNTS, layout="wide")
 
 # Client selector in sidebar
 client_id = render_client_selector()
 
-st.title("📋 Chart of Accounts")
+st.title("Chart of Accounts")
 
 if not client_id:
     st.warning("Please create a client first in the Clients page.")
@@ -205,7 +206,7 @@ with tab3:
         "4000,Service Revenue,Revenue,,\n"
         "6000,Office Expense,Expense,,\n"
     )
-    st.download_button("⬇ Download template CSV", data=_template,
+    st.download_button("Download template CSV", data=_template,
                        file_name="chart_of_accounts_template.csv", mime="text/csv")
 
     uploaded = st.file_uploader("Chart of accounts CSV", type=["csv"], key="coa_upload")

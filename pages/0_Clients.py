@@ -9,17 +9,18 @@ from models.client import Client
 from database import init_database
 from database.seed_data import ENTITY_TYPES, BUSINESS_TYPES
 from utils.client_selector import render_client_selector
+from utils import icons
 
 # Initialize database
 init_database()
 
-st.set_page_config(page_title="Clients", page_icon="👥", layout="wide")
+st.set_page_config(page_title="Clients", page_icon=icons.CLIENTS, layout="wide")
 
 # Same persistent client selector + nav every other page shows, so the
 # sidebar doesn't disappear/reappear when landing on or leaving this page.
 render_client_selector()
 
-st.title("👥 Client Management")
+st.title("Client Management")
 st.caption("Each client keeps its own separate set of books.")
 
 # Entity type and business type options
@@ -101,7 +102,7 @@ with tab1:
                     if addr:
                         st.text(addr)
                     if client.notes:
-                        st.caption(f"📝 {client.notes}")
+                        st.caption(client.notes)
                     st.caption("Has transactions recorded" if Client.has_transactions(client.id) else "No transactions yet")
 
                 with col3:
@@ -383,11 +384,11 @@ with tab2:
                                    key="add_seed_accounts")
 
         if st.button("Add Client", type="primary", key="add_client_submit"):
-            if not client_name:
+            if not client_name.strip():
                 st.error("Client name is required.")
             else:
                 new_client = Client(
-                    name=client_name,
+                    name=client_name.strip(),
                     entity_type=entity_type,
                     business_type=business_type,
                     fiscal_year_end_month=fiscal_month,

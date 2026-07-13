@@ -45,6 +45,9 @@ thin macOS wrapper that runs `desktop.py` from this folder.
 - **Data location:** unchanged from the normal app. Before storing **real**
   client data, set `PROBOOKS_DB_PATH` to a file under `~/Practice` so it lands in
   the encrypted-backup path (see `config.py`).
+- **Backup location:** defaults to the app data directory. Override it with
+  `PROBOOKS_BACKUP_DIR`; the in-app Data Safety page shows the active database
+  and verified-backup status.
 
 ## Regenerating the icon
 
@@ -70,6 +73,16 @@ to hand to a colleague).
 pip install -r requirements-desktop.txt      # includes pyinstaller
 pyinstaller ProBooks.spec --noconfirm
 ```
+
+For a tested, repeatable local release, use the wrapper instead:
+
+```bash
+./scripts/build_release.sh
+./scripts/install_local.sh   # explicit: copies to /Applications
+```
+
+After installation, open ProBooks from Applications, Control-click its Dock
+icon, and choose **Options → Keep in Dock**.
 
 Output: `dist/ProBooks.app` (~530 MB — it bundles Python, Streamlit, pandas,
 etc.). Double-click it, or `open dist/ProBooks.app`.

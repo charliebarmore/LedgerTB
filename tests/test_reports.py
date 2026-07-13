@@ -1,6 +1,7 @@
 from datetime import date
 
 from conftest import post_entry
+from models.account import Account
 from models.reports import ReportGenerator
 
 
@@ -90,6 +91,33 @@ def test_trial_balance_respects_as_of_date(client_id, accounts):
     after_second_entry = ReportGenerator.trial_balance(client_id, date(2025, 12, 31))
     cash_row = next(r for r in after_second_entry if r.account_number == "1000")
     assert cash_row.debit == 600
+
+
+def test_deactivated_accounts_remain_in_historical_reports(client_id, accounts):
+    """Deactivation blocks future use; it must not remove posted history."""
+    post_entry(client_id, date(2025, 3, 1), [
+        (accounts["cash"], 500, 0),
+        (accounts["revenue"], 0, 500),
+    ])
+    revenue = Account.get_by_id(accounts["revenue"], client_id=client_id)
+    revenue.deactivate()
+
+    trial_balance = ReportGenerator.trial_balance(client_id, date(2025, 12, 31))
+    assert {r.account_number for r in trial_balance} == {"1000", "4000"}
+    assert sum(r.debit for r in trial_balance) == sum(r.credit for r in trial_balance) == 500
+
+    income = ReportGenerator.income_statement(
+        client_id, date(2025, 1, 1), date(2025, 12, 31)
+    )
+    assert income["total_revenue"] == 500
+
+    balance_sheet = ReportGenerator.balance_sheet(client_id, date(2025, 12, 31))
+    assert balance_sheet["total_assets"] == balance_sheet["total_liabilities_equity"] == 500
+
+    worksheet, _ = ReportGenerator.trial_balance_worksheet(
+        client_id, date(2025, 1, 1), date(2025, 12, 31)
+    )
+    assert {r.account_number for r in worksheet} == {"1000", "4000"}
 
 
 def test_worksheet_includes_in_period_beginning_balance_and_closing_entries(client_id, accounts):

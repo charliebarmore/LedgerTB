@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
 from utils.client_selector import render_client_selector, get_selected_client
+from utils import icons
 from models.client import Client
 from models.audit_log import AuditLog
 
@@ -25,7 +26,7 @@ init_database()
 
 st.set_page_config(
     page_title="Audit Trail",
-    page_icon="📜",
+    page_icon=icons.AUDIT_TRAIL,
     layout="wide"
 )
 
@@ -41,7 +42,7 @@ if not client:
     st.error("Client not found.")
     st.stop()
 
-st.title("📜 Audit Trail")
+st.title("Audit Trail")
 st.caption(f"Viewing: **{client.name}**")
 
 # Filters
@@ -115,11 +116,11 @@ else:
     # Display logs
     for log in logs:
         # Create an expandable section for each log entry
-        action_icon = {
-            "INSERT": "➕",
-            "UPDATE": "✏️",
-            "DELETE": "🗑️"
-        }.get(log.action, "📝")
+        action_label = {
+            "INSERT": "Created",
+            "UPDATE": "Updated",
+            "DELETE": "Deleted",
+        }.get(log.action, log.action.title())
 
         action_color = {
             "INSERT": "green",
@@ -127,7 +128,7 @@ else:
             "DELETE": "red"
         }.get(log.action, "gray")
 
-        header = f"{action_icon} {log.action} - {log.table_name} #{log.record_id}"
+        header = f"{action_label} · {log.table_name} #{log.record_id}"
         if log.changed_at:
             header += f" - {log.changed_at.strftime('%m/%d/%Y %H:%M:%S')}"
 

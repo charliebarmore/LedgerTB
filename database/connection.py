@@ -1,4 +1,5 @@
 import sqlite3
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from config import DATABASE_PATH
@@ -8,7 +9,15 @@ from .schema import create_tables
 def get_connection() -> sqlite3.Connection:
     """Get a database connection with row factory enabled."""
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(DATABASE_PATH.parent, 0o700)
+    except OSError:
+        pass
     conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    try:
+        os.chmod(DATABASE_PATH, 0o600)
+    except OSError:
+        pass
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

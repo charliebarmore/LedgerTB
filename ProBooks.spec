@@ -14,6 +14,13 @@ analysis sees them).
 
 import os
 
+# Spec files execute in PyInstaller's build namespace, which does not guarantee
+# that the project root is importable. Read the tiny metadata module directly.
+version_meta = {}
+with open("version.py", encoding="utf-8") as version_file:
+    exec(version_file.read(), version_meta)
+APP_VERSION = version_meta["APP_VERSION"]
+
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 # Set PROBOOKS_CODESIGN_ID to a Developer ID Application identity to have
@@ -44,6 +51,7 @@ app_datas = [
     ("config.py", "."),
     ("constants.py", "."),
     ("money.py", "."),
+    ("version.py", "."),
     (".streamlit", ".streamlit"),
     ("pages", "pages"),
     ("models", "models"),
@@ -60,7 +68,8 @@ metadatas = []
 for pkg in (
     "streamlit", "pandas", "numpy", "pyarrow", "altair", "anthropic",
     "openpyxl", "pillow", "tornado", "click", "rich", "platformdirs",
-    "python-dotenv", "gitpython", "packaging",
+    "python-dotenv", "gitpython", "packaging", "keyring",
+    "pymupdf", "Pillow", "pyobjc-framework-Quartz",
 ):
     try:
         metadatas += copy_metadata(pkg)
@@ -69,6 +78,8 @@ for pkg in (
 
 hiddenimports = st_hiddenimports + [
     "pandas", "numpy", "openpyxl", "anthropic", "dotenv", "platformdirs", "altair",
+    "keyring", "keyring.backends.macOS",
+    "fitz", "PIL", "Quartz", "objc",
 ]
 
 a = Analysis(
@@ -121,8 +132,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "ProBooks",
         "CFBundleDisplayName": "ProBooks",
-        "CFBundleShortVersionString": "1.0",
-        "CFBundleVersion": "1.0",
+        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleVersion": APP_VERSION,
         "NSHighResolutionCapable": True,
         "LSApplicationCategoryType": "public.app-category.finance",
         "LSMinimumSystemVersion": "10.13",

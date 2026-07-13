@@ -2,6 +2,7 @@ import streamlit as st
 import sys
 from pathlib import Path
 from datetime import date
+import pandas as pd
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -13,19 +14,24 @@ from services.csv_import import CSVImporter
 from services.categorization import CategorizationService
 from services.pattern_learning import PatternLearner
 from services.posting import post_transaction
+from services.document_import import (
+    extract_document, parse_statement_text, parse_statement_with_ai,
+)
+from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils import icons
 from utils.import_review import ensure_row_ids, row_key, classify_review_rows
 
 # Initialize database
 init_database()
 
-st.set_page_config(page_title="Import Transactions", page_icon="📥", layout="wide")
+st.set_page_config(page_title="Import Transactions", page_icon=icons.IMPORT, layout="wide")
 
 # Client selector in sidebar
 client_id = render_client_selector()
 
-st.title("📥 Import Transactions")
+st.title("Import Transactions")
 
 if not client_id:
     st.warning("Please create a client first in the Clients page.")
@@ -47,6 +53,10 @@ if 'column_mapping' not in st.session_state:
     st.session_state.column_mapping = {}
 if 'transactions_to_review' not in st.session_state:
     st.session_state.transactions_to_review = []
+if 'document_extraction' not in st.session_state:
+    st.session_state.document_extraction = None
+if 'document_transactions' not in st.session_state:
+    st.session_state.document_transactions = []
 
 # Get accounts - include credit cards and other liability accounts for imports
 accounts = Account.get_all(client_id, active_only=True)
@@ -69,7 +79,7 @@ if 'import_active_tab' not in st.session_state:
     st.session_state.import_active_tab = "Upload CSV"
 
 # Navigation using radio buttons (allows programmatic control)
-tab_options = ["Upload CSV", "Review & Categorize", "Learned Patterns"]
+tab_options = ["Upload CSV", "Upload Statement", "Review & Categorize", "Learned Patterns"]
 selected_tab = st.radio(
     "Navigation",
     options=tab_options,
@@ -85,7 +95,7 @@ if selected_tab == "Upload CSV":
     st.subheader("Upload Bank/Credit Card CSV File")
 
     # Help section
-    with st.expander("ℹ️ CSV Import Help & Tips"):
+    with st.expander("CSV import help and tips"):
         st.markdown("""
         ### Supported Formats
 
@@ -154,7 +164,7 @@ if selected_tab == "Upload CSV":
 01/17/2025,Another expense,-25.50"""
 
         st.download_button(
-            label="📥 Download Sample CSV Template",
+            label="Download sample CSV template",
             data=sample_csv,
             file_name="transaction_import_template.csv",
             mime="text/csv"
@@ -594,6 +604,269 @@ if selected_tab == "Upload CSV":
                     except Exception as e:
                         st.error(f"Error parsing file: {e}")
 
+elif selected_tab == "Upload Statement":
+    st.subheader("Upload PDF or Image Statement")
+    st.caption(
+        "PDF text extraction and image OCR run locally on this Mac. Uploaded documents are "
+        "held only for the current session and are not saved to the ProBooks database."
+    )
+
+    all_importable = [a for a in accounts if a.type in ("Asset", "Liability")]
+    bank_account_options = {a.id: a.display_name() for a in all_importable}
+    if not bank_account_options:
+        st.warning("No bank or credit-card accounts found. Add one in Chart of Accounts first.")
+    else:
+        setup_col1, setup_col2, setup_col3 = st.columns(3)
+        with setup_col1:
+            document_bank_id = st.selectbox(
+                "Statement account",
+                options=list(bank_account_options),
+                format_func=lambda account_id: bank_account_options[account_id],
+                key="document_bank_account",
+            )
+        document_account = Account.get_by_id(document_bank_id, client_id=client_id)
+        with setup_col2:
+            default_convention = "credit_card" if document_account.type == "Liability" else "bank"
+            document_sign = st.selectbox(
+                "Printed amount convention",
+                options=list(SIGN_CONVENTIONS),
+                index=list(SIGN_CONVENTIONS).index(default_convention),
+                format_func=lambda value: SIGN_CONVENTIONS[value],
+                key="document_sign_convention",
+                help="Used by the local parser. AI-assisted parsing normalizes signs itself.",
+            )
+        with setup_col3:
+            statement_year = st.number_input(
+                "Statement year", min_value=2000, max_value=2100,
+                value=date.today().year, step=1,
+                help="Used when statement rows show month/day without a year.",
+            )
+
+        uploaded_document = st.file_uploader(
+            "Statement file", type=["pdf", "png", "jpg", "jpeg"],
+            key="statement_document_upload",
+        )
+        if uploaded_document is not None:
+            document_bytes = uploaded_document.getvalue()
+            document_identity = (uploaded_document.name, len(document_bytes), hash(document_bytes[:4096]))
+            if st.session_state.get("document_identity") != document_identity:
+                st.session_state.document_identity = document_identity
+                st.session_state.document_name = uploaded_document.name
+                st.session_state.document_bytes = document_bytes
+                st.session_state.document_extraction = None
+                st.session_state.document_transactions = []
+
+        if st.session_state.get("document_bytes"):
+            action_col1, action_col2 = st.columns([1, 4])
+            with action_col1:
+                if st.button("Extract text locally", type="primary"):
+                    try:
+                        with st.spinner("Reading statement locally…"):
+                            extraction = extract_document(
+                                st.session_state.document_name,
+                                st.session_state.document_bytes,
+                            )
+                        st.session_state.document_extraction = extraction
+                        st.session_state.document_text_editor = extraction.text
+                        st.session_state.document_transactions = []
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Statement extraction failed: {exc}")
+            with action_col2:
+                if st.button("Clear statement"):
+                    for key in (
+                        "document_identity", "document_name", "document_bytes",
+                        "document_extraction", "document_text_editor", "document_transactions",
+                    ):
+                        st.session_state.pop(key, None)
+                    st.rerun()
+
+        extraction = st.session_state.get("document_extraction")
+        if extraction:
+            st.success(
+                f"Extracted {extraction.page_count} page(s): "
+                f"{extraction.native_text_pages} text page(s), {extraction.ocr_pages} OCR page(s)."
+            )
+            for warning in extraction.warnings:
+                st.warning(warning)
+
+            st.subheader("Extracted statement text")
+            st.caption("Review and correct the text before parsing. This is especially important for OCR amounts.")
+            extracted_text = st.text_area(
+                "Extracted text",
+                value=st.session_state.get("document_text_editor", extraction.text),
+                height=300,
+                key="document_text_editor",
+                label_visibility="collapsed",
+            )
+
+            parser_options = ["Local pattern parser"]
+            if categorization_service.is_available():
+                parser_options.append("AI-assisted table parser")
+            parser_mode = st.radio(
+                "Statement parser", options=parser_options, horizontal=True,
+                help="The local parser is private and deterministic. AI is better for complex debit/credit tables.",
+            )
+
+            ai_consent = False
+            amount_strategy = "first"
+            if parser_mode == "Local pattern parser":
+                amount_label = st.selectbox(
+                    "When a row contains both transaction amount and running balance",
+                    options=["Use first monetary amount", "Use last monetary amount"],
+                )
+                amount_strategy = "first" if amount_label.startswith("Use first") else "last"
+                st.info(
+                    "Local parsing works best when every transaction starts with a date and signed amount. "
+                    "For statements with separate debit and credit columns, use AI-assisted parsing or export CSV."
+                )
+            else:
+                st.warning(
+                    "AI-assisted parsing sends the extracted statement text—including transaction dates, "
+                    "descriptions, and amounts—to Anthropic. The PDF/image itself is not uploaded."
+                )
+                ai_consent = st.checkbox(
+                    "I consent to sending this extracted statement text to Anthropic for parsing.",
+                    key="statement_ai_consent",
+                )
+
+            parse_disabled = parser_mode == "AI-assisted table parser" and not ai_consent
+            if st.button("Parse statement transactions", type="primary", disabled=parse_disabled):
+                try:
+                    with st.spinner("Parsing transaction rows…"):
+                        if parser_mode == "AI-assisted table parser":
+                            parsed = parse_statement_with_ai(
+                                extracted_text, document_account.type,
+                                ANTHROPIC_API_KEY, ANTHROPIC_MODEL,
+                            )
+                            skipped = []
+                            amounts_are_normalized = True
+                        else:
+                            parsed, skipped = parse_statement_text(
+                                extracted_text, int(statement_year), amount_strategy,
+                            )
+                            amounts_are_normalized = False
+                    if not parsed:
+                        st.error("No transaction rows could be parsed. Review the extracted text or use CSV.")
+                    else:
+                        st.session_state.document_transactions = parsed
+                        st.session_state.document_skipped = skipped
+                        st.session_state.document_amounts_normalized = amounts_are_normalized
+                        st.rerun()
+                except Exception as exc:
+                    st.error(f"Statement parsing failed: {exc}")
+
+            parsed_document_rows = st.session_state.get("document_transactions", [])
+            if parsed_document_rows:
+                st.subheader("Validate parsed transactions")
+                st.warning(
+                    "OCR and table parsing can misread dates, decimal points, and signs. "
+                    "Compare this table to the statement before continuing."
+                )
+                skipped = st.session_state.get("document_skipped", [])
+                if skipped:
+                    with st.expander(f"{len(skipped)} date-led row(s) could not be parsed"):
+                        for row in skipped[:50]:
+                            st.text(row)
+
+                parsed_frame = pd.DataFrame([{
+                    "Date": row["date"],
+                    "Description": row["description"],
+                    "Amount": row["amount"],
+                } for row in parsed_document_rows])
+                edited_frame = st.data_editor(
+                    parsed_frame,
+                    hide_index=True,
+                    use_container_width=True,
+                    num_rows="dynamic",
+                    column_config={
+                        "Date": st.column_config.DateColumn("Date", required=True),
+                        "Description": st.column_config.TextColumn("Description", required=True),
+                        "Amount": st.column_config.NumberColumn("Amount", format="$%.2f", required=True),
+                    },
+                    key="document_transaction_editor",
+                )
+
+                validation_confirmed = st.checkbox(
+                    "I compared the parsed dates, descriptions, amounts, and signs to the statement.",
+                    key="document_validation_confirmed",
+                )
+                if st.button(
+                    f"Send {len(edited_frame)} transactions to review",
+                    type="primary", disabled=not validation_confirmed,
+                ):
+                    try:
+                        if edited_frame.empty:
+                            raise ValueError("At least one transaction is required.")
+                        batch_id = str(parsed_document_rows[0].get("batch_id", "document"))
+                        review_transactions = []
+                        for _, row in edited_frame.iterrows():
+                            row_date = row["Date"]
+                            if hasattr(row_date, "date") and not isinstance(row_date, date):
+                                row_date = row_date.date()
+                            if isinstance(row_date, str):
+                                row_date = date.fromisoformat(row_date)
+                            description = str(row["Description"]).strip()
+                            amount = float(row["Amount"])
+                            if not description:
+                                raise ValueError("Every row needs a description.")
+                            if not st.session_state.get("document_amounts_normalized", False):
+                                if document_sign in ("credit_card", "flip"):
+                                    amount = -amount
+                            review_transactions.append({
+                                "date": row_date, "description": description[:200],
+                                "amount": amount, "batch_id": batch_id,
+                                "bank_account_id": document_bank_id,
+                                "client_id": client_id,
+                            })
+
+                        duplicate_count = 0
+                        for transaction in review_transactions:
+                            duplicates = JournalEntry.find_potential_duplicates(
+                                client_id=client_id,
+                                entry_date=transaction["date"],
+                                amount=transaction["amount"],
+                                bank_account_id=document_bank_id,
+                            )
+                            if duplicates:
+                                transaction["is_duplicate"] = True
+                                transaction["duplicate_info"] = duplicates[0]
+                                transaction["include"] = False
+                                duplicate_count += 1
+                            else:
+                                transaction["is_duplicate"] = False
+
+                            match = PatternLearner.find_match(client_id, transaction["description"])
+                            if match:
+                                transaction["suggested_account_id"] = match["account_id"]
+                                transaction["confidence"] = f"{match['confidence']:.0%}"
+                                transaction["reason"] = f"Learned pattern: {match['pattern']}"
+
+                        unmatched = [
+                            transaction for transaction in review_transactions
+                            if "suggested_account_id" not in transaction
+                        ]
+                        if unmatched and categorization_service.is_available():
+                            with st.spinner(f"Suggesting categories for {len(unmatched)} transactions…"):
+                                categorization_service.categorize_transactions(
+                                    unmatched, expense_accounts + revenue_accounts
+                                )
+
+                        ensure_row_ids(review_transactions)
+                        for transaction in review_transactions:
+                            if transaction.get("suggested_account_id"):
+                                st.session_state[row_key("cat", transaction)] = transaction["suggested_account_id"]
+                        st.session_state.transactions_to_review = review_transactions
+                        st.session_state.import_active_tab = "Review & Categorize"
+                        if duplicate_count:
+                            st.session_state.post_result = {
+                                "level": "warning",
+                                "text": f"{duplicate_count} potential duplicate(s) were auto-deselected.",
+                            }
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Could not prepare statement transactions: {exc}")
+
 elif selected_tab == "Review & Categorize":
     st.subheader("Review & Categorize Transactions")
 
@@ -738,7 +1011,7 @@ elif selected_tab == "Review & Categorize":
             if uncategorized:
                 col1, col2 = st.columns([2, 2])
                 with col1:
-                    if st.button(f"🤖 Categorize {len(uncategorized)} Transactions with AI", type="secondary"):
+                    if st.button(f"Categorize {len(uncategorized)} transactions with AI", type="secondary"):
                         with st.spinner("AI is analyzing transactions..."):
                             # Get expense and revenue accounts for suggestions
                             expense_accts = [a for a in all_accounts if a.type == 'Expense']
@@ -788,16 +1061,15 @@ elif selected_tab == "Review & Categorize":
 
                 if api_key_input:
                     if st.button("Save & Enable AI", type="primary"):
-                        # Save to a local key file in the app's data directory
-                        # (writable even when running as a packaged app; data/ is
-                        # gitignored so the key is never committed).
-                        from config import API_KEY_FILE
-                        API_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
-                        API_KEY_FILE.write_text(api_key_input.strip() + "\n")
-                        st.success("API key saved! Please restart ProBooks for the change to take effect.")
+                        from utils.secure_store import set_secret
+                        try:
+                            set_secret("anthropic_api_key", api_key_input.strip())
+                            st.success("API key saved in the system credential vault. Please restart ProBooks.")
+                        except Exception as exc:
+                            st.error(f"Could not save the API key securely: {exc}")
 
                 st.caption(
-                    "Your API key is stored locally on this machine. When you run AI "
+                    "Your API key is stored in the system credential vault. When you run AI "
                     "categorization, transaction descriptions and amounts are sent to "
                     "Anthropic's API to suggest accounts."
                 )
@@ -1158,7 +1430,7 @@ elif selected_tab == "Review & Categorize":
 
         with col3:
             if not categorization_service.is_available():
-                st.caption("⚠️ AI categorization unavailable - set ANTHROPIC_API_KEY")
+                st.caption("AI categorization unavailable — set ANTHROPIC_API_KEY")
 
 elif selected_tab == "Learned Patterns":
     st.subheader("Learned Categorization Patterns")
@@ -1185,6 +1457,6 @@ elif selected_tab == "Learned Patterns":
                 st.caption(f"Used {rule['times_used']}x")
 
             with col4:
-                if st.button("🗑️", key=f"del_rule_{rule['id']}"):
+                if st.button("Delete", key=f"del_rule_{rule['id']}"):
                     PatternLearner.delete_rule(rule['id'])
                     st.rerun()

@@ -126,8 +126,6 @@ class Client:
                      self.fiscal_year_end_month, int(self.is_active)) + extended + (self.id,)
                 )
 
-            conn.commit()
-
             # Seed chart of accounts for new clients based on entity and business type
             if is_new and seed_accounts:
                 seed_chart_of_accounts_for_client(
@@ -136,6 +134,9 @@ class Client:
                     self.entity_type or "Sole Proprietorship",
                     self.business_type or "Other"
                 )
+            # Client creation and its requested starter chart are one onboarding
+            # transaction. A seeding failure must not leave a half-created client.
+            conn.commit()
         finally:
             conn.close()
 

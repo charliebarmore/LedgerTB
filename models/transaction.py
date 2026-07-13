@@ -22,6 +22,10 @@ class ImportedTransaction:
     # Display fields (not stored)
     bank_account_name: Optional[str] = None
     suggested_account_name: Optional[str] = None
+    is_cleared: bool = False
+    reconciliation_id: Optional[int] = None
+    reconciliation_status: Optional[str] = None
+    statement_end_date: Optional[date] = None
 
     def save(self, conn=None) -> int:
         """Save or update the imported transaction.
@@ -183,18 +187,33 @@ class ImportedTransaction:
         end_date: date = None,
         status: str = None,
         bank_account_id: int = None,
-        limit: int = 500
+        limit: int = 500,
+        cleared: Optional[bool] = None,
     ) -> List['ImportedTransaction']:
         """Get all imported transactions for a client with optional filters."""
         query = """
+            WITH clearance AS (
+                SELECT jel.journal_entry_id, jel.account_id,
+                       MAX(br.id) reconciliation_id,
+                       MAX(br.status) reconciliation_status,
+                       MAX(br.statement_end_date) statement_end_date
+                FROM journal_entry_lines jel
+                JOIN bank_reconciliation_items bri ON bri.journal_entry_line_id = jel.id
+                JOIN bank_reconciliations br ON br.id = bri.reconciliation_id
+                GROUP BY jel.journal_entry_id, jel.account_id
+            )
             SELECT it.*,
                    ba.name as bank_account_name,
                    ba.account_number as bank_account_number,
                    sa.name as suggested_account_name,
-                   sa.account_number as suggested_account_number
+                   sa.account_number as suggested_account_number,
+                   c.reconciliation_id, c.reconciliation_status, c.statement_end_date
             FROM imported_transactions it
             LEFT JOIN accounts ba ON it.bank_account_id = ba.id
             LEFT JOIN accounts sa ON it.suggested_account_id = sa.id
+            LEFT JOIN clearance c
+              ON c.journal_entry_id = it.journal_entry_id
+             AND c.account_id = it.bank_account_id
             WHERE it.client_id = ?
         """
         params = [client_id]
@@ -215,6 +234,11 @@ class ImportedTransaction:
             query += " AND it.bank_account_id = ?"
             params.append(bank_account_id)
 
+        if cleared is True:
+            query += " AND c.reconciliation_id IS NOT NULL"
+        elif cleared is False:
+            query += " AND c.reconciliation_id IS NULL"
+
         query += " ORDER BY it.transaction_date DESC, it.id DESC LIMIT ?"
         params.append(limit)
 
@@ -234,7 +258,11 @@ class ImportedTransaction:
             status=row['status'],
             journal_entry_id=row['journal_entry_id'],
             bank_account_name=row['bank_account_name'],
-            suggested_account_name=row['suggested_account_name']
+            suggested_account_name=row['suggested_account_name'],
+            is_cleared=row['reconciliation_id'] is not None,
+            reconciliation_id=row['reconciliation_id'],
+            reconciliation_status=row['reconciliation_status'],
+            statement_end_date=date.fromisoformat(row['statement_end_date']) if row['statement_end_date'] else None,
         ) for row in rows]
 
     @staticmethod

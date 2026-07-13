@@ -4,6 +4,7 @@ import pytest
 
 from conftest import post_entry
 from models.journal_entry import JournalEntry
+from models.fiscal_period import FiscalPeriod
 from models.transaction import ImportedTransaction
 
 
@@ -50,3 +51,24 @@ def test_delete_plain_entry_still_works(client_id, accounts):
     ])
     JournalEntry.delete(entry.id)
     assert JournalEntry.get_by_id(entry.id) is None
+
+
+def test_closed_year_entry_cannot_be_moved_to_open_year(client_id, accounts):
+    entry = post_entry(client_id, date(2025, 12, 31), [
+        (accounts["cash"], 100, 0),
+        (accounts["revenue"], 0, 100),
+    ])
+    FiscalPeriod(
+        client_id=client_id,
+        period_name="FY 2025",
+        period_type="Year",
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 12, 31),
+        is_closed=True,
+    ).save()
+
+    entry.entry_date = date(2026, 1, 1)
+    with pytest.raises(ValueError, match="FY 2025 is closed"):
+        entry.save()
+
+    assert JournalEntry.get_by_id(entry.id).entry_date == date(2025, 12, 31)

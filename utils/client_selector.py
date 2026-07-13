@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.client import Client
 from models.transaction import ImportedTransaction
+from utils import icons
 
 
 # Narrow the sidebar (default is ~21rem). Uses width only — Streamlit collapses
@@ -68,11 +69,19 @@ def render_client_selector() -> Optional[int]:
     """
     apply_sidebar_style()
 
+    # This deliberately remains red until database encryption and verified
+    # backups are in place; every page shares this selector, so the warning
+    # cannot disappear through navigation.
+    from services.production_readiness import is_production_ready
+    if not is_production_ready():
+        st.sidebar.error("TEST DATA ONLY")
+    st.sidebar.page_link("pages/9_Data_Safety.py", label="Data Safety", icon=icons.SECURITY)
+
     clients = Client.get_all(active_only=True)
 
     if not clients:
         st.sidebar.warning("No clients yet.")
-        st.sidebar.page_link("pages/0_Clients.py", label="Create your first client", icon="➕")
+        st.sidebar.page_link("pages/0_Clients.py", label="Create your first client", icon=icons.ADD_CLIENT)
         return None
 
     # Build options dict
@@ -99,7 +108,7 @@ def render_client_selector() -> Optional[int]:
     st.session_state.selected_client_id = selected_id
 
     # Add-client affordance right where the clients are listed.
-    st.sidebar.page_link("pages/0_Clients.py", label="Add client", icon="➕")
+    st.sidebar.page_link("pages/0_Clients.py", label="Add client", icon=icons.ADD_CLIENT)
 
     # Client sub-navigation - CPA-focused workflow
     if selected_id:
@@ -109,20 +118,21 @@ def render_client_selector() -> Optional[int]:
         pending_count = ImportedTransaction.get_pending_count(selected_id)
 
         # Primary navigation - Dashboard first (client landing), then CPA workflow
-        st.sidebar.page_link("pages/7_Dashboard.py", label="Dashboard", icon="🏠")
-        st.sidebar.page_link("pages/1_Trial_Balance_Worksheet.py", label="Trial Balance Worksheet", icon="📊")
-        st.sidebar.page_link("pages/2_Journal_Entries.py", label="Journal Entries", icon="📝")
-        st.sidebar.page_link("pages/3_Chart_of_Accounts.py", label="Chart of Accounts", icon="📋")
+        st.sidebar.page_link("pages/7_Dashboard.py", label="Dashboard", icon=icons.DASHBOARD)
+        st.sidebar.page_link("pages/1_Trial_Balance_Worksheet.py", label="Trial Balance Worksheet", icon=icons.TRIAL_BALANCE)
+        st.sidebar.page_link("pages/2_Journal_Entries.py", label="Journal Entries", icon=icons.JOURNAL_ENTRIES)
+        st.sidebar.page_link("pages/3_Chart_of_Accounts.py", label="Chart of Accounts", icon=icons.CHART_OF_ACCOUNTS)
 
         # Import with pending badge
         import_label = "Import Transactions"
         if pending_count > 0:
             import_label = f"Import Transactions ({pending_count})"
-        st.sidebar.page_link("pages/4_Import_Transactions.py", label=import_label, icon="📥")
+        st.sidebar.page_link("pages/4_Import_Transactions.py", label=import_label, icon=icons.IMPORT)
 
-        st.sidebar.page_link("pages/5_Reports.py", label="Reports", icon="📈")
-        st.sidebar.page_link("pages/6_Transactions.py", label="Transactions", icon="💳")
-        st.sidebar.page_link("pages/8_Audit_Trail.py", label="Audit Trail", icon="📜")
+        st.sidebar.page_link("pages/5_Reports.py", label="Reports", icon=icons.REPORTS)
+        st.sidebar.page_link("pages/6_Transactions.py", label="Transactions", icon=icons.TRANSACTIONS)
+        st.sidebar.page_link("pages/10_Bank_Reconciliation.py", label="Bank Reconciliation", icon=icons.RECONCILIATION)
+        st.sidebar.page_link("pages/8_Audit_Trail.py", label="Audit Trail", icon=icons.AUDIT_TRAIL)
 
         # Quick report links (collapsible)
         with st.sidebar.expander("Quick Reports"):
@@ -140,7 +150,7 @@ def render_client_selector() -> Optional[int]:
                 st.switch_page("pages/5_Reports.py")
 
         st.sidebar.divider()
-        st.sidebar.page_link("pages/0_Clients.py", label="Manage Clients", icon="👥")
+        st.sidebar.page_link("pages/0_Clients.py", label="Manage Clients", icon=icons.CLIENTS)
 
     return selected_id
 
