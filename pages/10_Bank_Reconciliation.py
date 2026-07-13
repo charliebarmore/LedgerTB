@@ -126,7 +126,7 @@ else:
         edited = st.data_editor(
             frame,
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             height=min(680, 38 * len(frame) + 40),
             disabled=["Line ID", "Date", "Description", "Amount", "Journal Entry", "Source"],
             column_config={
@@ -180,7 +180,7 @@ else:
     st.dataframe(
         history_frame,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={"Ending balance": st.column_config.NumberColumn(format="$%.2f")},
     )
 

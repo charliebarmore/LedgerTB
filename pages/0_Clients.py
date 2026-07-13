@@ -75,16 +75,16 @@ div[role="radiogroup"] {
     gap: 0;
     border-bottom: 1px solid #d8dee8;
 }
-div[role="radiogroup"] > label {
+div[role="radiogroup"] label[data-testid="stRadioOption"] {
     padding: 0.25rem 1rem 0.4rem 0.75rem;
     margin-right: 0;
     border-bottom: 2px solid transparent;
 }
-div[role="radiogroup"] > label:has(input:checked) {
-    border-bottom: 2px solid #1f3a5f;
+div[role="radiogroup"] label[data-testid="stRadioOption"][data-selected="true"] {
+    border-bottom-color: #1f3a5f;
     font-weight: 600;
 }
-div[role="radiogroup"] > label > div:first-child {
+div[role="radiogroup"] label[data-testid="stRadioOption"] > div > div > div:first-child {
     display: none;  /* hide the radio dot */
 }
 </style>

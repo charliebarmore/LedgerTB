@@ -209,7 +209,7 @@ if year_period:
         with lock_cols[0]:
             st.warning(f"FY {selected_year} is closed. Entries in this year are locked.")
         with lock_cols[1]:
-            if st.button("Reopen year", key="reopen_year", use_container_width=True):
+            if st.button("Reopen year", key="reopen_year", width="stretch"):
                 FiscalPeriod.set_closed(year_period.id, False, client_id)
                 st.rerun()
     else:
@@ -315,7 +315,7 @@ else:
     st.dataframe(
         styler,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         height=min(len(df) * 36 + 40, 660),
         column_config={"Account Name": st.column_config.TextColumn(width="medium")},
     )
@@ -333,7 +333,7 @@ else:
         )
     with dd2:
         st.write("")
-        if st.button("Open GL →", use_container_width=True, key="open_gl_btn"):
+        if st.button("Open GL →", width="stretch", key="open_gl_btn"):
             st.session_state.gl_account_id = gl_pick
             st.switch_page("pages/5_Reports.py")
 

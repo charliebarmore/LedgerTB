@@ -73,7 +73,7 @@ with col1:
     if st.button(
         f"**Total Assets** {_toggle_icon('assets')}\n\n${total_assets:,.2f}",
         key="btn_assets",
-        use_container_width=True,
+        width="stretch",
         type="secondary" if st.session_state.dashboard_expanded != 'assets' else "primary"
     ):
         st.session_state.dashboard_expanded = 'assets' if st.session_state.dashboard_expanded != 'assets' else None
@@ -83,7 +83,7 @@ with col2:
     if st.button(
         f"**Total Liabilities** {_toggle_icon('liabilities')}\n\n${total_liabilities:,.2f}",
         key="btn_liabilities",
-        use_container_width=True,
+        width="stretch",
         type="secondary" if st.session_state.dashboard_expanded != 'liabilities' else "primary"
     ):
         st.session_state.dashboard_expanded = 'liabilities' if st.session_state.dashboard_expanded != 'liabilities' else None
@@ -93,7 +93,7 @@ with col3:
     if st.button(
         f"**Fiscal YTD Net Income** {_toggle_icon('income')}\n\n${income_report['net_income']:,.2f}",
         key="btn_income",
-        use_container_width=True,
+        width="stretch",
         type="secondary" if st.session_state.dashboard_expanded != 'income' else "primary"
     ):
         st.session_state.dashboard_expanded = 'income' if st.session_state.dashboard_expanded != 'income' else None
@@ -104,7 +104,7 @@ with col4:
         if st.button(
             f"**Pending Imports** →\n\n{pending_count} (Action needed)",
             key="btn_pending",
-            use_container_width=True,
+            width="stretch",
             type="secondary"
         ):
             st.switch_page("pages/4_Import_Transactions.py")
@@ -112,7 +112,7 @@ with col4:
         st.button(
             f"**Pending Imports**\n\n0 (All clear)",
             key="btn_pending",
-            use_container_width=True,
+            width="stretch",
             type="secondary",
             disabled=True
         )
