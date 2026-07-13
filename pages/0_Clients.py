@@ -61,10 +61,44 @@ def _format_address(client):
 if 'client_added_message' in st.session_state:
     st.success(st.session_state.pop('client_added_message'))
 
-# Tabs for viewing and adding clients
-tab1, tab2 = st.tabs(["View Clients", "Add Client"])
+# View switcher. st.tabs can't be preselected, so the sidebar "Add client"
+# button couldn't land on the add form — a radio driven by session state can.
+# Queued view changes (sidebar deep link, post-add return to the list) are
+# applied here, before the widget is instantiated on this run.
+if '_clients_view_pending' in st.session_state:
+    st.session_state['clients_view'] = st.session_state.pop('_clients_view_pending')
 
-with tab1:
+# Render the horizontal radio as segmented tabs (no dots, underlined selection).
+st.markdown("""
+<style>
+div[role="radiogroup"] {
+    gap: 0;
+    border-bottom: 1px solid #d8dee8;
+}
+div[role="radiogroup"] > label {
+    padding: 0.25rem 1rem 0.4rem 0.75rem;
+    margin-right: 0;
+    border-bottom: 2px solid transparent;
+}
+div[role="radiogroup"] > label:has(input:checked) {
+    border-bottom: 2px solid #1f3a5f;
+    font-weight: 600;
+}
+div[role="radiogroup"] > label > div:first-child {
+    display: none;  /* hide the radio dot */
+}
+</style>
+""", unsafe_allow_html=True)
+
+view = st.radio(
+    "Client view",
+    options=["View Clients", "Add Client"],
+    key="clients_view",
+    horizontal=True,
+    label_visibility="collapsed",
+)
+
+if view == "View Clients":
     # Filter options
     col1, col2 = st.columns([1, 3])
     with col1:
@@ -224,7 +258,7 @@ with tab1:
                             st.session_state.pop('_edit_loaded_id', None)
                             st.rerun()
 
-with tab2:
+else:
     st.subheader("Add New Client")
 
     # After a successful add we clear the fields; do it here (before the widgets
@@ -413,6 +447,8 @@ with tab2:
                         msg += f" Chart of accounts created for {entity_type} / {business_type}."
                     st.session_state['client_added_message'] = msg
                     st.session_state['_clear_add_form'] = True
+                    # Return to the list (with the new client expanded) on rerun.
+                    st.session_state['_clients_view_pending'] = "View Clients"
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error adding client: {e}")
