@@ -177,9 +177,10 @@ if year_period:
             st.success("Trial balance balanced")
         else:
             st.error("Trial balance out of balance")
+        # \$ so markdown doesn't treat the paired $…$ as inline LaTeX.
         st.caption(
-            f"Debits ${checklist['total_debits']:,.2f} · "
-            f"Credits ${checklist['total_credits']:,.2f}"
+            f"Debits \\${checklist['total_debits']:,.2f} · "
+            f"Credits \\${checklist['total_credits']:,.2f}"
         )
     with check_cols[1]:
         if checklist["pending_imports"]:
@@ -213,33 +214,35 @@ if year_period:
                 FiscalPeriod.set_closed(year_period.id, False, client_id)
                 st.rerun()
     else:
-        st.caption(f"FY {selected_year} is open.")
-        confirmation_phrase = f"CLOSE FY {selected_year}"
-        close_confirmation = st.text_input(
-            f"Type {confirmation_phrase} to confirm",
-            key="close_year_confirmation",
-            placeholder=confirmation_phrase,
-        )
-        warnings_acknowledged = not checklist["warning_count"] or st.checkbox(
-            "I reviewed the outstanding items and accept closing with these warnings.",
-            key="close_warning_acknowledgement",
-        )
-        explicitly_confirmed = close_confirmation.strip().upper() == confirmation_phrase
-        if st.button(
-            "Close fiscal year", key="close_year", type="primary",
-            disabled=not explicitly_confirmed or not warnings_acknowledged,
-        ):
-            try:
-                FiscalPeriod.set_closed(
-                    year_period.id, True, client_id,
-                    confirmation={
-                        "explicit_confirmation": explicitly_confirmed,
-                        "warnings_acknowledged": warnings_acknowledged,
-                    },
-                )
-                st.rerun()
-            except ValueError as exc:
-                st.error(str(exc))
+        # Collapsed by default: closing the year is an occasional action, and
+        # expanded it pushed the worksheet itself below the fold.
+        with st.expander(f"Close fiscal year {selected_year} (FY is open)"):
+            confirmation_phrase = f"CLOSE FY {selected_year}"
+            close_confirmation = st.text_input(
+                f"Type {confirmation_phrase} to confirm",
+                key="close_year_confirmation",
+                placeholder=confirmation_phrase,
+            )
+            warnings_acknowledged = not checklist["warning_count"] or st.checkbox(
+                "I reviewed the outstanding items and accept closing with these warnings.",
+                key="close_warning_acknowledgement",
+            )
+            explicitly_confirmed = close_confirmation.strip().upper() == confirmation_phrase
+            if st.button(
+                "Close fiscal year", key="close_year", type="primary",
+                disabled=not explicitly_confirmed or not warnings_acknowledged,
+            ):
+                try:
+                    FiscalPeriod.set_closed(
+                        year_period.id, True, client_id,
+                        confirmation={
+                            "explicit_confirmation": explicitly_confirmed,
+                            "warnings_acknowledged": warnings_acknowledged,
+                        },
+                    )
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
 
 st.markdown("---")
 
