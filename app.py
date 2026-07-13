@@ -30,6 +30,7 @@ from models.client import Client
 from models.account import Account
 from models.journal_entry import JournalEntry
 from utils.client_selector import render_client_selector
+from utils import icons
 
 # Initialize database on startup
 init_database()
@@ -37,7 +38,7 @@ init_database()
 # Page config
 st.set_page_config(
     page_title=APP_NAME,
-    page_icon="📚",
+    page_icon=icons.DASHBOARD,
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -52,7 +53,7 @@ if selected_client_id:
     st.switch_page("pages/7_Dashboard.py")
 
 # ---- Header ----
-st.title(f"📚 {APP_NAME}")
+st.title(APP_NAME)
 st.caption("CPA-focused bookkeeping — trial balance worksheet, adjusting entries, and workpaper-ready reports.")
 
 # ---- At-a-glance metrics ----
@@ -74,14 +75,15 @@ st.divider()
 st.subheader("Jump to")
 n1, n2, n3 = st.columns(3)
 with n1:
-    st.page_link("pages/1_Trial_Balance_Worksheet.py", label="Trial Balance Worksheet", icon="📊")
-    st.page_link("pages/2_Journal_Entries.py", label="Journal Entries", icon="📝")
+    st.page_link("pages/1_Trial_Balance_Worksheet.py", label="Trial Balance Worksheet", icon=icons.TRIAL_BALANCE)
+    st.page_link("pages/2_Journal_Entries.py", label="Journal Entries", icon=icons.JOURNAL_ENTRIES)
 with n2:
-    st.page_link("pages/4_Import_Transactions.py", label="Import Transactions", icon="📥")
-    st.page_link("pages/3_Chart_of_Accounts.py", label="Chart of Accounts", icon="📒")
+    st.page_link("pages/4_Import_Transactions.py", label="Import Transactions", icon=icons.IMPORT)
+    st.page_link("pages/10_Bank_Reconciliation.py", label="Bank Reconciliation", icon=icons.RECONCILIATION)
+    st.page_link("pages/3_Chart_of_Accounts.py", label="Chart of Accounts", icon=icons.CHART_OF_ACCOUNTS)
 with n3:
-    st.page_link("pages/5_Reports.py", label="Reports", icon="📄")
-    st.page_link("pages/0_Clients.py", label="Clients", icon="👥")
+    st.page_link("pages/5_Reports.py", label="Reports", icon=icons.REPORTS)
+    st.page_link("pages/0_Clients.py", label="Clients", icon=icons.CLIENTS)
 
 st.divider()
 
@@ -96,7 +98,7 @@ if clients:
         st.caption(f"…and {len(clients) - 5} more")
     st.page_link("pages/0_Clients.py", label="Manage clients →")
 else:
-    st.caption("No clients yet — use **➕ Create your first client** in the sidebar to get started.")
+    st.caption("No clients yet — use **Create your first client** in the sidebar to get started.")
 
 # ---- AI status (compact, non-intrusive) ----
 st.sidebar.divider()

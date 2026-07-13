@@ -107,6 +107,19 @@ class JournalEntry:
         old_values = None
 
         try:
+            # SQLite foreign keys ensure referenced accounts exist, but cannot
+            # express that every line belongs to the same client as the entry.
+            # Enforce that tenant boundary before inserting or replacing lines.
+            account_ids = {line.account_id for line in self.lines}
+            placeholders = ", ".join("?" for _ in account_ids)
+            cursor.execute(
+                f"SELECT id FROM accounts WHERE client_id = ? AND id IN ({placeholders})",
+                [self.client_id, *account_ids],
+            )
+            owned_account_ids = {row["id"] for row in cursor.fetchall()}
+            if owned_account_ids != account_ids:
+                raise ValueError("Every journal entry account must belong to the selected client.")
+
             if is_new:
                 # Insert new entry
                 cursor.execute(
@@ -120,26 +133,55 @@ class JournalEntry:
                 self.id = cursor.lastrowid
             else:
                 # Get old values for audit log
-                cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (self.id,))
+                cursor.execute(
+                    "SELECT * FROM journal_entries WHERE id = ? AND client_id = ?",
+                    (self.id, self.client_id),
+                )
                 old_row = cursor.fetchone()
-                if old_row:
-                    old_values = {
-                        'entry_date': old_row['entry_date'],
-                        'description': old_row['description'],
-                        'source_reference': old_row['source_reference'],
-                        'entry_type': old_row['entry_type'],
-                        'aje_reference': old_row['aje_reference'] if 'aje_reference' in old_row.keys() else None
-                    }
+                if not old_row:
+                    raise ValueError("Journal entry not found for the selected client.")
+                old_entry_date = date.fromisoformat(old_row['entry_date'])
+                old_closed = FiscalPeriod.get_closed_period_for_date(
+                    self.client_id, old_entry_date
+                )
+                if old_closed:
+                    raise ValueError(
+                        f"{old_closed.period_name} is closed. Reopen the year before "
+                        f"editing entries dated {old_entry_date.isoformat()}."
+                    )
+                old_values = {
+                    'entry_date': old_row['entry_date'],
+                    'description': old_row['description'],
+                    'source_reference': old_row['source_reference'],
+                    'entry_type': old_row['entry_type'],
+                    'aje_reference': old_row['aje_reference'] if 'aje_reference' in old_row.keys() else None
+                }
+
+                cursor.execute(
+                    """
+                    SELECT 1
+                    FROM bank_reconciliation_items bri
+                    JOIN journal_entry_lines jel ON jel.id = bri.journal_entry_line_id
+                    WHERE jel.journal_entry_id = ?
+                    LIMIT 1
+                    """,
+                    (self.id,),
+                )
+                if cursor.fetchone():
+                    raise ValueError(
+                        "This entry is selected in a bank reconciliation. "
+                        "Unselect it (or reopen the completed reconciliation) before editing."
+                    )
 
                 # Update existing entry
                 cursor.execute(
                     """
                     UPDATE journal_entries
                     SET entry_date = ?, description = ?, source_reference = ?, entry_type = ?, aje_reference = ?
-                    WHERE id = ?
+                    WHERE id = ? AND client_id = ?
                     """,
                     (self.entry_date.isoformat(), self.description, self.source_reference,
-                     self.entry_type, self.aje_reference, self.id)
+                     self.entry_type, self.aje_reference, self.id, self.client_id)
                 )
                 # Delete existing lines
                 cursor.execute("DELETE FROM journal_entry_lines WHERE journal_entry_id = ?", (self.id,))
@@ -341,6 +383,22 @@ class JournalEntry:
                     raise ValueError(
                         f"{closed.period_name} is closed. Reopen the year before deleting "
                         f"entries dated {entry_date.isoformat()}."
+                    )
+
+                cursor.execute(
+                    """
+                    SELECT 1
+                    FROM bank_reconciliation_items bri
+                    JOIN journal_entry_lines jel ON jel.id = bri.journal_entry_line_id
+                    WHERE jel.journal_entry_id = ?
+                    LIMIT 1
+                    """,
+                    (entry_id,),
+                )
+                if cursor.fetchone():
+                    raise ValueError(
+                        "This entry is selected in a bank reconciliation. "
+                        "Unselect it (or reopen the completed reconciliation) before deleting."
                     )
 
                 # Unlink any imported transactions that reference this entry first.

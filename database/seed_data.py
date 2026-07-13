@@ -476,4 +476,5 @@ def seed_chart_of_accounts_for_client(
             """,
             data
         )
-        conn.commit()
+        # The caller owns the transaction so client creation and account seeding
+        # commit or roll back together.

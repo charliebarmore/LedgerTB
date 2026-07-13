@@ -1,3 +1,6 @@
+# Full application + test/build tooling used by scripts/build_release.sh.
+-r requirements-dev.txt
+
 # Desktop app: native window (Tier 1) + standalone .app build (Tier 2)
 pywebview>=5.0
 pyinstaller>=6.0

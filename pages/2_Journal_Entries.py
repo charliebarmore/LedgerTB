@@ -11,20 +11,21 @@ from models.client import Client
 from models.journal_entry import JournalEntry, JournalEntryLine
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils import icons
 from constants import EntryType
 
 # Initialize database
 init_database()
 
-st.set_page_config(page_title="Journal Entries", page_icon="📝", layout="wide")
+st.set_page_config(page_title="Journal Entries", page_icon=icons.JOURNAL_ENTRIES, layout="wide")
 
 # Client selector in sidebar
 client_id = render_client_selector()
 
-st.title("📝 Journal Entries")
+st.title("Journal Entries")
 
 # Quick link to Trial Balance Worksheet
-st.page_link("pages/1_Trial_Balance_Worksheet.py", label="← Back to Trial Balance Worksheet", icon="📊")
+st.page_link("pages/1_Trial_Balance_Worksheet.py", label="Back to Trial Balance Worksheet", icon=icons.TRIAL_BALANCE)
 
 if not client_id:
     st.warning("Please create a client first in the Clients page.")
@@ -95,6 +96,15 @@ with tab1:
     accounts = Account.get_all(client_id, active_only=True)
     account_options = {0: "-- Select Account --"}
     account_options.update({a.id: a.display_name() for a in accounts})
+    # Preserve an entry's historical account selections while editing even if
+    # an account has since been deactivated. Inactive accounts remain unavailable
+    # for brand-new lines, but editing must not silently reset an existing line.
+    if st.session_state.editing_entry_id:
+        for account_id in {line['account_id'] for line in st.session_state.je_lines}:
+            if account_id and account_id not in account_options:
+                inactive = Account.get_by_id(account_id, client_id=client_id)
+                if inactive:
+                    account_options[account_id] = f"{inactive.display_name()} (inactive)"
 
     # Entry header - use session state values if editing
     entry_type_options = EntryType.ALL
@@ -189,12 +199,12 @@ with tab1:
             st.write("")  # Spacing
             st.write("")  # Spacing
             if len(st.session_state.je_lines) > 2:
-                if st.button("🗑️", key=f"delete_line_{i}"):
+                if st.button("Remove", key=f"delete_line_{i}", help="Remove this line"):
                     st.session_state.je_lines.pop(i)
                     st.rerun()
 
     # Add line button
-    if st.button("➕ Add Line"):
+    if st.button("Add line"):
         st.session_state.je_lines.append({'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''})
         st.rerun()
 
@@ -312,7 +322,7 @@ with tab2:
 
             # Use different styling for special entry types
             if entry.entry_type == 'Beginning Balance':
-                with st.expander(f"📋 {header}", expanded=False):
+                with st.expander(header, expanded=False):
                     st.success("**Beginning Balance Entry**")
                     col1, col2 = st.columns([3, 1])
 
@@ -356,7 +366,7 @@ with tab2:
                             except ValueError as e:
                                 st.error(str(e))
             elif entry.entry_type == 'Adjusting':
-                with st.expander(f"📝 {header}", expanded=False):
+                with st.expander(header, expanded=False):
                     st.info("**Adjusting Entry**")
                     col1, col2 = st.columns([3, 1])
 

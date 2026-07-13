@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 import platformdirs
+from version import APP_VERSION
 
 load_dotenv()
 
@@ -29,6 +30,7 @@ USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 # default location is for test/seed data only and is NOT a sanctioned location
 # for client PII.
 DATABASE_PATH = Path(os.getenv("PROBOOKS_DB_PATH", USER_DATA_DIR / "accounting.db"))
+BACKUP_DIR = Path(os.getenv("PROBOOKS_BACKUP_DIR", USER_DATA_DIR / "backups"))
 
 # Anthropic API key.
 # Priority: environment/.env (dev), then a key file saved by the in-app setup
@@ -38,10 +40,12 @@ API_KEY_FILE = USER_DATA_DIR / "anthropic_api_key"
 
 
 def _read_saved_api_key() -> str:
-    try:
-        return API_KEY_FILE.read_text().strip()
-    except Exception:
-        return ""
+    from utils.secure_store import get_secret, migrate_legacy_secret
+    return (
+        get_secret("anthropic_api_key")
+        or migrate_legacy_secret("anthropic_api_key", API_KEY_FILE)
+        or ""
+    )
 
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "") or _read_saved_api_key()

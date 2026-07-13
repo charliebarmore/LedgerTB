@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
 from utils.client_selector import render_client_selector, get_selected_client
+from utils import icons
 from models.client import Client
 from models.fiscal_period import FiscalPeriod
 from models.reports import ReportGenerator
@@ -30,7 +31,7 @@ init_database()
 
 st.set_page_config(
     page_title="Trial Balance Worksheet",
-    page_icon="📊",
+    page_icon=icons.TRIAL_BALANCE,
     layout="wide"
 )
 
@@ -46,7 +47,7 @@ if not client:
     st.error("Client not found.")
     st.stop()
 
-st.title("📊 Trial Balance Worksheet")
+st.title("Trial Balance Worksheet")
 st.caption(f"Viewing: **{client.name}**")
 
 # Period Selection
@@ -166,16 +167,16 @@ if year_period:
     lock_cols = st.columns([3, 1])
     with lock_cols[0]:
         if year_period.is_closed:
-            st.warning(f"🔒 FY {selected_year} is CLOSED — entries in this year are locked (no add / edit / delete).")
+            st.warning(f"FY {selected_year} is closed. Entries in this year are locked.")
         else:
-            st.caption(f"🔓 FY {selected_year} is open.")
+            st.caption(f"FY {selected_year} is open.")
     with lock_cols[1]:
         if year_period.is_closed:
-            if st.button("🔓 Reopen Year", key="reopen_year", use_container_width=True):
+            if st.button("Reopen year", key="reopen_year", use_container_width=True):
                 FiscalPeriod.set_closed(year_period.id, False)
                 st.rerun()
         else:
-            if st.button("🔒 Close Year", key="close_year", type="primary", use_container_width=True):
+            if st.button("Close year", key="close_year", type="primary", use_container_width=True):
                 FiscalPeriod.set_closed(year_period.id, True)
                 st.rerun()
 

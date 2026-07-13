@@ -12,17 +12,18 @@ from models.client import Client
 from models.reports import ReportGenerator
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils import icons
 from utils.export import sanitize_df
 
 # Initialize database
 init_database()
 
-st.set_page_config(page_title="Reports", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Reports", page_icon=icons.REPORTS, layout="wide")
 
 # Client selector in sidebar
 client_id = render_client_selector()
 
-st.title("📊 Reports")
+st.title("Reports")
 
 if not client_id:
     st.warning("Please create a client first in the Clients page.")
@@ -61,7 +62,9 @@ if selected_report == "Trial Balance":
     rows = ReportGenerator.trial_balance(client_id, as_of_date)
 
     # Get accounts for drill-down
-    accounts = Account.get_all(client_id, active_only=True)
+    # Include deactivated accounts for historical drill-down. They remain
+    # unavailable in new-entry pickers, but their ledger history must be reachable.
+    accounts = Account.get_all(client_id, active_only=False)
     account_id_lookup = {f"{a.account_number}": a.id for a in accounts}
 
     if not rows:
@@ -131,7 +134,7 @@ if selected_report == "Trial Balance":
             buffer.seek(0)
 
         st.download_button(
-            label="📥 Download Excel",
+            label="Download Excel",
             data=buffer,
             file_name=f"trial_balance_{client.name}_{as_of_date}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -149,7 +152,7 @@ elif selected_report == "Income Statement":
     report = ReportGenerator.income_statement(client_id, is_start, is_end)
 
     # Get accounts for drill-down
-    accounts = Account.get_all(client_id, active_only=True)
+    accounts = Account.get_all(client_id, active_only=False)
     account_id_lookup = {a.account_number: a.id for a in accounts}
 
     def is_drill_down_link(account_number, account_name, balance, key_prefix):
@@ -223,7 +226,7 @@ elif selected_report == "Income Statement":
     buffer.seek(0)
 
     st.download_button(
-        label="📥 Download Excel",
+        label="Download Excel",
         data=buffer,
         file_name=f"income_statement_{client.name}_{is_start}_to_{is_end}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -239,7 +242,7 @@ elif selected_report == "Balance Sheet":
     report = ReportGenerator.balance_sheet(client_id, bs_date)
 
     # Get accounts for drill-down
-    accounts = Account.get_all(client_id, active_only=True)
+    accounts = Account.get_all(client_id, active_only=False)
     account_id_lookup = {a.account_number: a.id for a in accounts}
 
     def drill_down_link(account_number, account_name, balance, key_prefix):
@@ -334,7 +337,7 @@ elif selected_report == "Balance Sheet":
     buffer.seek(0)
 
     st.download_button(
-        label="📥 Download Excel",
+        label="Download Excel",
         data=buffer,
         file_name=f"balance_sheet_{client.name}_{bs_date}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -344,8 +347,11 @@ elif selected_report == "General Ledger":
     st.subheader("General Ledger")
 
     # Account selection
-    accounts = Account.get_all(client_id, active_only=True)
-    account_options = {a.id: a.display_name() for a in accounts}
+    accounts = Account.get_all(client_id, active_only=False)
+    account_options = {
+        a.id: a.display_name() + (" (inactive)" if not a.is_active else "")
+        for a in accounts
+    }
 
     # Check for drill-down from another report
     default_account = st.session_state.get('gl_account_id', None)
@@ -471,7 +477,7 @@ elif selected_report == "General Ledger":
             buffer.seek(0)
 
             st.download_button(
-                label="📥 Download Excel",
+                label="Download Excel",
                 data=buffer,
                 file_name=f"general_ledger_{client.name}_{account.account_number}_{gl_start}_to_{gl_end}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

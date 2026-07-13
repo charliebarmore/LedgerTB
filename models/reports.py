@@ -103,7 +103,7 @@ class ReportGenerator:
                     journal_entry_lines jel
                     JOIN journal_entries je ON jel.journal_entry_id = je.id {date_filter}
                 ) ON a.id = jel.account_id
-                WHERE a.client_id = ? AND a.is_active = 1
+                WHERE a.client_id = ?
                 GROUP BY a.id, a.account_number, a.name, a.type
                 HAVING total_debits > 0 OR total_credits > 0
                 ORDER BY a.account_number
@@ -158,11 +158,21 @@ class ReportGenerator:
         ps, pe = period_start.isoformat(), period_end.isoformat()
 
         with get_cursor() as cursor:
-            # Get all active accounts for the client
+            # Historical reports must retain deactivated accounts when they have
+            # activity. Deactivation prevents future posting; it must not erase an
+            # account from prior-period financial statements. Never-used inactive
+            # accounts remain hidden from the worksheet's "show all" view.
             cursor.execute("""
                 SELECT id, account_number, name, type
                 FROM accounts
-                WHERE client_id = ? AND is_active = 1
+                WHERE client_id = ?
+                  AND (
+                      is_active = 1
+                      OR EXISTS (
+                          SELECT 1 FROM journal_entry_lines jel
+                          WHERE jel.account_id = accounts.id
+                      )
+                  )
                 ORDER BY account_number
             """, (client_id,))
             accounts = cursor.fetchall()
@@ -210,10 +220,10 @@ class ReportGenerator:
             """, (client_id, ps, pe))
             aje_detail_rows = cursor.fetchall()
 
-        active_ids = {acct['id'] for acct in accounts}
+        reportable_ids = {acct['id'] for acct in accounts}
         aje_details_by_account = {}
         for a in aje_detail_rows:
-            if a['account_id'] not in active_ids:
+            if a['account_id'] not in reportable_ids:
                 continue
             aje_details_by_account.setdefault(a['account_id'], []).append({
                 'entry_id': a['id'],
@@ -337,7 +347,7 @@ class ReportGenerator:
                     JOIN journal_entries je ON jel.journal_entry_id = je.id
                         AND je.entry_date >= ? AND je.entry_date <= ?
                 ) ON a.id = jel.account_id
-                WHERE a.client_id = ? AND a.type = 'Revenue' AND a.is_active = 1
+                WHERE a.client_id = ? AND a.type = 'Revenue'
                 GROUP BY a.id
                 HAVING balance != 0
                 ORDER BY a.account_number
@@ -365,7 +375,7 @@ class ReportGenerator:
                     JOIN journal_entries je ON jel.journal_entry_id = je.id
                         AND je.entry_date >= ? AND je.entry_date <= ?
                 ) ON a.id = jel.account_id
-                WHERE a.client_id = ? AND a.type = 'Expense' AND a.is_active = 1
+                WHERE a.client_id = ? AND a.type = 'Expense'
                 GROUP BY a.id
                 HAVING balance != 0
                 ORDER BY a.account_number
@@ -415,7 +425,7 @@ class ReportGenerator:
                         JOIN journal_entries je ON jel.journal_entry_id = je.id
                             AND je.entry_date <= ?
                     ) ON a.id = jel.account_id
-                    WHERE a.client_id = ? AND a.type = ? AND a.is_active = 1
+                    WHERE a.client_id = ? AND a.type = ?
                     GROUP BY a.id
                     ORDER BY a.account_number
                 """, (as_of_date.isoformat(), client_id, account_type))

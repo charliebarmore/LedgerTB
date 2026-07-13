@@ -111,23 +111,29 @@ class Account:
                 )
                 self.id = cursor.lastrowid
             else:
-                cursor.execute("SELECT account_number, name, type, subtype, is_active FROM accounts WHERE id = ?", (self.id,))
+                cursor.execute(
+                    "SELECT account_number, name, type, subtype, is_active "
+                    "FROM accounts WHERE id = ? AND client_id = ?",
+                    (self.id, self.client_id),
+                )
                 prev = cursor.fetchone()
-                if prev:
-                    old_values = {
-                        'account_number': prev['account_number'],
-                        'name': prev['name'],
-                        'type': prev['type'],
-                        'subtype': prev['subtype'],
-                        'is_active': bool(prev['is_active']),
-                    }
+                if not prev:
+                    raise ValueError("Account not found for the selected client.")
+                old_values = {
+                    'account_number': prev['account_number'],
+                    'name': prev['name'],
+                    'type': prev['type'],
+                    'subtype': prev['subtype'],
+                    'is_active': bool(prev['is_active']),
+                }
                 cursor.execute(
                     """
                     UPDATE accounts
                     SET account_number = ?, name = ?, type = ?, subtype = ?, description = ?, is_active = ?
-                    WHERE id = ?
+                    WHERE id = ? AND client_id = ?
                     """,
-                    (self.account_number, self.name, self.type, self.subtype, self.description, int(self.is_active), self.id)
+                    (self.account_number, self.name, self.type, self.subtype,
+                     self.description, int(self.is_active), self.id, self.client_id)
                 )
 
         new_values = {

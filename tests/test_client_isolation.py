@@ -12,7 +12,7 @@ import pytest
 from conftest import post_entry
 from models.client import Client
 from models.account import Account
-from models.journal_entry import JournalEntry
+from models.journal_entry import JournalEntry, JournalEntryLine
 from models.reports import ReportGenerator
 
 
@@ -83,3 +83,47 @@ def test_get_balance_scoped_to_wrong_client_is_zero(two_clients):
     d = two_clients
     assert Account.get_balance(d["b_cash"], client_id=d["a"]) == 0.0
     assert Account.get_balance(d["b_cash"], client_id=d["b"]) == 500.0
+
+
+def test_entry_save_rejects_cross_client_accounts(two_clients):
+    d = two_clients
+    entry = JournalEntry(
+        client_id=d["a"],
+        entry_date=date(2025, 2, 1),
+        lines=[
+            JournalEntryLine(account_id=d["a_cash"], debit=100),
+            JournalEntryLine(account_id=d["b_rev"], credit=100),
+        ],
+    )
+    with pytest.raises(ValueError, match="must belong"):
+        entry.save()
+    assert JournalEntry.count(d["a"]) == 1
+    assert JournalEntry.count(d["b"]) == 1
+
+
+def test_entry_update_rejects_cross_client_id(two_clients):
+    d = two_clients
+    entry = JournalEntry(
+        id=d["b_entry"],
+        client_id=d["a"],
+        entry_date=date(2025, 2, 1),
+        description="must not overwrite B",
+        lines=[
+            JournalEntryLine(account_id=d["a_cash"], debit=100),
+            JournalEntryLine(account_id=d["a_rev"], credit=100),
+        ],
+    )
+    with pytest.raises(ValueError, match="not found"):
+        entry.save()
+    assert JournalEntry.get_by_id(d["b_entry"]).description == "test entry"
+
+
+def test_account_update_rejects_cross_client_id(two_clients):
+    d = two_clients
+    spoofed = Account(
+        id=d["b_cash"], client_id=d["a"], account_number="9999",
+        name="must not overwrite B", type="Asset",
+    )
+    with pytest.raises(ValueError, match="not found"):
+        spoofed.save()
+    assert Account.get_by_id(d["b_cash"]).name == "B Cash"

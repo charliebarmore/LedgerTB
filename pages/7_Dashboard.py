@@ -13,16 +13,17 @@ from models.transaction import ImportedTransaction
 from models.reports import ReportGenerator
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils import icons
 
 # Initialize database
 init_database()
 
-st.set_page_config(page_title="Dashboard", page_icon="🏠", layout="wide")
+st.set_page_config(page_title="Dashboard", page_icon=icons.DASHBOARD, layout="wide")
 
 # Client selector in sidebar
 client_id = render_client_selector()
 
-st.title("🏠 Dashboard")
+st.title("Dashboard")
 
 if not client_id:
     st.warning("Please create a client first in the Clients page.")
@@ -199,15 +200,16 @@ with col1:
                     st.text(f"${entry.total_debits():,.2f}")
                 st.divider()
 
-    st.page_link("pages/2_Journal_Entries.py", label="View All Entries →", icon="📝")
+    st.page_link("pages/2_Journal_Entries.py", label="View all entries", icon=icons.JOURNAL_ENTRIES)
 
 with col2:
     st.subheader("Quick Actions")
 
-    st.page_link("pages/2_Journal_Entries.py", label="📝 New Journal Entry")
-    st.page_link("pages/4_Import_Transactions.py", label="📥 Import Transactions")
-    st.page_link("pages/5_Reports.py", label="📊 Generate Reports")
-    st.page_link("pages/3_Chart_of_Accounts.py", label="📋 Manage Accounts")
+    st.page_link("pages/2_Journal_Entries.py", label="New journal entry", icon=icons.JOURNAL_ENTRIES)
+    st.page_link("pages/4_Import_Transactions.py", label="Import transactions", icon=icons.IMPORT)
+    st.page_link("pages/10_Bank_Reconciliation.py", label="Reconcile accounts", icon=icons.RECONCILIATION)
+    st.page_link("pages/5_Reports.py", label="Generate reports", icon=icons.REPORTS)
+    st.page_link("pages/3_Chart_of_Accounts.py", label="Manage accounts", icon=icons.CHART_OF_ACCOUNTS)
 
 st.divider()
 
