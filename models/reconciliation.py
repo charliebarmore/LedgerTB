@@ -1,12 +1,11 @@
 """Bank and credit-card statement reconciliation domain model."""
 
-import json
-import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Optional
 
 from database.connection import get_connection, get_cursor
+from models.audit_log import AuditLog
 from money import to_cents, to_dollars
 
 
@@ -74,18 +73,9 @@ class BankReconciliation:
     @staticmethod
     def _audit(cursor, client_id, record_id, action, old_values=None, new_values=None):
         """Write the reconciliation audit row in the same transaction."""
-        cursor.execute(
-            """
-            INSERT INTO audit_log
-                (client_id, table_name, record_id, action, old_values, new_values, session_id)
-            VALUES (?, 'bank_reconciliations', ?, ?, ?, ?, ?)
-            """,
-            (
-                client_id, record_id, action,
-                json.dumps(old_values) if old_values else None,
-                json.dumps(new_values) if new_values else None,
-                str(uuid.uuid4()),
-            ),
+        AuditLog.write(
+            cursor, client_id, "bank_reconciliations", record_id, action,
+            old_values=old_values, new_values=new_values,
         )
 
     @classmethod
@@ -311,6 +301,16 @@ class BankReconciliation:
             row = cursor.fetchone()
             if not row or row["status"] != "Draft":
                 raise ValueError("Only a draft reconciliation can be changed.")
+            cursor.execute(
+                """
+                SELECT journal_entry_line_id
+                FROM bank_reconciliation_items
+                WHERE reconciliation_id = ?
+                ORDER BY journal_entry_line_id
+                """,
+                (self.id,),
+            )
+            previous = [item["journal_entry_line_id"] for item in cursor.fetchall()]
             cursor.execute("DELETE FROM bank_reconciliation_items WHERE reconciliation_id = ?", (self.id,))
             cursor.executemany(
                 "INSERT INTO bank_reconciliation_items (reconciliation_id, journal_entry_line_id) VALUES (?, ?)",
@@ -320,6 +320,13 @@ class BankReconciliation:
                 "UPDATE bank_reconciliations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (self.id,),
             )
+            selected = sorted(requested)
+            if previous != selected:
+                self._audit(
+                    cursor, self.client_id, self.id, "UPDATE",
+                    old_values={"cleared_line_ids": previous, "cleared_line_count": len(previous)},
+                    new_values={"cleared_line_ids": selected, "cleared_line_count": len(selected)},
+                )
             conn.commit()
         except Exception:
             conn.rollback()
@@ -398,7 +405,7 @@ class BankReconciliation:
                 """,
                 (self.id,),
             )
-            self._audit(cursor, self.client_id, self.id, "UPDATE",
+            self._audit(cursor, self.client_id, self.id, "CLOSE",
                         old_values={"status": "Draft"},
                         new_values={"status": "Completed", "cleared_balance": to_dollars(cleared_cents)})
             conn.commit()
@@ -437,7 +444,7 @@ class BankReconciliation:
                 """,
                 (self.id,),
             )
-            self._audit(cursor, self.client_id, self.id, "UPDATE",
+            self._audit(cursor, self.client_id, self.id, "REOPEN",
                         old_values={"status": "Completed"}, new_values={"status": "Draft"})
             conn.commit()
         except Exception:

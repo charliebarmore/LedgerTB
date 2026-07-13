@@ -1,4 +1,3 @@
-import sqlite3
 from dataclasses import dataclass
 from typing import Optional, List
 from datetime import date
@@ -38,9 +37,12 @@ class ImportedTransaction:
         if owns_conn:
             conn = get_connection()
         cursor = conn.cursor()
+        from models.audit_log import AuditLog
+        is_new = self.id is None
+        old_values = None
 
         try:
-            if self.id is None:
+            if is_new:
                 cursor.execute(
                     """
                     INSERT INTO imported_transactions
@@ -63,11 +65,28 @@ class ImportedTransaction:
                 self.id = cursor.lastrowid
             else:
                 cursor.execute(
+                    "SELECT * FROM imported_transactions WHERE id = ? AND client_id = ?",
+                    (self.id, self.client_id),
+                )
+                old = cursor.fetchone()
+                if not old:
+                    raise ValueError("Imported transaction not found for the selected client.")
+                old_values = {
+                    "import_batch": old["import_batch"],
+                    "transaction_date": old["transaction_date"],
+                    "description": old["description"],
+                    "amount": to_dollars(old["amount"]),
+                    "bank_account_id": old["bank_account_id"],
+                    "suggested_account_id": old["suggested_account_id"],
+                    "status": old["status"],
+                    "journal_entry_id": old["journal_entry_id"],
+                }
+                cursor.execute(
                     """
                     UPDATE imported_transactions
                     SET import_batch = ?, transaction_date = ?, description = ?, amount = ?,
                         bank_account_id = ?, suggested_account_id = ?, status = ?, journal_entry_id = ?
-                    WHERE id = ?
+                    WHERE id = ? AND client_id = ?
                     """,
                     (
                         self.import_batch,
@@ -78,9 +97,25 @@ class ImportedTransaction:
                         self.suggested_account_id,
                         self.status,
                         self.journal_entry_id,
-                        self.id
+                        self.id, self.client_id
                     )
                 )
+
+            new_values = {
+                "import_batch": self.import_batch,
+                "transaction_date": self.transaction_date.isoformat() if self.transaction_date else None,
+                "description": self.description,
+                "amount": self.amount,
+                "bank_account_id": self.bank_account_id,
+                "suggested_account_id": self.suggested_account_id,
+                "status": self.status,
+                "journal_entry_id": self.journal_entry_id,
+            }
+            AuditLog.write(
+                cursor, self.client_id, "imported_transactions", self.id,
+                "INSERT" if is_new else "UPDATE",
+                old_values=old_values, new_values=new_values,
+            )
 
             if owns_conn:
                 conn.commit()
@@ -142,43 +177,88 @@ class ImportedTransaction:
     @staticmethod
     def bulk_insert(transactions: List['ImportedTransaction']):
         """Insert multiple transactions at once."""
-        data = [
-            (
-                t.client_id,
-                t.import_batch,
-                t.transaction_date.isoformat() if t.transaction_date else None,
-                t.description,
-                to_cents(t.amount),
-                t.bank_account_id,
-                t.suggested_account_id,
-                t.status,
-                t.journal_entry_id
-            )
-            for t in transactions
-        ]
-
+        from models.audit_log import AuditLog
         with get_cursor(commit=True) as cursor:
-            cursor.executemany(
-                """
-                INSERT INTO imported_transactions
-                (client_id, import_batch, transaction_date, description, amount, bank_account_id,
-                 suggested_account_id, status, journal_entry_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                data
-            )
+            for transaction in transactions:
+                cursor.execute(
+                    """
+                    INSERT INTO imported_transactions
+                    (client_id, import_batch, transaction_date, description, amount, bank_account_id,
+                     suggested_account_id, status, journal_entry_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        transaction.client_id, transaction.import_batch,
+                        transaction.transaction_date.isoformat() if transaction.transaction_date else None,
+                        transaction.description, to_cents(transaction.amount),
+                        transaction.bank_account_id, transaction.suggested_account_id,
+                        transaction.status, transaction.journal_entry_id,
+                    ),
+                )
+                transaction.id = cursor.lastrowid
+                AuditLog.write(
+                    cursor, transaction.client_id, "imported_transactions", transaction.id, "INSERT",
+                    new_values={
+                        "import_batch": transaction.import_batch,
+                        "transaction_date": transaction.transaction_date,
+                        "description": transaction.description,
+                        "amount": transaction.amount,
+                        "bank_account_id": transaction.bank_account_id,
+                        "suggested_account_id": transaction.suggested_account_id,
+                        "status": transaction.status,
+                        "journal_entry_id": transaction.journal_entry_id,
+                    },
+                )
 
     @staticmethod
-    def delete(transaction_id: int):
+    def delete(transaction_id: int, client_id: Optional[int] = None):
         """Delete an imported transaction."""
+        from models.audit_log import AuditLog
         with get_cursor(commit=True) as cursor:
+            query = "SELECT * FROM imported_transactions WHERE id = ?"
+            params = [transaction_id]
+            if client_id is not None:
+                query += " AND client_id = ?"
+                params.append(client_id)
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError("Imported transaction not found.")
             cursor.execute("DELETE FROM imported_transactions WHERE id = ?", (transaction_id,))
+            AuditLog.write(
+                cursor, row["client_id"], "imported_transactions", transaction_id, "DELETE",
+                old_values={
+                    "import_batch": row["import_batch"], "transaction_date": row["transaction_date"],
+                    "description": row["description"], "amount": to_dollars(row["amount"]),
+                    "bank_account_id": row["bank_account_id"], "status": row["status"],
+                    "journal_entry_id": row["journal_entry_id"],
+                },
+            )
 
     @staticmethod
-    def delete_batch(batch_id: str):
+    def delete_batch(batch_id: str, client_id: Optional[int] = None):
         """Delete all transactions from a batch."""
+        from models.audit_log import AuditLog
         with get_cursor(commit=True) as cursor:
-            cursor.execute("DELETE FROM imported_transactions WHERE import_batch = ?", (batch_id,))
+            query = "SELECT * FROM imported_transactions WHERE import_batch = ?"
+            params = [batch_id]
+            if client_id is not None:
+                query += " AND client_id = ?"
+                params.append(client_id)
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            for row in rows:
+                cursor.execute("DELETE FROM imported_transactions WHERE id = ?", (row["id"],))
+                AuditLog.write(
+                    cursor, row["client_id"], "imported_transactions", row["id"], "DELETE",
+                    old_values={
+                        "import_batch": row["import_batch"],
+                        "transaction_date": row["transaction_date"],
+                        "description": row["description"],
+                        "amount": to_dollars(row["amount"]),
+                        "status": row["status"],
+                    },
+                )
 
     @staticmethod
     def get_all(

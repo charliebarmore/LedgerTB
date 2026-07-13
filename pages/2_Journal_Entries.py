@@ -87,7 +87,7 @@ def reset_entry_form():
 
 
 # Tabs
-tab1, tab2 = st.tabs(["New Entry", "View Entries"])
+tab1, tab2, tab3 = st.tabs(["New Entry", "View Entries", "Reverse Entry"])
 
 with tab1:
     st.subheader("Create Journal Entry" if not st.session_state.editing_entry_id else "Edit Journal Entry")
@@ -365,6 +365,7 @@ with tab2:
                                 st.rerun()
                             except ValueError as e:
                                 st.error(str(e))
+
             elif entry.entry_type == 'Adjusting':
                 with st.expander(header, expanded=False):
                     st.info("**Adjusting Entry**")
@@ -411,6 +412,7 @@ with tab2:
                                 st.rerun()
                             except ValueError as e:
                                 st.error(str(e))
+
             else:
                 with st.expander(header):
                     col1, col2 = st.columns([3, 1])
@@ -454,3 +456,45 @@ with tab2:
                                 st.rerun()
                             except ValueError as e:
                                 st.error(str(e))
+
+with tab3:
+    st.subheader("Reverse a Journal Entry")
+    st.caption(
+        "A reversal creates a new equal-and-opposite entry. The original remains intact "
+        "so the accounting history and audit trail are preserved."
+    )
+
+    reversal_entry_id = st.number_input(
+        "Original journal entry #", min_value=1, value=1, step=1,
+        key="reversal_entry_id",
+    )
+    original = JournalEntry.get_by_id(int(reversal_entry_id), client_id=client_id)
+    if not original:
+        st.info("Enter an existing journal entry number for this client.")
+    else:
+        st.markdown(
+            f"**JE #{original.id}** · {original.entry_date} · "
+            f"{original.description or 'No description'} · ${original.total_debits():,.2f}"
+        )
+        for line in original.lines:
+            debit = f"${line.debit:,.2f}" if line.debit else "—"
+            credit = f"${line.credit:,.2f}" if line.credit else "—"
+            st.caption(f"{line.account_number} {line.account_name} · Debit {debit} · Credit {credit}")
+
+        reversal_date = st.date_input(
+            "Reversal date", value=date.today(), key="reversal_date",
+        )
+        confirmed = st.checkbox(
+            "I understand this posts a new entry and does not delete the original.",
+            key="confirm_reversal",
+        )
+        if st.button(
+            "Post reversal", type="primary", disabled=not confirmed,
+            key="post_reversal",
+        ):
+            try:
+                reversal = JournalEntry.reverse(original.id, client_id, reversal_date)
+                st.success(f"Reversal posted as JE #{reversal.id}.")
+                st.session_state.confirm_reversal = False
+            except ValueError as exc:
+                st.error(str(exc))

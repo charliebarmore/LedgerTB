@@ -10,6 +10,7 @@ from models.client import Client
 from models.account import Account
 from models.transaction import ImportedTransaction
 from models.journal_entry import JournalEntry
+from models.audit_log import AuditLog
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils import icons
@@ -231,5 +232,11 @@ else:
             label="Download CSV",
             data=csv,
             file_name=f"transactions_{client.name}_{date.today()}.csv",
-            mime="text/csv"
+            mime="text/csv",
+            on_click=AuditLog.log_event,
+            args=(client_id, "EXPORT", "transactions_export", {
+                "format": "csv", "start_date": start_date, "end_date": end_date,
+                "status": status_param or "All", "account_id": bank_param,
+                "reconciliation": clearance_filter, "row_count": len(transactions),
+            }),
         )

@@ -1,4 +1,3 @@
-import sqlite3
 from dataclasses import dataclass
 from typing import Optional, List
 from database.connection import get_connection, get_cursor
@@ -82,6 +81,27 @@ class Client:
         conn = get_connection()
         is_new = self.id is None
         old_values = None
+
+        def audit_snapshot(values):
+            tax_id = values.get("tax_id")
+            return {
+                "name": values.get("name"),
+                "entity_type": values.get("entity_type"),
+                "business_type": values.get("business_type"),
+                "fiscal_year_end_month": values.get("fiscal_year_end_month"),
+                "is_active": bool(values.get("is_active")),
+                "tax_id_present": bool(tax_id),
+                "tax_id_last4": str(tax_id)[-4:] if tax_id else None,
+                "dba_name": values.get("dba_name"),
+                "address_line1": values.get("address_line1"),
+                "address_city": values.get("address_city"),
+                "address_state": values.get("address_state"),
+                "address_zip": values.get("address_zip"),
+                "contact_name": values.get("contact_name"),
+                "contact_email": values.get("contact_email"),
+                "contact_phone": values.get("contact_phone"),
+                "notes": values.get("notes"),
+            }
         try:
             cursor = conn.cursor()
 
@@ -104,16 +124,10 @@ class Client:
                 )
                 self.id = cursor.lastrowid
             else:
-                cursor.execute("SELECT name, entity_type, business_type, fiscal_year_end_month, is_active FROM clients WHERE id = ?", (self.id,))
+                cursor.execute("SELECT * FROM clients WHERE id = ?", (self.id,))
                 prev = cursor.fetchone()
                 if prev:
-                    old_values = {
-                        'name': prev['name'],
-                        'entity_type': prev['entity_type'],
-                        'business_type': prev['business_type'] if 'business_type' in prev.keys() else None,
-                        'fiscal_year_end_month': prev['fiscal_year_end_month'],
-                        'is_active': bool(prev['is_active']),
-                    }
+                    old_values = audit_snapshot(dict(prev))
                 cursor.execute(
                     """
                     UPDATE clients
@@ -134,27 +148,41 @@ class Client:
                     self.entity_type or "Sole Proprietorship",
                     self.business_type or "Other"
                 )
+            new_values = audit_snapshot({
+                "name": self.name, "entity_type": self.entity_type,
+                "business_type": self.business_type,
+                "fiscal_year_end_month": self.fiscal_year_end_month,
+                "is_active": self.is_active, "tax_id": self.tax_id,
+                "dba_name": self.dba_name, "address_line1": self.address_line1,
+                "address_city": self.address_city, "address_state": self.address_state,
+                "address_zip": self.address_zip, "contact_name": self.contact_name,
+                "contact_email": self.contact_email, "contact_phone": self.contact_phone,
+                "notes": self.notes,
+            })
+            AuditLog.write(
+                cursor, self.id, "clients", self.id,
+                "INSERT" if is_new else "UPDATE",
+                old_values=old_values, new_values=new_values,
+            )
+            if is_new and seed_accounts:
+                cursor.execute("SELECT COUNT(*) count FROM accounts WHERE client_id = ?", (self.id,))
+                AuditLog.write(
+                    cursor, self.id, "accounts", 0, "INSERT",
+                    new_values={
+                        "source": "default_chart_seed",
+                        "account_count": cursor.fetchone()["count"],
+                        "entity_type": self.entity_type,
+                        "business_type": self.business_type,
+                    },
+                )
             # Client creation and its requested starter chart are one onboarding
             # transaction. A seeding failure must not leave a half-created client.
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
-
-        new_values = {
-            'name': self.name,
-            'entity_type': self.entity_type,
-            'business_type': self.business_type,
-            'fiscal_year_end_month': self.fiscal_year_end_month,
-            'is_active': self.is_active,
-        }
-        AuditLog.log_change_safe(
-            client_id=self.id,
-            table_name='clients',
-            record_id=self.id,
-            action='INSERT' if is_new else 'UPDATE',
-            old_values=old_values,
-            new_values=new_values,
-        )
         return self.id
 
     def deactivate(self):

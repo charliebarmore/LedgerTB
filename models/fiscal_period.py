@@ -1,9 +1,9 @@
-import sqlite3
 from dataclasses import dataclass
 from typing import Optional, List
 from datetime import date
 from calendar import monthrange
-from database.connection import get_connection, get_cursor
+from database.connection import get_cursor
+from models.audit_log import AuditLog
 
 
 @dataclass
@@ -18,10 +18,7 @@ class FiscalPeriod:
 
     def save(self) -> int:
         """Save the fiscal period to the database."""
-        conn = get_connection()
-        cursor = conn.cursor()
-
-        try:
+        with get_cursor(commit=True) as cursor:
             if self.id is None:
                 cursor.execute(
                     """
@@ -33,39 +30,93 @@ class FiscalPeriod:
                      1 if self.is_closed else 0)
                 )
                 self.id = cursor.lastrowid
+                AuditLog.write(
+                    cursor, self.client_id, "fiscal_periods", self.id, "INSERT",
+                    new_values={
+                        "period_name": self.period_name,
+                        "period_type": self.period_type,
+                        "start_date": self.start_date,
+                        "end_date": self.end_date,
+                        "is_closed": self.is_closed,
+                    },
+                )
             else:
+                cursor.execute(
+                    "SELECT * FROM fiscal_periods WHERE id = ? AND client_id = ?",
+                    (self.id, self.client_id),
+                )
+                old = cursor.fetchone()
+                if not old:
+                    raise ValueError("Fiscal period not found for this client.")
                 cursor.execute(
                     """
                     UPDATE fiscal_periods
                     SET period_name = ?, period_type = ?, start_date = ?, end_date = ?, is_closed = ?
-                    WHERE id = ?
+                    WHERE id = ? AND client_id = ?
                     """,
                     (self.period_name, self.period_type,
                      self.start_date.isoformat(), self.end_date.isoformat(),
-                     1 if self.is_closed else 0, self.id)
+                     1 if self.is_closed else 0, self.id, self.client_id)
                 )
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            raise e
-        finally:
-            conn.close()
+                AuditLog.write(
+                    cursor, self.client_id, "fiscal_periods", self.id, "UPDATE",
+                    old_values={
+                        "period_name": old["period_name"],
+                        "period_type": old["period_type"],
+                        "start_date": old["start_date"],
+                        "end_date": old["end_date"],
+                        "is_closed": bool(old["is_closed"]),
+                    },
+                    new_values={
+                        "period_name": self.period_name,
+                        "period_type": self.period_type,
+                        "start_date": self.start_date,
+                        "end_date": self.end_date,
+                        "is_closed": self.is_closed,
+                    },
+                )
 
         return self.id
 
     @staticmethod
-    def set_closed(period_id: int, is_closed: bool):
+    def set_closed(period_id: int, is_closed: bool, client_id: Optional[int] = None):
         """Close or reopen a fiscal period."""
-        conn = get_connection()
-        cursor = conn.cursor()
-        try:
+        with get_cursor(commit=True) as cursor:
+            query = "SELECT * FROM fiscal_periods WHERE id = ?"
+            params = [period_id]
+            if client_id is not None:
+                query += " AND client_id = ?"
+                params.append(client_id)
+            cursor.execute(query, params)
+            period = cursor.fetchone()
+            if not period:
+                raise ValueError("Fiscal period not found for this client.")
+
+            if bool(period["is_closed"]) == bool(is_closed):
+                return
             cursor.execute(
-                "UPDATE fiscal_periods SET is_closed = ? WHERE id = ?",
-                (1 if is_closed else 0, period_id)
+                "UPDATE fiscal_periods SET is_closed = ? WHERE id = ? AND client_id = ?",
+                (1 if is_closed else 0, period_id, period["client_id"])
             )
-            conn.commit()
-        finally:
-            conn.close()
+            AuditLog.write(
+                cursor,
+                period["client_id"],
+                "fiscal_periods",
+                period_id,
+                "CLOSE" if is_closed else "REOPEN",
+                old_values={
+                    "period_name": period["period_name"],
+                    "start_date": period["start_date"],
+                    "end_date": period["end_date"],
+                    "is_closed": bool(period["is_closed"]),
+                },
+                new_values={
+                    "period_name": period["period_name"],
+                    "start_date": period["start_date"],
+                    "end_date": period["end_date"],
+                    "is_closed": bool(is_closed),
+                },
+            )
 
     @staticmethod
     def get_closed_period_for_date(client_id: int, entry_date: date) -> Optional['FiscalPeriod']:
@@ -182,10 +233,32 @@ class FiscalPeriod:
         return period
 
     @staticmethod
-    def delete(period_id: int):
+    def delete(period_id: int, client_id: Optional[int] = None):
         """Delete a fiscal period."""
         with get_cursor(commit=True) as cursor:
-            cursor.execute("DELETE FROM fiscal_periods WHERE id = ?", (period_id,))
+            query = "SELECT * FROM fiscal_periods WHERE id = ?"
+            params = [period_id]
+            if client_id is not None:
+                query += " AND client_id = ?"
+                params.append(client_id)
+            cursor.execute(query, params)
+            period = cursor.fetchone()
+            if not period:
+                raise ValueError("Fiscal period not found for this client.")
+            cursor.execute(
+                "DELETE FROM fiscal_periods WHERE id = ? AND client_id = ?",
+                (period_id, period["client_id"]),
+            )
+            AuditLog.write(
+                cursor, period["client_id"], "fiscal_periods", period_id, "DELETE",
+                old_values={
+                    "period_name": period["period_name"],
+                    "period_type": period["period_type"],
+                    "start_date": period["start_date"],
+                    "end_date": period["end_date"],
+                    "is_closed": bool(period["is_closed"]),
+                },
+            )
 
     @staticmethod
     def generate_periods(client_id: int, year: int, fiscal_year_end_month: int = 12) -> List['FiscalPeriod']:

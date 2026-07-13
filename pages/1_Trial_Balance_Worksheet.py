@@ -26,6 +26,7 @@ from models.fiscal_period import FiscalPeriod
 from models.reports import ReportGenerator
 from models.journal_entry import JournalEntry, JournalEntryLine
 from models.account import Account
+from models.audit_log import AuditLog
 
 init_database()
 
@@ -173,11 +174,11 @@ if year_period:
     with lock_cols[1]:
         if year_period.is_closed:
             if st.button("Reopen year", key="reopen_year", use_container_width=True):
-                FiscalPeriod.set_closed(year_period.id, False)
+                FiscalPeriod.set_closed(year_period.id, False, client_id)
                 st.rerun()
         else:
             if st.button("Close year", key="close_year", type="primary", use_container_width=True):
-                FiscalPeriod.set_closed(year_period.id, True)
+                FiscalPeriod.set_closed(year_period.id, True, client_id)
                 st.rerun()
 
 st.markdown("---")
@@ -408,7 +409,12 @@ with btn_cols[1]:
             label="Export Excel",
             data=output,
             file_name=f"TB_Worksheet_{client.name}_{period_end.strftime('%Y%m%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            on_click=AuditLog.log_event,
+            args=(client_id, "EXPORT", "trial_balance_worksheet_export", {
+                "format": "xlsx", "period_start": period_start,
+                "period_end": period_end, "row_count": len(rows),
+            }),
         )
 
 with btn_cols[2]:
@@ -439,6 +445,12 @@ with btn_cols[2]:
             file_name=f"AdjTB_attestclaw_{client.name}_{period_end.strftime('%Y%m%d')}.csv",
             mime="text/csv",
             help="Adjusted TB as CSV for import into attest-claw (TB Import → post as opening balances)",
+            on_click=AuditLog.log_event,
+            args=(client_id, "EXPORT", "adjusted_trial_balance_export", {
+                "format": "csv", "destination": "attest-claw",
+                "period_start": period_start, "period_end": period_end,
+                "row_count": len(rows),
+            }),
         )
 
 with btn_cols[3]:

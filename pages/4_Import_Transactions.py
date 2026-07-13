@@ -1458,5 +1458,5 @@ elif selected_tab == "Learned Patterns":
 
             with col4:
                 if st.button("Delete", key=f"del_rule_{rule['id']}"):
-                    PatternLearner.delete_rule(rule['id'])
+                    PatternLearner.delete_rule(rule['id'], client_id)
                     st.rerun()

@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.account import Account
 from models.client import Client
+from models.audit_log import AuditLog
 from models.reports import ReportGenerator
 from database import init_database
 from utils.client_selector import render_client_selector
@@ -137,7 +138,11 @@ if selected_report == "Trial Balance":
             label="Download Excel",
             data=buffer,
             file_name=f"trial_balance_{client.name}_{as_of_date}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            on_click=AuditLog.log_event,
+            args=(client_id, "EXPORT", "trial_balance_export", {
+                "format": "xlsx", "as_of_date": as_of_date, "row_count": len(rows),
+            }),
         )
 
 elif selected_report == "Income Statement":
@@ -229,7 +234,12 @@ elif selected_report == "Income Statement":
         label="Download Excel",
         data=buffer,
         file_name=f"income_statement_{client.name}_{is_start}_to_{is_end}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        on_click=AuditLog.log_event,
+        args=(client_id, "EXPORT", "income_statement_export", {
+            "format": "xlsx", "start_date": is_start, "end_date": is_end,
+            "row_count": len(df),
+        }),
     )
 
 elif selected_report == "Balance Sheet":
@@ -340,7 +350,11 @@ elif selected_report == "Balance Sheet":
         label="Download Excel",
         data=buffer,
         file_name=f"balance_sheet_{client.name}_{bs_date}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        on_click=AuditLog.log_event,
+        args=(client_id, "EXPORT", "balance_sheet_export", {
+            "format": "xlsx", "as_of_date": bs_date, "row_count": len(df),
+        }),
     )
 
 elif selected_report == "General Ledger":
@@ -480,5 +494,10 @@ elif selected_report == "General Ledger":
                 label="Download Excel",
                 data=buffer,
                 file_name=f"general_ledger_{client.name}_{account.account_number}_{gl_start}_to_{gl_end}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                on_click=AuditLog.log_event,
+                args=(client_id, "EXPORT", "general_ledger_export", {
+                    "format": "xlsx", "account_id": selected_account,
+                    "start_date": gl_start, "end_date": gl_end, "row_count": len(entries),
+                }),
             )

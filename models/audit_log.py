@@ -1,4 +1,3 @@
-import sqlite3
 import json
 import logging
 import uuid
@@ -8,6 +7,11 @@ from datetime import datetime
 from database.connection import get_cursor
 
 logger = logging.getLogger(__name__)
+
+AUDIT_ACTIONS = {
+    "INSERT", "UPDATE", "DELETE", "EXPORT", "BACKUP", "RESTORE",
+    "CLOSE", "REOPEN", "REVERSE",
+}
 
 
 @dataclass
@@ -29,6 +33,62 @@ class AuditLog:
         if 'audit_session_id' not in st.session_state:
             st.session_state.audit_session_id = str(uuid.uuid4())
         return st.session_state.audit_session_id
+
+    @staticmethod
+    def _current_session_id() -> str:
+        """Return the Streamlit session id when in-app, otherwise a request id."""
+        try:
+            from streamlit.runtime.scriptrunner import get_script_run_ctx
+            if get_script_run_ctx(suppress_warning=True) is not None:
+                return AuditLog.get_session_id()
+        except Exception:
+            pass
+        return str(uuid.uuid4())
+
+    @staticmethod
+    def _json(values):
+        if values is None:
+            return None
+        return json.dumps(
+            values,
+            default=lambda value: value.isoformat()
+            if isinstance(value, (datetime,)) or hasattr(value, "isoformat")
+            else str(value),
+            sort_keys=True,
+        )
+
+    @staticmethod
+    def write(
+        cursor,
+        client_id: int,
+        table_name: str,
+        record_id: int,
+        action: str,
+        old_values: Optional[Dict[str, Any]] = None,
+        new_values: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
+    ) -> int:
+        """Insert an audit row using the caller's transaction.
+
+        Accounting mutations must call this before commit. If the audit insert
+        fails, the caller rolls the business change back as well, preventing an
+        unaudited successful mutation.
+        """
+        if action not in AUDIT_ACTIONS:
+            raise ValueError(f"Unsupported audit action: {action}")
+        cursor.execute(
+            """
+            INSERT INTO audit_log
+                (client_id, table_name, record_id, action, old_values, new_values, session_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                client_id, table_name, record_id, action,
+                AuditLog._json(old_values), AuditLog._json(new_values),
+                session_id or AuditLog._current_session_id(),
+            ),
+        )
+        return cursor.lastrowid
 
     @staticmethod
     def log_change(
@@ -53,26 +113,29 @@ class AuditLog:
         Returns:
             The ID of the created audit log entry
         """
-        try:
-            session_id = AuditLog.get_session_id()
-        except Exception:
-            # If streamlit is not available (e.g., in tests), use a random ID
-            session_id = str(uuid.uuid4())
-
-        old_json = json.dumps(old_values) if old_values else None
-        new_json = json.dumps(new_values) if new_values else None
-
         with get_cursor(commit=True) as cursor:
-            cursor.execute(
-                """
-                INSERT INTO audit_log (client_id, table_name, record_id, action, old_values, new_values, session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (client_id, table_name, record_id, action, old_json, new_json, session_id)
+            return AuditLog.write(
+                cursor=cursor, client_id=client_id, table_name=table_name,
+                record_id=record_id, action=action, old_values=old_values,
+                new_values=new_values,
             )
-            log_id = cursor.lastrowid
 
-        return log_id
+    @staticmethod
+    def log_event(
+        client_id: int,
+        action: str,
+        event_name: str,
+        details: Optional[Dict[str, Any]] = None,
+        record_id: int = 0,
+    ) -> int:
+        """Record a non-CRUD event such as an export or backup."""
+        return AuditLog.log_change(
+            client_id=client_id,
+            table_name=event_name,
+            record_id=record_id,
+            action=action,
+            new_values=details,
+        )
 
     @staticmethod
     def log_change_safe(
@@ -164,7 +227,7 @@ class AuditLog:
             cursor.execute("""
                 SELECT * FROM audit_log
                 WHERE table_name = ? AND record_id = ?
-                ORDER BY changed_at DESC
+                ORDER BY changed_at DESC, id DESC
             """, (table_name, record_id))
 
             logs = []
@@ -236,7 +299,7 @@ class AuditLog:
             search_pattern = f"%{search_term}%"
             params.extend([search_pattern, search_pattern])
 
-        query += " ORDER BY changed_at DESC LIMIT ?"
+        query += " ORDER BY changed_at DESC, id DESC LIMIT ?"
         params.append(limit)
 
         with get_cursor() as cursor:
@@ -280,7 +343,7 @@ class AuditLog:
                 WHERE client_id = ?
                   AND ((table_name = 'journal_entries' AND record_id = ?)
                        OR (table_name = 'journal_entry_lines' AND new_values LIKE ?))
-                ORDER BY changed_at DESC
+                ORDER BY changed_at DESC, id DESC
             """, (client_id, entry_id, f'%"journal_entry_id": {entry_id}%'))
 
             logs = []
