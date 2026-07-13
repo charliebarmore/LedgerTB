@@ -165,21 +165,77 @@ show_all = st.checkbox("Show all accounts (default: only accounts with activity)
 # Year close / reopen — locks all journal entries dated within the fiscal year
 year_period = next((p for p in year_periods if p.period_type == "Year"), None)
 if year_period:
-    lock_cols = st.columns([3, 1])
-    with lock_cols[0]:
-        if year_period.is_closed:
-            st.warning(f"FY {selected_year} is closed. Entries in this year are locked.")
+    checklist = FiscalPeriod.get_close_checklist(year_period.id, client_id)
+    st.subheader("Year-close checklist")
+    check_cols = st.columns(4)
+    with check_cols[0]:
+        if checklist["trial_balance_balanced"]:
+            st.success("Trial balance balanced")
         else:
-            st.caption(f"FY {selected_year} is open.")
-    with lock_cols[1]:
-        if year_period.is_closed:
+            st.error("Trial balance out of balance")
+        st.caption(
+            f"Debits ${checklist['total_debits']:,.2f} · "
+            f"Credits ${checklist['total_credits']:,.2f}"
+        )
+    with check_cols[1]:
+        if checklist["pending_imports"]:
+            st.warning(f"{checklist['pending_imports']} pending imports")
+        else:
+            st.success("No pending imports")
+    with check_cols[2]:
+        if checklist["uncategorized_items"]:
+            st.warning(f"{checklist['uncategorized_items']} uncategorized items")
+        else:
+            st.success("No uncategorized items")
+    with check_cols[3]:
+        if checklist["unresolved_duplicates"]:
+            st.warning(f"{checklist['unresolved_duplicates']} potential duplicates")
+        else:
+            st.success("No potential duplicates")
+
+    if checklist["warning_count"]:
+        st.warning(
+            "Outstanding items should be resolved before close. If they are understood and "
+            "intentional, the close requires a separate acknowledgement."
+        )
+        st.page_link("pages/4_Import_Transactions.py", label="Review imports")
+
+    if year_period.is_closed:
+        lock_cols = st.columns([3, 1])
+        with lock_cols[0]:
+            st.warning(f"FY {selected_year} is closed. Entries in this year are locked.")
+        with lock_cols[1]:
             if st.button("Reopen year", key="reopen_year", use_container_width=True):
                 FiscalPeriod.set_closed(year_period.id, False, client_id)
                 st.rerun()
-        else:
-            if st.button("Close year", key="close_year", type="primary", use_container_width=True):
-                FiscalPeriod.set_closed(year_period.id, True, client_id)
+    else:
+        st.caption(f"FY {selected_year} is open.")
+        confirmation_phrase = f"CLOSE FY {selected_year}"
+        close_confirmation = st.text_input(
+            f"Type {confirmation_phrase} to confirm",
+            key="close_year_confirmation",
+            placeholder=confirmation_phrase,
+        )
+        warnings_acknowledged = not checklist["warning_count"] or st.checkbox(
+            "I reviewed the outstanding items and accept closing with these warnings.",
+            key="close_warning_acknowledgement",
+        )
+        explicitly_confirmed = close_confirmation.strip().upper() == confirmation_phrase
+        if st.button(
+            "Close fiscal year", key="close_year", type="primary",
+            disabled=not explicitly_confirmed or not warnings_acknowledged,
+        ):
+            try:
+                FiscalPeriod.set_closed(
+                    year_period.id, True, client_id,
+                    confirmation={
+                        "explicit_confirmation": explicitly_confirmed,
+                        "warnings_acknowledged": warnings_acknowledged,
+                    },
+                )
                 st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
 
 st.markdown("---")
 

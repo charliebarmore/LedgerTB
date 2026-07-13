@@ -4,6 +4,7 @@ from datetime import date
 from calendar import monthrange
 from database.connection import get_cursor
 from models.audit_log import AuditLog
+from money import to_dollars
 
 
 @dataclass
@@ -79,7 +80,12 @@ class FiscalPeriod:
         return self.id
 
     @staticmethod
-    def set_closed(period_id: int, is_closed: bool, client_id: Optional[int] = None):
+    def set_closed(
+        period_id: int,
+        is_closed: bool,
+        client_id: Optional[int] = None,
+        confirmation: Optional[dict] = None,
+    ):
         """Close or reopen a fiscal period."""
         with get_cursor(commit=True) as cursor:
             query = "SELECT * FROM fiscal_periods WHERE id = ?"
@@ -94,6 +100,20 @@ class FiscalPeriod:
 
             if bool(period["is_closed"]) == bool(is_closed):
                 return
+
+            checklist = None
+            if is_closed and period["period_type"] == "Year":
+                checklist = FiscalPeriod._close_checklist(
+                    cursor, period["client_id"], period["start_date"], period["end_date"]
+                )
+                if not confirmation or not confirmation.get("explicit_confirmation"):
+                    raise ValueError("Explicit year-close confirmation is required.")
+                if not checklist["trial_balance_balanced"]:
+                    raise ValueError("The fiscal year cannot close while the trial balance is out of balance.")
+                if checklist["warning_count"] and not confirmation.get("warnings_acknowledged"):
+                    raise ValueError(
+                        "Review and acknowledge the outstanding close-checklist warnings first."
+                    )
             cursor.execute(
                 "UPDATE fiscal_periods SET is_closed = ? WHERE id = ? AND client_id = ?",
                 (1 if is_closed else 0, period_id, period["client_id"])
@@ -115,7 +135,93 @@ class FiscalPeriod:
                     "start_date": period["start_date"],
                     "end_date": period["end_date"],
                     "is_closed": bool(is_closed),
+                    "close_checklist": checklist,
+                    "explicit_confirmation": bool(
+                        confirmation and confirmation.get("explicit_confirmation")
+                    ),
+                    "warnings_acknowledged": bool(
+                        confirmation and confirmation.get("warnings_acknowledged")
+                    ),
                 },
+            )
+
+    @staticmethod
+    def _close_checklist(cursor, client_id: int, start_date, end_date) -> dict:
+        """Compute close controls using the caller's transaction."""
+        start = start_date.isoformat() if hasattr(start_date, "isoformat") else str(start_date)
+        end = end_date.isoformat() if hasattr(end_date, "isoformat") else str(end_date)
+        cursor.execute(
+            """
+            SELECT COUNT(DISTINCT je.id) entry_count,
+                   COALESCE(SUM(jel.debit), 0) total_debits,
+                   COALESCE(SUM(jel.credit), 0) total_credits
+            FROM journal_entries je
+            LEFT JOIN journal_entry_lines jel ON jel.journal_entry_id = je.id
+            WHERE je.client_id = ? AND je.entry_date BETWEEN ? AND ?
+            """,
+            (client_id, start, end),
+        )
+        trial_balance = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END) pending_imports,
+                   SUM(CASE WHEN suggested_account_id IS NULL AND status != 'Posted'
+                            THEN 1 ELSE 0 END) uncategorized_items
+            FROM imported_transactions
+            WHERE client_id = ? AND transaction_date BETWEEN ? AND ?
+            """,
+            (client_id, start, end),
+        )
+        imports = cursor.fetchone()
+        cursor.execute(
+            """
+            SELECT COALESCE(SUM(group_count - 1), 0) unresolved_duplicates
+            FROM (
+                SELECT COUNT(*) group_count
+                FROM imported_transactions
+                WHERE client_id = ? AND transaction_date BETWEEN ? AND ?
+                GROUP BY transaction_date, amount, UPPER(TRIM(description)),
+                         COALESCE(bank_account_id, -1)
+                HAVING COUNT(*) > 1
+            ) duplicates
+            """,
+            (client_id, start, end),
+        )
+        duplicates = int(cursor.fetchone()["unresolved_duplicates"] or 0)
+        debits = int(trial_balance["total_debits"] or 0)
+        credits = int(trial_balance["total_credits"] or 0)
+        pending = int(imports["pending_imports"] or 0)
+        uncategorized = int(imports["uncategorized_items"] or 0)
+        warning_count = pending + uncategorized + duplicates
+        return {
+            "period_start": start,
+            "period_end": end,
+            "entry_count": int(trial_balance["entry_count"] or 0),
+            "total_debits": to_dollars(debits),
+            "total_credits": to_dollars(credits),
+            "trial_balance_balanced": debits == credits,
+            "pending_imports": pending,
+            "uncategorized_items": uncategorized,
+            "unresolved_duplicates": duplicates,
+            "warning_count": warning_count,
+        }
+
+    @staticmethod
+    def get_close_checklist(period_id: int, client_id: int) -> dict:
+        """Return the current close checklist for a client-owned year period."""
+        with get_cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT * FROM fiscal_periods
+                WHERE id = ? AND client_id = ? AND period_type = 'Year'
+                """,
+                (period_id, client_id),
+            )
+            period = cursor.fetchone()
+            if not period:
+                raise ValueError("Fiscal year not found for this client.")
+            return FiscalPeriod._close_checklist(
+                cursor, client_id, period["start_date"], period["end_date"]
             )
 
     @staticmethod

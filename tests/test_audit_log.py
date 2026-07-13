@@ -166,7 +166,10 @@ def test_period_close_and_reopen_are_explicitly_audited(client_id):
         start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
     )
     period.save()
-    FiscalPeriod.set_closed(period.id, True, client_id)
+    FiscalPeriod.set_closed(
+        period.id, True, client_id,
+        confirmation={"explicit_confirmation": True, "warnings_acknowledged": True},
+    )
     FiscalPeriod.set_closed(period.id, False, client_id)
 
     actions = [log.action for log in AuditLog.get_history("fiscal_periods", period.id)]
