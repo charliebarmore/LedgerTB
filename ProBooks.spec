@@ -53,6 +53,7 @@ app_datas = [
     ("money.py", "."),
     ("version.py", "."),
     (".streamlit", ".streamlit"),
+    ("assets", "assets"),
     ("pages", "pages"),
     ("models", "models"),
     ("services", "services"),
