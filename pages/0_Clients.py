@@ -9,16 +9,20 @@ from models.client import Client
 from database import init_database
 from database.seed_data import ENTITY_TYPES, BUSINESS_TYPES
 from utils.client_selector import render_client_selector
+from utils.unlock import require_unlock
 from utils.ui import view_switcher
 from utils import icons
 
 # Initialize database
-init_database()
 
 st.set_page_config(page_title="Clients", page_icon=icons.CLIENTS, layout="wide")
 
 # Same persistent client selector + nav every other page shows, so the
 # sidebar doesn't disappear/reappear when landing on or leaving this page.
+# Gate on the database passphrase before any DB access, then ensure schema.
+require_unlock()
+init_database()
+
 render_client_selector()
 
 st.title("Client Management")

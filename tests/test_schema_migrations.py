@@ -50,6 +50,8 @@ def test_migration_failure_is_atomic(tmp_path, monkeypatch):
     from database import schema as schema_mod
 
     monkeypatch.setattr(dbc, "DATABASE_PATH", tmp_path / "atomic.db")
+    from database.crypto import derive_key
+    dbc.set_active_key(derive_key("test-passphrase"))
 
     migdir = tmp_path / "migs"
     migdir.mkdir()

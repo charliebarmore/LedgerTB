@@ -30,10 +30,10 @@ from models.client import Client
 from models.account import Account
 from models.journal_entry import JournalEntry
 from utils.client_selector import render_client_selector
+from utils.unlock import require_unlock
 from utils import icons
 
 # Initialize database on startup
-init_database()
 
 # Page config
 st.set_page_config(
@@ -45,6 +45,10 @@ st.set_page_config(
 
 # Same persistent client selector + nav every other page shows, so the
 # sidebar doesn't disappear/reappear when landing on or leaving Home.
+# Gate on the database passphrase before any DB access, then ensure schema.
+require_unlock()
+init_database()
+
 selected_client_id = render_client_selector()
 
 # When a client is selected, the Dashboard is the landing page for that client.

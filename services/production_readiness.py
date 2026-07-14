@@ -1,7 +1,6 @@
 """Evidence-backed production-data readiness checks."""
 
 import os
-import sqlite3
 import stat
 import subprocess
 import sys
@@ -53,7 +52,8 @@ def _permissions_check() -> ReadinessCheck:
 
 def _database_integrity_check() -> ReadinessCheck:
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
+        from database import connection as db_connection
+        conn = db_connection.open_keyed(DATABASE_PATH)
         try:
             passed = conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         finally:
@@ -64,16 +64,26 @@ def _database_integrity_check() -> ReadinessCheck:
         return ReadinessCheck("integrity", "Database integrity", False, str(exc))
 
 
+def _encrypted_database_check() -> ReadinessCheck:
+    from database.crypto import database_state
+    state = database_state(DATABASE_PATH)
+    if state == "encrypted":
+        return ReadinessCheck("encrypted_database", "Encrypted database", True,
+                              "Database is SQLCipher-encrypted at rest.")
+    if state == "absent":
+        return ReadinessCheck("encrypted_database", "Encrypted database", False,
+                              "Database not created yet; it will be encrypted on first setup.")
+    return ReadinessCheck("encrypted_database", "Encrypted database", False,
+                          "Database is unencrypted (plaintext); migrate it to SQLCipher.")
+
+
 def get_readiness_checks() -> list[ReadinessCheck]:
     health = backup_health()
     return [
         _filevault_check(),
         _permissions_check(),
         _database_integrity_check(),
-        ReadinessCheck(
-            "encrypted_database", "Encrypted database", False,
-            "SQLCipher encryption has not been implemented yet.",
-        ),
+        _encrypted_database_check(),
         ReadinessCheck(
             "legacy_secret", "Secrets outside plaintext files", not API_KEY_FILE.exists(),
             "No legacy plaintext API-key file exists."

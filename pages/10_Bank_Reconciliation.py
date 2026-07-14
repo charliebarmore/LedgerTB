@@ -13,10 +13,14 @@ from models.client import Client
 from models.reconciliation import BankReconciliation
 from utils import icons
 from utils.client_selector import render_client_selector
+from utils.unlock import require_unlock
 
 
-init_database()
 st.set_page_config(page_title="Bank Reconciliation", page_icon=icons.RECONCILIATION, layout="wide")
+# Gate on the database passphrase before any DB access, then ensure schema.
+require_unlock()
+init_database()
+
 client_id = render_client_selector()
 
 st.title("Bank Reconciliation")

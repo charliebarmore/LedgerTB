@@ -11,16 +11,20 @@ from models.account import Account
 from models.client import Client
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils.unlock import require_unlock
 from utils import icons
 from constants import AccountType
 from services.coa_import import parse_coa_csv
 
 # Initialize database
-init_database()
 
 st.set_page_config(page_title="Chart of Accounts", page_icon=icons.CHART_OF_ACCOUNTS, layout="wide")
 
 # Client selector in sidebar
+# Gate on the database passphrase before any DB access, then ensure schema.
+require_unlock()
+init_database()
+
 client_id = render_client_selector()
 
 st.title("Chart of Accounts")

@@ -11,16 +11,20 @@ from models.client import Client
 from models.journal_entry import JournalEntry, JournalEntryLine
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils.unlock import require_unlock
 from utils import icons
 from constants import EntryType
 from utils.fiscal_dates import fiscal_year_bounds
 
 # Initialize database
-init_database()
 
 st.set_page_config(page_title="Journal Entries", page_icon=icons.JOURNAL_ENTRIES, layout="wide")
 
 # Client selector in sidebar
+# Gate on the database passphrase before any DB access, then ensure schema.
+require_unlock()
+init_database()
+
 client_id = render_client_selector()
 
 st.title("Journal Entries")

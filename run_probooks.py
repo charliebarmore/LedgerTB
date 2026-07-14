@@ -28,6 +28,7 @@ from pathlib import Path
 import pandas          # noqa: F401
 import numpy           # noqa: F401
 import openpyxl        # noqa: F401
+import sqlcipher3      # noqa: F401  (encrypted database driver)
 import anthropic       # noqa: F401
 import dotenv          # noqa: F401
 import platformdirs    # noqa: F401
@@ -114,7 +115,8 @@ def _selfcheck() -> int:
     sys.path.insert(0, str(BUNDLE))
     # Import database.connection before config to mirror app.py's real cold-start
     # path and catch package-level circular imports in the frozen bundle.
-    mods = ["database.connection", "streamlit", "pandas", "numpy", "pyarrow", "altair", "openpyxl",
+    mods = ["sqlcipher3", "database.connection", "database.crypto", "streamlit", "pandas",
+            "numpy", "pyarrow", "altair", "openpyxl",
             "anthropic", "pydantic", "pydantic_core", "dotenv", "platformdirs",
             "config", "constants", "money", "models.journal_entry", "models.reconciliation",
             "services.categorization", "services.document_import", "fitz", "PIL",

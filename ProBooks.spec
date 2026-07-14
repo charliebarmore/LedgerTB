@@ -81,6 +81,7 @@ hiddenimports = st_hiddenimports + [
     "pandas", "numpy", "openpyxl", "anthropic", "dotenv", "platformdirs", "altair",
     "keyring", "keyring.backends.macOS",
     "fitz", "PIL", "Quartz", "objc",
+    "sqlcipher3", "sqlcipher3.dbapi2",  # encrypted database driver (native ext)
 ]
 
 a = Analysis(

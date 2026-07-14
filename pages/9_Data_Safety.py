@@ -11,10 +11,14 @@ from models.client import Client
 from services.backups import backup_health, create_backup, list_backups, restore_backup
 from services.production_readiness import get_readiness_checks, is_production_ready
 from utils.client_selector import render_client_selector
+from utils.unlock import require_unlock
 from utils import icons
 
-init_database()
 st.set_page_config(page_title="Data Safety", page_icon=icons.SECURITY, layout="wide")
+# Gate on the database passphrase before any DB access, then ensure schema.
+require_unlock()
+init_database()
+
 client_id = render_client_selector()
 
 
