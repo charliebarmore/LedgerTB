@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import shutil
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,7 +25,9 @@ def _sha256(path: Path) -> str:
 
 
 def _integrity(path: Path) -> bool:
-    conn = sqlite3.connect(path)
+    # Backups are SQLCipher-encrypted, so they must be opened with the active
+    # key -- a plaintext sqlite3 open would fail on the encrypted header.
+    conn = db_connection.open_keyed(path)
     try:
         return conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
@@ -62,7 +63,10 @@ def create_backup(
     temp_manifest = backup_dir / f".{manifest.name}.tmp"
 
     source = db_connection.get_connection()
-    target = sqlite3.connect(temp_db)
+    # Key the backup target with the same passphrase so the backup file is
+    # itself encrypted (SQLCipher's online backup writes encrypted pages when
+    # the target connection is keyed).
+    target = db_connection.open_keyed(temp_db)
     try:
         source.backup(target)
     finally:
@@ -99,7 +103,7 @@ def create_backup(
 
 
 def _schema_versions(path: Path) -> list[str]:
-    conn = sqlite3.connect(path)
+    conn = db_connection.open_keyed(path)
     try:
         found = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"

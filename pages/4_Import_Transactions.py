@@ -21,16 +21,20 @@ from services.document_import import (
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 from database import init_database
 from utils.client_selector import render_client_selector
+from utils.unlock import require_unlock
 from utils.ui import view_switcher
 from utils import icons
 from utils.import_review import ensure_row_ids, row_key, classify_review_rows
 
 # Initialize database
-init_database()
 
 st.set_page_config(page_title="Import Transactions", page_icon=icons.IMPORT, layout="wide")
 
 # Client selector in sidebar
+# Gate on the database passphrase before any DB access, then ensure schema.
+require_unlock()
+init_database()
+
 client_id = render_client_selector()
 
 st.title("Import Transactions")

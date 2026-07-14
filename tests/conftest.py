@@ -14,9 +14,15 @@ from models.journal_entry import JournalEntry, JournalEntryLine
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
-    """Point the app at a throwaway SQLite file for this test only."""
+    """Point the app at a throwaway encrypted SQLite file for this test only."""
     monkeypatch.setattr(db_connection, "DATABASE_PATH", tmp_path / "test.db")
+    # The database is SQLCipher-encrypted; set the derived key (the app's unlock
+    # gate does this from the passphrase in production) so connections can open it.
+    from database.crypto import derive_key
+    db_connection.set_active_key(derive_key("test-passphrase"))
     init_database()
+    yield
+    db_connection.clear_active_key()
 
 
 @pytest.fixture

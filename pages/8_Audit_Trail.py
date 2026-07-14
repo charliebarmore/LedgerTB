@@ -10,12 +10,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
 from utils.client_selector import render_client_selector, get_selected_client
+from utils.unlock import require_unlock
 from utils import icons
 from models.client import Client
 from models.audit_log import AuditLog
 from utils.fiscal_dates import fiscal_year_bounds
 
-init_database()
 
 st.set_page_config(
     page_title="Audit Trail",
@@ -24,6 +24,10 @@ st.set_page_config(
 )
 
 # Render client selector
+# Gate on the database passphrase before any DB access, then ensure schema.
+require_unlock()
+init_database()
+
 client_id = render_client_selector()
 
 if not client_id:
