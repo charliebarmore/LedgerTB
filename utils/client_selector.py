@@ -95,13 +95,11 @@ def render_client_selector() -> Optional[int]:
     """
     apply_sidebar_style()
 
-    # This deliberately remains red until database encryption and verified
-    # backups are in place; every page shares this selector, so the warning
-    # cannot disappear through navigation.
-    from services.production_readiness import is_production_ready
-    if not is_production_ready():
-        st.sidebar.error("TEST DATA ONLY")
-    st.sidebar.page_link("pages/9_Data_Safety.py", label="Data Safety", icon=icons.SECURITY)
+    # The sidebar "TEST DATA ONLY" readiness banner and Data Safety link were
+    # removed at the owner's request (single-user local tool; owner manages PII
+    # safety via FileVault + their own backup posture). The Data Safety page
+    # (pages/9_Data_Safety.py) and services.production_readiness still exist and
+    # can be re-linked here if that guardrail is ever wanted back.
 
     clients = Client.get_all(active_only=True)
 
