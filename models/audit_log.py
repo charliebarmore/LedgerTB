@@ -77,16 +77,24 @@ class AuditLog:
         """
         if action not in AUDIT_ACTIONS:
             raise ValueError(f"Unsupported audit action: {action}")
+        # Stamp local time explicitly rather than leaning on SQLite's
+        # CURRENT_TIMESTAMP default, which is UTC. ProBooks is a single-user
+        # local desktop app whose audit filter and every other date use the
+        # machine's local clock (date.today()); a UTC default made evening
+        # entries (past UTC midnight) appear dated "tomorrow", inverting the
+        # audit page's default date range and mislabeling when the user acted.
+        changed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute(
             """
             INSERT INTO audit_log
-                (client_id, table_name, record_id, action, old_values, new_values, session_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (client_id, table_name, record_id, action, old_values, new_values,
+                 session_id, changed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 client_id, table_name, record_id, action,
                 AuditLog._json(old_values), AuditLog._json(new_values),
-                session_id or AuditLog._current_session_id(),
+                session_id or AuditLog._current_session_id(), changed_at,
             ),
         )
         return cursor.lastrowid

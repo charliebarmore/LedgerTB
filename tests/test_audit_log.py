@@ -238,3 +238,21 @@ def test_operational_event_actions_are_supported(client_id):
     event = AuditLog.get_by_id(log_id)
     assert event.action == "EXPORT"
     assert event.new_values == {"format": "csv", "row_count": 12}
+
+
+def test_changed_at_is_local_not_utc(client_id):
+    """audit_log.changed_at must be stamped in local time, not SQLite's UTC
+    CURRENT_TIMESTAMP default. Storing UTC made evening entries (past UTC
+    midnight) sort a day ahead of date.today(), inverting the audit page's
+    default From/To range so no rows showed. On any non-UTC machine a UTC
+    stamp is hours off local now; assert they agree within a small window.
+    This is deterministic regardless of the time of day the suite runs."""
+    _clear_audit(client_id)
+    log_id = AuditLog.log_event(client_id, "EXPORT", "tz_probe", {"n": 1})
+    stamped = AuditLog.get_by_id(log_id).changed_at
+    assert stamped is not None
+    skew = abs((datetime.now() - stamped).total_seconds())
+    assert skew < 120, (
+        f"changed_at {stamped} is {skew:.0f}s from local now — looks like a "
+        "UTC/local timezone skew rather than local time"
+    )

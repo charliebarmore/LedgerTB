@@ -44,11 +44,16 @@ st.markdown("---")
 filter_cols = st.columns([2, 2, 1, 1, 2])
 
 # Default "From Date" to the client's earliest activity rather than a fixed
-# 30-day window, so older audit history isn't hidden on first view.
+# 30-day window, so older audit history isn't hidden on first view. Clamp it to
+# today so a timestamp dated in the future (e.g. legacy rows written under the
+# old UTC default, when the local clock is behind UTC) can't push the default
+# start past the default end and invert the range.
+today = date.today()
 earliest_activity = AuditLog.get_earliest_date(client_id)
 default_start_date = earliest_activity.date() if earliest_activity else fiscal_year_bounds(
-    date.today(), client.fiscal_year_end_month
+    today, client.fiscal_year_end_month
 )[0]
+default_start_date = min(default_start_date, today)
 
 with filter_cols[0]:
     start_date = st.date_input(
@@ -60,7 +65,7 @@ with filter_cols[0]:
 with filter_cols[1]:
     end_date = st.date_input(
         "To Date",
-        value=date.today(),
+        value=today,
         key="audit_end_date"
     )
 
