@@ -276,8 +276,11 @@ if selected_tab == "Upload CSV":
             - **Flip All Signs**: Use if your statement is the opposite of the above
             """)
 
-        # File upload
-        uploaded_file = st.file_uploader("Upload CSV file", type=['csv'])
+        # File upload — keyed by a nonce so "Clear File" can force a fresh,
+        # empty uploader. Without this the widget keeps returning the old file
+        # after a clear, and the new-file branch below re-imports it instantly.
+        uploader_key = f"csv_uploader_{st.session_state.get('csv_uploader_nonce', 0)}"
+        uploaded_file = st.file_uploader("Upload CSV file", type=['csv'], key=uploader_key)
 
         # Handle new file upload
         if uploaded_file:
@@ -288,6 +291,11 @@ if selected_tab == "Upload CSV":
                 st.session_state.csv_content = raw_content
                 st.session_state.csv_raw_content = raw_content  # Keep original for reset
                 st.session_state.csv_filename = uploaded_file.name
+                # Reset the editor widget itself. A keyed text_area keeps its own
+                # value across reruns and ignores `value=`, so without this the
+                # editor (and the import) would show the PREVIOUS file's rows when
+                # a second file is uploaded in the same session.
+                st.session_state.csv_editor_widget = raw_content
 
         # Show editor if we have CSV content (persists after file uploader clears)
         if st.session_state.get('csv_content'):
@@ -308,21 +316,31 @@ if selected_tab == "Upload CSV":
                 label_visibility="collapsed"
             )
 
-            # Also save on every render (belt and suspenders)
-            if edited_content != st.session_state.csv_content:
-                st.session_state.csv_content = edited_content
+            # NOTE: no "copy edited_content back on every render" here — that
+            # was what broke Reset: it re-saved the editor's old text right
+            # after the reset wrote the original. The on_change callback is
+            # the single save path; the button callbacks below run BEFORE the
+            # widgets render on their rerun, which is the only legal moment to
+            # overwrite a keyed widget's state.
+
+            def _reset_csv_to_original():
+                raw = st.session_state.get('csv_raw_content', '')
+                st.session_state.csv_content = raw
+                st.session_state.csv_editor_widget = raw
+
+            def _clear_csv_file():
+                st.session_state.csv_content = None
+                st.session_state.csv_raw_content = None
+                st.session_state.csv_filename = None
+                st.session_state.pop('csv_editor_widget', None)
+                # Rotate the uploader key so the old file can't re-import itself.
+                st.session_state.csv_uploader_nonce = st.session_state.get('csv_uploader_nonce', 0) + 1
 
             col1, col2, col3 = st.columns([1, 1, 3])
             with col1:
-                if st.button("Reset to Original"):
-                    st.session_state.csv_content = st.session_state.get('csv_raw_content', '')
-                    st.rerun()
+                st.button("Reset to Original", on_click=_reset_csv_to_original)
             with col2:
-                if st.button("Clear File"):
-                    st.session_state.csv_content = None
-                    st.session_state.csv_raw_content = None
-                    st.session_state.csv_filename = None
-                    st.rerun()
+                st.button("Clear File", on_click=_clear_csv_file)
 
             content = st.session_state.csv_content
 

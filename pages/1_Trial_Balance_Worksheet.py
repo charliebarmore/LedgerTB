@@ -399,13 +399,10 @@ with btn_cols[0]:
 with btn_cols[1]:
     # Export to Excel with formulas
     if rows:
-        df = ReportGenerator.trial_balance_worksheet_to_dataframe(rows)
-
         # Create Excel with formulas
         output = BytesIO()
         with st.spinner("Generating Excel..."):
             import openpyxl
-            from openpyxl.utils.dataframe import dataframe_to_rows
             from openpyxl.styles import Font, Alignment, Border, Side
 
             wb = openpyxl.Workbook()
