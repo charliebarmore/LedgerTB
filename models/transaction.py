@@ -484,6 +484,122 @@ class ImportedTransaction:
         }
 
     @staticmethod
+    def get_batch_summaries(client_id: int) -> List[dict]:
+        """Summarize every import batch for a client, newest import first.
+
+        One row per import_batch: where it came from, which account it landed
+        in, how many rows, what they total, and how far along posting is.
+        Backs the Import History view.
+
+        A batch can legitimately span several accounts or files (the
+        "CSV contains transactions from multiple accounts" path), so the
+        counts are reported alongside the representative value and callers
+        should say "Multiple" when a count exceeds one.
+        """
+        query = """
+            SELECT b.*,
+                   a.name account_name,
+                   a.account_number account_number
+            FROM (
+                SELECT it.import_batch,
+                       MIN(it.source_filename) source_filename,
+                       COUNT(DISTINCT it.source_filename) filename_count,
+                       MIN(it.bank_account_id) bank_account_id,
+                       COUNT(DISTINCT it.bank_account_id) account_count,
+                       COUNT(*) row_count,
+                       COALESCE(SUM(it.amount), 0) net_amount,
+                       COALESCE(SUM(CASE WHEN it.amount > 0 THEN it.amount ELSE 0 END), 0) deposits,
+                       COALESCE(SUM(CASE WHEN it.amount < 0 THEN it.amount ELSE 0 END), 0) withdrawals,
+                       SUM(CASE WHEN it.status = 'Posted' THEN 1 ELSE 0 END) posted_count,
+                       SUM(CASE WHEN it.status = 'Categorized' THEN 1 ELSE 0 END) categorized_count,
+                       SUM(CASE WHEN it.status = 'Pending' THEN 1 ELSE 0 END) pending_count,
+                       MIN(it.transaction_date) first_date,
+                       MAX(it.transaction_date) last_date,
+                       -- created_at is stored UTC (CURRENT_TIMESTAMP), so convert
+                       -- for display or evening imports show tomorrow's date.
+                       MIN(datetime(it.created_at, 'localtime')) imported_at,
+                       MIN(it.created_at) sort_key
+                FROM imported_transactions it
+                WHERE it.client_id = ? AND it.import_batch IS NOT NULL
+                GROUP BY it.import_batch
+            ) b
+            LEFT JOIN accounts a ON a.id = b.bank_account_id
+            ORDER BY b.sort_key DESC, b.import_batch DESC
+        """
+        with get_cursor() as cursor:
+            cursor.execute(query, (client_id,))
+            rows = cursor.fetchall()
+
+        return [{
+            "import_batch": row["import_batch"],
+            "source_filename": row["source_filename"],
+            "filename_count": int(row["filename_count"] or 0),
+            "bank_account_id": row["bank_account_id"],
+            "account_count": int(row["account_count"] or 0),
+            "account_name": row["account_name"],
+            "account_number": row["account_number"],
+            "row_count": int(row["row_count"] or 0),
+            "net_amount": to_dollars(row["net_amount"] or 0),
+            "deposits": to_dollars(row["deposits"] or 0),
+            "withdrawals": to_dollars(row["withdrawals"] or 0),
+            "posted_count": int(row["posted_count"] or 0),
+            "categorized_count": int(row["categorized_count"] or 0),
+            "pending_count": int(row["pending_count"] or 0),
+            "first_date": date.fromisoformat(row["first_date"]) if row["first_date"] else None,
+            "last_date": date.fromisoformat(row["last_date"]) if row["last_date"] else None,
+            "imported_at": row["imported_at"],
+        } for row in rows]
+
+    @staticmethod
+    def get_by_batch(client_id: int, batch_id: str) -> List['ImportedTransaction']:
+        """Return one batch's rows in source-file order.
+
+        Ordered by source_row_number so the list lines up line-for-line with
+        the file that was uploaded — that alignment is what makes a
+        source-vs-posted check readable. Rows imported before
+        source_row_number existed have NULL and sort last, by id.
+        """
+        query = """
+            SELECT it.*,
+                   ba.name as bank_account_name,
+                   sa.name as suggested_account_name,
+                   NULL as reconciliation_id,
+                   NULL as reconciliation_status,
+                   NULL as statement_end_date
+            FROM imported_transactions it
+            LEFT JOIN accounts ba ON it.bank_account_id = ba.id
+            LEFT JOIN accounts sa ON it.suggested_account_id = sa.id
+            WHERE it.client_id = ? AND it.import_batch = ?
+            ORDER BY it.source_row_number IS NULL, it.source_row_number, it.id
+        """
+        with get_cursor() as cursor:
+            cursor.execute(query, (client_id, batch_id))
+            rows = cursor.fetchall()
+
+        return [ImportedTransaction(
+            id=row['id'],
+            client_id=row['client_id'],
+            import_batch=row['import_batch'],
+            transaction_date=date.fromisoformat(row['transaction_date']) if row['transaction_date'] else None,
+            description=row['description'],
+            amount=to_dollars(row['amount']),
+            bank_account_id=row['bank_account_id'],
+            suggested_account_id=row['suggested_account_id'],
+            status=row['status'],
+            journal_entry_id=row['journal_entry_id'],
+            source_id=row['source_id'],
+            source_filename=row['source_filename'],
+            source_row_number=row['source_row_number'],
+            row_fingerprint=row['row_fingerprint'],
+            idempotency_key=row['idempotency_key'],
+            duplicate_override=bool(row['duplicate_override']),
+            duplicate_override_reason=row['duplicate_override_reason'],
+            duplicate_of_id=row['duplicate_of_id'],
+            bank_account_name=row['bank_account_name'],
+            suggested_account_name=row['suggested_account_name'],
+        ) for row in rows]
+
+    @staticmethod
     def get_count(client_id: int) -> int:
         """Get total count of imported transactions for a client."""
         with get_cursor() as cursor:

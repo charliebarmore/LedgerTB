@@ -10,7 +10,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.account import Account
 from models.client import Client
 from models.journal_entry import JournalEntry
+from models.transaction import ImportedTransaction
 from services.csv_import import CSVImporter
+from services.import_verification import check_row_continuity, verify_against_source
 from services.categorization import CategorizationService
 from services.pattern_learning import PatternLearner
 from services.posting import post_transaction
@@ -109,7 +111,8 @@ if 'import_active_tab' not in st.session_state:
 
 # Navigation (segmented tabs; programmatically controllable via
 # st.session_state.import_active_tab, e.g. jumping to Review after an upload).
-tab_options = ["Upload CSV", "Upload Statement", "Review & Categorize", "Learned Patterns"]
+tab_options = ["Upload CSV", "Upload Statement", "Review & Categorize",
+               "Import History", "Learned Patterns"]
 selected_tab = view_switcher(tab_options, key="import_active_tab",
                              label="Navigation")
 
@@ -1513,6 +1516,186 @@ elif selected_tab == "Review & Categorize":
         with col3:
             if not categorization_service.is_available():
                 st.caption("AI categorization unavailable — set ANTHROPIC_API_KEY")
+
+elif selected_tab == "Import History":
+    st.subheader("Import History")
+    st.caption("Every file imported for this client — what landed, and whether it matches the source.")
+
+    batches = ImportedTransaction.get_batch_summaries(client_id)
+
+    if not batches:
+        st.info("Nothing imported yet for this client. Upload a CSV or statement to get started.")
+    else:
+        def _batch_source(batch):
+            """How the batch is identified in the picker and the table."""
+            if batch["filename_count"] > 1:
+                return f"{batch['filename_count']} files"
+            return batch["source_filename"] or "(no filename recorded)"
+
+        def _batch_account(batch):
+            if batch["account_count"] > 1:
+                return f"{batch['account_count']} accounts"
+            if batch["account_number"]:
+                return f"{batch['account_number']} - {batch['account_name']}"
+            return batch["account_name"] or "—"
+
+        def _batch_status(batch):
+            if batch["pending_count"] or batch["categorized_count"]:
+                unposted = batch["pending_count"] + batch["categorized_count"]
+                return f"{batch['posted_count']} posted, {unposted} not yet posted"
+            return "All posted"
+
+        overview = pd.DataFrame([{
+            "Imported": batch["imported_at"] or "—",
+            "Source file": _batch_source(batch),
+            "Account": _batch_account(batch),
+            "Rows": batch["row_count"],
+            "Date range": (
+                f"{batch['first_date']:%m/%d/%Y} – {batch['last_date']:%m/%d/%Y}"
+                if batch["first_date"] and batch["last_date"] else "—"
+            ),
+            "Net amount": f"{batch['net_amount']:,.2f}",
+            "Status": _batch_status(batch),
+            "Batch": batch["import_batch"],
+        } for batch in batches])
+
+        st.dataframe(overview, width="stretch", hide_index=True)
+
+        st.divider()
+        st.markdown("#### Check an import against its source")
+
+        labels = {
+            batch["import_batch"]: (
+                f"{_batch_source(batch)} → {_batch_account(batch)} "
+                f"({batch['row_count']} rows, {batch['net_amount']:,.2f})"
+            )
+            for batch in batches
+        }
+        selected_batch = st.selectbox(
+            "Import batch",
+            options=list(labels.keys()),
+            format_func=lambda b: labels[b],
+            key="history_batch",
+        )
+
+        batch = next(b for b in batches if b["import_batch"] == selected_batch)
+        rows = ImportedTransaction.get_by_batch(client_id, selected_batch)
+
+        metric_cols = st.columns(4)
+        metric_cols[0].metric("Rows imported", batch["row_count"])
+        metric_cols[1].metric("Net amount", f"{batch['net_amount']:,.2f}")
+        metric_cols[2].metric("Deposits in", f"{batch['deposits']:,.2f}")
+        metric_cols[3].metric("Payments out", f"{batch['withdrawals']:,.2f}")
+
+        # Cheap check that needs no file: a gap in the recorded source line
+        # numbers means a row from the middle of the file never landed.
+        continuity = check_row_continuity(rows)
+        if continuity.missing_rows:
+            st.warning(
+                f"Gap in the source rows: line(s) "
+                f"{', '.join(str(n) for n in continuity.missing_rows)} of "
+                f"{batch['source_filename'] or 'the source file'} were not imported. "
+                "Re-check the file below to see exactly what is missing."
+            )
+        elif continuity.present_count:
+            st.success(
+                f"Source lines {continuity.first_row}–{continuity.last_row} all "
+                f"present ({continuity.present_count} rows, no gaps)."
+            )
+
+        if batch["pending_count"] or batch["categorized_count"]:
+            st.info(
+                f"{batch['posted_count']} of {batch['row_count']} rows are posted to the "
+                f"ledger. The rest are waiting in **Review & Categorize**."
+            )
+
+        # The stronger check: re-supply the file and compare row by row. Only a
+        # comparison against the source can catch rows dropped off the end.
+        with st.expander("Compare against the original file", expanded=False):
+            st.caption(
+                "Upload the same file again to check it line by line. Nothing is "
+                "imported — this only compares."
+            )
+            recheck = st.file_uploader(
+                "Original CSV", type=["csv"], key=f"verify_{selected_batch}"
+            )
+            if recheck is not None:
+                try:
+                    content = recheck.getvalue().decode("utf-8", errors="replace")
+                    preview_df, columns = CSVImporter.preview_csv(content)
+                    detected = CSVImporter.detect_columns(columns)
+                    if not detected.get("date") or not detected.get("description"):
+                        st.error(
+                            "Could not find date and description columns in that file."
+                        )
+                    else:
+                        source_rows = CSVImporter.parse_csv(
+                            content,
+                            date_column=detected["date"],
+                            description_column=detected["description"],
+                            amount_column=detected.get("amount"),
+                            debit_column=detected.get("debit"),
+                            credit_column=detected.get("credit"),
+                            source_filename=recheck.name,
+                        )
+                        report = verify_against_source(rows, source_rows)
+
+                        check_cols = st.columns(3)
+                        check_cols[0].metric("Rows in file", report.source_count)
+                        check_cols[1].metric("Rows imported", report.imported_count)
+                        # delta_color="off": any non-zero difference is a problem,
+                        # so the usual green-up / red-down reading is misleading.
+                        check_cols[2].metric(
+                            "Difference", f"{report.difference:,.2f}",
+                            delta=None if report.difference == 0 else "does not match",
+                            delta_color="off",
+                        )
+
+                        if report.is_clean:
+                            st.success(
+                                f"Every one of the {report.source_count} rows in "
+                                f"{recheck.name} is in the ledger, and the totals agree "
+                                f"({report.source_total:,.2f})."
+                            )
+                        else:
+                            if report.missing_from_import:
+                                st.error(
+                                    f"{len(report.missing_from_import)} row(s) in the file "
+                                    "were never imported:"
+                                )
+                                st.dataframe(pd.DataFrame([{
+                                    "Date": r["date"],
+                                    "Description": r["description"],
+                                    "Amount": f"{r['amount']:,.2f}",
+                                } for r in report.missing_from_import]),
+                                    width="stretch", hide_index=True)
+                            if report.not_in_source:
+                                st.error(
+                                    f"{len(report.not_in_source)} imported row(s) are not "
+                                    "in this file — they came from somewhere else, or an "
+                                    "amount differs:"
+                                )
+                                st.dataframe(pd.DataFrame([{
+                                    "Date": r.transaction_date,
+                                    "Description": r.description,
+                                    "Amount": f"{r.amount:,.2f}",
+                                    "Status": r.status,
+                                } for r in report.not_in_source]),
+                                    width="stretch", hide_index=True)
+                except Exception as exc:
+                    st.error(f"Could not read that file: {exc}")
+
+        st.markdown("##### Imported rows")
+        st.caption("In source-file order, so this reads alongside the original.")
+        st.dataframe(pd.DataFrame([{
+            "Line": r.source_row_number if r.source_row_number is not None else "—",
+            "Date": r.transaction_date,
+            "Description": r.description,
+            "Amount": f"{r.amount:,.2f}",
+            "Account": r.bank_account_name or "—",
+            "Status": r.status,
+            "Entry #": r.journal_entry_id if r.journal_entry_id else "—",
+        } for r in rows]), width="stretch", hide_index=True)
 
 elif selected_tab == "Learned Patterns":
     st.subheader("Learned Categorization Patterns")
