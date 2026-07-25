@@ -115,8 +115,12 @@ def _selfcheck() -> int:
     sys.path.insert(0, str(BUNDLE))
     # Import database.connection before config to mirror app.py's real cold-start
     # path and catch package-level circular imports in the frozen bundle.
+    # NB: submodules must be listed explicitly — importing a package does NOT
+    # import its submodules, so a bare "openpyxl" here passed while the Excel
+    # export crashed on the missing openpyxl.styles / openpyxl.utils.
     mods = ["sqlcipher3", "database.connection", "database.crypto", "streamlit", "pandas",
             "numpy", "pyarrow", "altair", "openpyxl",
+            "openpyxl.styles", "openpyxl.utils", "openpyxl.utils.dataframe",
             "anthropic", "pydantic", "pydantic_core", "dotenv", "platformdirs",
             "config", "constants", "money", "models.journal_entry", "models.reconciliation",
             "services.categorization", "services.document_import", "fitz", "PIL",

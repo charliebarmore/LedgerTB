@@ -21,7 +21,7 @@ with open("version.py", encoding="utf-8") as version_file:
     exec(version_file.read(), version_meta)
 APP_VERSION = version_meta["APP_VERSION"]
 
-from PyInstaller.utils.hooks import collect_all, copy_metadata
+from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 
 # Set PROBOOKS_CODESIGN_ID to a Developer ID Application identity to have
 # PyInstaller sign the bundle (inside-out, hardened runtime) during the build;
@@ -82,7 +82,9 @@ hiddenimports = st_hiddenimports + [
     "keyring", "keyring.backends.macOS",
     "fitz", "PIL", "Quartz", "objc",
     "sqlcipher3", "sqlcipher3.dbapi2",  # encrypted database driver (native ext)
-]
+] + collect_submodules("openpyxl")  # bundle ALL openpyxl submodules (styles, utils,
+    # utils.dataframe, …). Pages are bundled as data files, so PyInstaller can't see
+    # which openpyxl submodules they import; collect them all to avoid ModuleNotFound.
 
 a = Analysis(
     ["run_probooks.py"],
