@@ -27,6 +27,35 @@ _SWITCHER_CSS = """
 """
 
 
+_MISSING = object()
+
+
+def apply_default_on_change(widget_key, depends_on, default_value):
+    """Re-apply a keyed widget's default when what it derives from changes.
+
+    A keyed Streamlit widget ignores ``index=``/``value=`` once its key exists
+    in session state. A default computed from another control — a sign
+    convention derived from the selected account, say — therefore lands on the
+    first render and never again, so changing the other control silently leaves
+    the stale value in place.
+
+    Re-applying on every run would be just as wrong: it would overwrite a
+    deliberate override the moment anything else on the page rerun. So the
+    dependency is tracked and the default re-applied only when it actually
+    changed, leaving an override intact until the user picks a different
+    account.
+
+    Must be called BEFORE the widget renders — that is the only point at which
+    a keyed widget's session value may legally be overwritten.
+    """
+    tracker_key = f"_{widget_key}_depends_on"
+    # A sentinel, not None: None is a legitimate dependency value (no account
+    # selected yet) and must not read as "never seen".
+    if st.session_state.get(tracker_key, _MISSING) != depends_on:
+        st.session_state[tracker_key] = depends_on
+        st.session_state[widget_key] = default_value
+
+
 def view_switcher(options, key, label="View"):
     """Tab-styled switcher for a page's views. st.tabs can't be preselected,
     so pages that need deep links (sidebar buttons, post-action jumps) use
