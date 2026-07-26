@@ -29,20 +29,23 @@ class CSVImporter:
     }
 
     @staticmethod
-    def preview_csv(file_content: str, num_rows: int = 10, header_row: int = 0) -> Tuple[pd.DataFrame, List[str]]:
+    def preview_csv(file_content: str, num_rows: Optional[int] = 10, header_row: int = 0) -> Tuple[pd.DataFrame, List[str]]:
         """
         Preview a CSV file and return sample data with column names.
 
         Args:
             file_content: The CSV file content as string
-            num_rows: Number of rows to preview
+            num_rows: Number of rows to preview; ``None`` returns every row.
+                Callers that show the user what they are about to import should
+                pass None — a truncated table reads as though the file itself
+                were short.
             header_row: Which row contains the column headers (0-indexed)
 
         Returns:
             Tuple of (DataFrame with sample rows, list of column names)
         """
         df = pd.read_csv(StringIO(file_content), header=header_row)
-        return df.head(num_rows), list(df.columns)
+        return (df if num_rows is None else df.head(num_rows)), list(df.columns)
 
     @staticmethod
     def detect_columns(columns: List[str]) -> Dict[str, Optional[str]]:
