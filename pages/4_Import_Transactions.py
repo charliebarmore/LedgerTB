@@ -1024,11 +1024,13 @@ elif selected_tab == "Review & Categorize":
             with subcol1:
                 if st.button("Select All", key="select_all_top"):
                     for t in transactions:
+                        # An overridden duplicate is selectable; no reason needed.
+                        # An exact re-import of an already-posted source row never
+                        # is — that would double-count.
                         duplicate_allowed = (
                             not t.get("is_duplicate")
                             or (
                                 t.get("duplicate_override")
-                                and str(t.get("duplicate_override_reason", "")).strip()
                                 and not t.get("duplicate_info", {}).get("exact_retry")
                             )
                         )
@@ -1401,17 +1403,19 @@ elif selected_tab == "Review & Categorize":
                         )
                         reason = ""
                         if override:
+                            # Optional. The checkbox is the decision and the
+                            # OVERRIDE audit event records it either way; a
+                            # required reason only blocked importing statements
+                            # that legitimately repeat an identical charge.
                             reason = st.text_input(
-                                "Reason for duplicate override",
+                                "Reason (optional)",
                                 value=t.get("duplicate_override_reason", ""),
                                 key=row_key("duplicate_reason", t),
                                 placeholder="Example: Two separate purchases for the same amount",
                             ).strip()
-                            if not reason:
-                                st.caption("A reason is required before this row can be selected.")
                         transactions[i]["duplicate_override"] = override
                         transactions[i]["duplicate_override_reason"] = reason
-                        duplicate_select_disabled = not (override and reason)
+                        duplicate_select_disabled = not override
 
                 if duplicate_select_disabled:
                     transactions[i]["include"] = False
