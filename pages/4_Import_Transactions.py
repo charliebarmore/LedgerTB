@@ -302,24 +302,26 @@ if selected_tab == "Upload CSV":
 
         # Show editor if we have CSV content (persists after file uploader clears)
         if st.session_state.get('csv_content'):
-            # Editable CSV content
-            st.subheader("Edit CSV (Optional)")
-            st.caption("Delete extra rows, fix data, or make any changes before importing. First row should be column headers.")
+            content = st.session_state.csv_content
 
-            # Use on_change callback to save edits immediately
+            # Parse before rendering anything: the row count and the table both
+            # need the result, and the raw editor below has to know whether to
+            # open itself. Every row is requested, not a sample — a truncated
+            # table reads as though the file were short.
+            parse_error = None
+            try:
+                parsed_df, columns = CSVImporter.preview_csv(content, num_rows=None)
+            except Exception as exc:
+                parse_error = str(exc)
+
+            # Raw text editing is a repair tool, not the main view, so it stays
+            # collapsed — except when the file won't parse, which is exactly when
+            # it is needed. It must render BEFORE the st.stop() below, or a
+            # malformed file would leave no way to fix it.
             def save_csv_edits():
                 st.session_state.csv_content = st.session_state.csv_editor_widget
 
-            edited_content = st.text_area(
-                "CSV Content",
-                value=st.session_state.csv_content,
-                height=200,
-                key="csv_editor_widget",
-                on_change=save_csv_edits,
-                label_visibility="collapsed"
-            )
-
-            # NOTE: no "copy edited_content back on every render" here — that
+            # NOTE: no "copy the widget value back on every render" here — that
             # was what broke Reset: it re-saved the editor's old text right
             # after the reset wrote the original. The on_change callback is
             # the single save path; the button callbacks below run BEFORE the
@@ -339,87 +341,121 @@ if selected_tab == "Upload CSV":
                 # Rotate the uploader key so the old file can't re-import itself.
                 st.session_state.csv_uploader_nonce = st.session_state.get('csv_uploader_nonce', 0) + 1
 
-            col1, col2, col3 = st.columns([1, 1, 3])
-            with col1:
-                st.button("Reset to Original", on_click=_reset_csv_to_original)
-            with col2:
-                st.button("Clear File", on_click=_clear_csv_file)
+            with st.expander("Edit the raw CSV", expanded=parse_error is not None):
+                st.caption("Delete extra rows or fix bad data before importing. "
+                           "The first row should be column headers.")
+                st.text_area(
+                    "CSV Content",
+                    value=st.session_state.csv_content,
+                    height=200,
+                    key="csv_editor_widget",
+                    on_change=save_csv_edits,
+                    label_visibility="collapsed"
+                )
+                edit_col1, edit_col2, _ = st.columns([1, 1, 3])
+                with edit_col1:
+                    st.button("Reset to Original", on_click=_reset_csv_to_original)
+                with edit_col2:
+                    st.button("Clear File", on_click=_clear_csv_file)
 
-            content = st.session_state.csv_content
-
-            # Preview parsed data
-            st.subheader("Preview")
-            try:
-                preview_df, columns = CSVImporter.preview_csv(content)
-                st.dataframe(preview_df)
-            except Exception as e:
-                st.error(f"Error parsing CSV: {e}")
+            if parse_error:
+                st.error(f"Could not read this CSV: {parse_error}")
+                st.info("Fix the rows in **Edit the raw CSV** above, or clear the file and upload a different one.")
                 st.stop()
+
+            # The one place the file is shown: every row, scrollable.
+            st.subheader(f"{len(parsed_df):,} transactions in {st.session_state.get('csv_filename') or 'this file'}")
+            st.dataframe(
+                parsed_df,
+                width="stretch",
+                # Tall enough to read at a glance, capped so the page stays
+                # navigable; the table scrolls past the cap.
+                height=min(len(parsed_df) * 35 + 45, 440),
+            )
 
             # Auto-detect columns
             detected = CSVImporter.detect_columns(columns)
 
-            st.subheader("Column Mapping")
-            st.caption("Map your CSV columns to the required fields")
+            # A single amount column plus date and description is the common
+            # case and needs no decision from the user — summarize it and keep
+            # the controls available but out of the way. Separate debit/credit
+            # columns still require choosing the radio below, so that counts as
+            # unresolved and stays visible.
+            mapping_is_clear = bool(
+                detected['date'] and detected['description'] and detected['amount']
+            )
 
-            col1, col2 = st.columns(2)
-
-            with col1:
-                date_col = st.selectbox(
-                    "Date Column",
-                    options=columns,
-                    index=columns.index(detected['date']) if detected['date'] else 0
+            if mapping_is_clear:
+                st.caption(
+                    f"Detected columns — date: **{detected['date']}**, "
+                    f"description: **{detected['description']}**, "
+                    f"amount: **{detected['amount']}**"
                 )
+                mapping_area = st.expander("Change column mapping", expanded=False)
+            else:
+                st.subheader("Column Mapping")
+                st.caption("Some columns could not be detected — map them to the required fields.")
+                mapping_area = st.container()
 
-                desc_col = st.selectbox(
-                    "Description Column",
-                    options=columns,
-                    index=columns.index(detected['description']) if detected['description'] else 0
-                )
+            with mapping_area:
+                col1, col2 = st.columns(2)
 
-                # Source account column for multi-account mode
-                if multi_account_mode:
-                    source_account_col_selection = st.selectbox(
-                        "Source Account Column",
-                        options=["(none - assign all to one account)"] + columns,
-                        index=0,
-                        help="Column that identifies which account each transaction is from. Select 'none' if your CSV doesn't have this."
-                    )
-                    if source_account_col_selection == "(none - assign all to one account)":
-                        source_account_col = None
-                    else:
-                        source_account_col = source_account_col_selection
-
-            with col2:
-                amount_type = st.radio(
-                    "Amount Format",
-                    options=["Single Amount Column", "Separate Debit/Credit Columns"]
-                )
-
-                if amount_type == "Single Amount Column":
-                    amount_col = st.selectbox(
-                        "Amount Column",
+                with col1:
+                    date_col = st.selectbox(
+                        "Date Column",
                         options=columns,
-                        index=columns.index(detected['amount']) if detected['amount'] else 0
+                        index=columns.index(detected['date']) if detected['date'] else 0
                     )
-                    debit_col = None
-                    credit_col = None
-                else:
-                    amount_col = None
-                    debit_col = st.selectbox(
-                        "Debit/Withdrawal Column",
-                        options=['(none)'] + columns,
-                        index=columns.index(detected['debit']) + 1 if detected['debit'] else 0
+
+                    desc_col = st.selectbox(
+                        "Description Column",
+                        options=columns,
+                        index=columns.index(detected['description']) if detected['description'] else 0
                     )
-                    credit_col = st.selectbox(
-                        "Credit/Deposit Column",
-                        options=['(none)'] + columns,
-                        index=columns.index(detected['credit']) + 1 if detected['credit'] else 0
+
+                    # Source account column for multi-account mode
+                    if multi_account_mode:
+                        source_account_col_selection = st.selectbox(
+                            "Source Account Column",
+                            options=["(none - assign all to one account)"] + columns,
+                            index=0,
+                            help="Column that identifies which account each transaction is from. Select 'none' if your CSV doesn't have this."
+                        )
+                        if source_account_col_selection == "(none - assign all to one account)":
+                            source_account_col = None
+                        else:
+                            source_account_col = source_account_col_selection
+
+                with col2:
+                    amount_type = st.radio(
+                        "Amount Format",
+                        options=["Single Amount Column", "Separate Debit/Credit Columns"]
                     )
-                    if debit_col == '(none)':
+
+                    if amount_type == "Single Amount Column":
+                        amount_col = st.selectbox(
+                            "Amount Column",
+                            options=columns,
+                            index=columns.index(detected['amount']) if detected['amount'] else 0
+                        )
                         debit_col = None
-                    if credit_col == '(none)':
                         credit_col = None
+                    else:
+                        amount_col = None
+                        debit_col = st.selectbox(
+                            "Debit/Withdrawal Column",
+                            options=['(none)'] + columns,
+                            index=columns.index(detected['debit']) + 1 if detected['debit'] else 0
+                        )
+                        credit_col = st.selectbox(
+                            "Credit/Deposit Column",
+                            options=['(none)'] + columns,
+                            index=columns.index(detected['credit']) + 1 if detected['credit'] else 0
+                        )
+                        if debit_col == '(none)':
+                            debit_col = None
+                        if credit_col == '(none)':
+                            credit_col = None
 
             # When multi-account mode is on but no source column selected, show single account selector
             if multi_account_mode and source_account_col is None:
@@ -483,38 +519,28 @@ if selected_tab == "Upload CSV":
             st.divider()
             st.subheader("Confirm Import")
 
-            # Show summary stats
-            import pandas as pd
-            from io import StringIO
-            try:
-                summary_df = pd.read_csv(StringIO(content))
-                total_rows = len(summary_df)
+            # Summary figures only. The rows themselves are already shown in
+            # full and scrollable further up, so repeating a first-3/last-3
+            # sample here added a third view of the same data. Reuses the
+            # dataframe parsed above rather than re-reading the file.
+            total_rows = len(parsed_df)
 
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Rows", total_rows)
-                with col2:
-                    if date_col in summary_df.columns:
-                        st.metric("Date Column", date_col)
-                with col3:
-                    if amount_col and amount_col in summary_df.columns:
-                        try:
-                            amounts = summary_df[amount_col].astype(str).str.replace(',', '').str.replace('$', '').str.replace('(', '-').str.replace(')', '')
-                            amounts = pd.to_numeric(amounts, errors='coerce')
-                            st.metric("Amount Range", f"${amounts.min():,.2f} to ${amounts.max():,.2f}")
-                        except:
-                            pass
-
-                # Show first few and last few rows for confirmation
-                st.caption("**First 3 rows:**")
-                st.dataframe(summary_df.head(3), width="stretch", hide_index=True)
-
-                if total_rows > 6:
-                    st.caption("**Last 3 rows:**")
-                    st.dataframe(summary_df.tail(3), width="stretch", hide_index=True)
-
-            except Exception as e:
-                st.error(f"Error reading CSV: {e}")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Rows", total_rows)
+            with col2:
+                if date_col in parsed_df.columns:
+                    st.metric("Date Column", date_col)
+            with col3:
+                if amount_col and amount_col in parsed_df.columns:
+                    try:
+                        amounts = (parsed_df[amount_col].astype(str)
+                                   .str.replace(',', '').str.replace('$', '')
+                                   .str.replace('(', '-').str.replace(')', ''))
+                        amounts = pd.to_numeric(amounts, errors='coerce')
+                        st.metric("Amount Range", f"${amounts.min():,.2f} to ${amounts.max():,.2f}")
+                    except Exception:
+                        pass
 
             # Confirmation checkbox
             confirmed = st.checkbox(
