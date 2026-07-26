@@ -577,6 +577,12 @@ if selected_tab == "Upload CSV":
                     try:
                         # Clear any previously parsed transactions to avoid duplicates
                         st.session_state.transactions_to_review = []
+                        # Retire the previous batch's "What's next?" screen. It is
+                        # shown by Review & Categorize with an st.stop(), so a
+                        # leftover flag hides the rows just parsed behind a stale
+                        # success message from the import before this one.
+                        st.session_state.import_complete = False
+                        st.session_state.import_complete_msg = None
 
                         # Parse with source account column if in multi-account mode
                         transactions = CSVImporter.parse_csv(
@@ -938,6 +944,11 @@ elif selected_tab == "Upload Statement":
                                 st.session_state[row_key("cat", transaction)] = transaction["suggested_account_id"]
                         st.session_state.transactions_to_review = review_transactions
                         st.session_state.import_active_tab = "Review & Categorize"
+                        # Same reason as the CSV path: a stale completion flag
+                        # would hide these rows behind the previous batch's
+                        # "What's next?" screen.
+                        st.session_state.import_complete = False
+                        st.session_state.import_complete_msg = None
                         if duplicate_count:
                             st.session_state.post_result = {
                                 "level": "warning",
