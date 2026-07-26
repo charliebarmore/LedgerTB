@@ -251,6 +251,47 @@ class JournalEntry:
         return self.id
 
     @staticmethod
+    def get_hand_keyed_recent(client_id: int, limit: int = 10) -> List[dict]:
+        """Recent journal entries a person actually keyed, newest first.
+
+        Excludes entries created by an import: ``post_transaction`` stamps those
+        with a "Import batch <id>" source_reference, and on the activity feed
+        they belong to the one import event that produced them rather than as
+        dozens of separate lines.
+
+        ``created_at`` is stored UTC (CURRENT_TIMESTAMP), so it is converted to
+        local time here — the activity feed merges these with timestamps from
+        other tables and has to compare like with like.
+        """
+        query = """
+            SELECT je.id, je.entry_date, je.description, je.entry_type,
+                   je.aje_reference,
+                   datetime(je.created_at, 'localtime') created_at_local,
+                   COALESCE(SUM(jel.debit), 0) total_debits
+            FROM journal_entries je
+            LEFT JOIN journal_entry_lines jel ON jel.journal_entry_id = je.id
+            WHERE je.client_id = ?
+              AND (je.source_reference IS NULL
+                   OR je.source_reference NOT LIKE 'Import batch %')
+            GROUP BY je.id
+            ORDER BY je.created_at DESC, je.id DESC
+            LIMIT ?
+        """
+        with get_cursor() as cursor:
+            cursor.execute(query, (client_id, max(1, int(limit))))
+            rows = cursor.fetchall()
+
+        return [{
+            "id": row["id"],
+            "entry_date": date.fromisoformat(row["entry_date"]) if row["entry_date"] else None,
+            "description": row["description"],
+            "entry_type": row["entry_type"],
+            "aje_reference": row["aje_reference"],
+            "created_at": row["created_at_local"],
+            "total_debits": to_dollars(row["total_debits"] or 0),
+        } for row in rows]
+
+    @staticmethod
     def _entry_from_row(row) -> 'JournalEntry':
         """Build a JournalEntry (header only) from a DB row."""
         return JournalEntry(
