@@ -110,9 +110,13 @@ def post_transaction(
     committed in that case).
     """
     ensure_import_identity(transaction, client_id, bank_account_id)
-    override_reason = (duplicate_override_reason or "").strip()
-    if duplicate_override and not override_reason:
-        raise ValueError("A reason is required to post a potential duplicate.")
+    # Ticking the override is the decision; a written reason is optional context.
+    # The OVERRIDE audit event is what makes the choice reviewable afterwards, and
+    # it is recorded either way — requiring prose only meant a statement with two
+    # genuinely identical charges could not be imported without inventing text.
+    # An exact re-import of the same source row is still refused outright below;
+    # that is double-counting, not a judgement call.
+    override_reason = (duplicate_override_reason or "").strip() or None
 
     entry = build_journal_entry(
         client_id=client_id,

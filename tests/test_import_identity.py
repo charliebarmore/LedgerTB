@@ -93,7 +93,26 @@ def test_exact_source_row_retry_reuses_existing_journal_entry(client_id, account
     assert len(ImportedTransaction.get_by_status(client_id, "Posted")) == 1
 
 
-def test_duplicate_requires_reasoned_override_and_audits_it(client_id, accounts):
+def test_override_cannot_double_post_the_same_source_row(client_id, accounts):
+    """The override is a judgement call about two similar rows, never a licence
+    to import one row twice. Now that ticking it needs no reason, this is the
+    property that keeps a re-run of the same file from duplicating the books.
+    """
+    transaction = _row()
+    first_entry, first_import = post_transaction(
+        client_id, transaction, accounts["expense"], accounts["cash"], batch_id="JAN26"
+    )
+    retry_entry, retry_import = post_transaction(
+        client_id, dict(transaction), accounts["expense"], accounts["cash"],
+        batch_id="JAN26", duplicate_override=True,
+    )
+
+    assert retry_entry.id == first_entry.id
+    assert retry_import.id == first_import.id
+    assert len(JournalEntry.get_all(client_id)) == 1
+
+
+def test_duplicate_is_blocked_until_overridden_and_the_override_is_audited(client_id, accounts):
     post_transaction(
         client_id, _row(2), accounts["expense"], accounts["cash"], batch_id="JAN26"
     )
@@ -101,11 +120,6 @@ def test_duplicate_requires_reasoned_override_and_audits_it(client_id, accounts)
     with pytest.raises(ValueError, match="matches a previously imported row"):
         post_transaction(
             client_id, duplicate, accounts["expense"], accounts["cash"], batch_id="JAN26"
-        )
-    with pytest.raises(ValueError, match="reason is required"):
-        post_transaction(
-            client_id, duplicate, accounts["expense"], accounts["cash"], batch_id="JAN26",
-            duplicate_override=True,
         )
 
     _, imported = post_transaction(
@@ -121,6 +135,72 @@ def test_duplicate_requires_reasoned_override_and_audits_it(client_id, accounts)
     )
     assert override.new_values["reason"] == "Two separate purchases on the statement"
     assert len(JournalEntry.get_all(client_id)) == 2
+
+
+def test_override_needs_no_reason(client_id, accounts):
+    """A statement can legitimately repeat an identical charge; requiring prose
+    to import it meant inventing text. The checkbox alone is the decision."""
+    post_transaction(
+        client_id, _row(2), accounts["expense"], accounts["cash"], batch_id="JAN26"
+    )
+    _, imported = post_transaction(
+        client_id, _row(3), accounts["expense"], accounts["cash"], batch_id="JAN26",
+        duplicate_override=True,
+    )
+
+    assert imported.duplicate_override is True
+    assert imported.duplicate_override_reason is None
+    assert len(JournalEntry.get_all(client_id)) == 2
+
+
+def test_override_without_a_reason_is_still_audited(client_id, accounts):
+    """The OVERRIDE event is what makes the choice reviewable, so it must be
+    written whether or not a reason was typed."""
+    post_transaction(
+        client_id, _row(2), accounts["expense"], accounts["cash"], batch_id="JAN26"
+    )
+    _, imported = post_transaction(
+        client_id, _row(3), accounts["expense"], accounts["cash"], batch_id="JAN26",
+        duplicate_override=True,
+    )
+
+    override = next(
+        log for log in AuditLog.get_history("imported_transactions", imported.id)
+        if log.action == "OVERRIDE"
+    )
+    assert override.new_values["reason"] is None
+    assert override.new_values["duplicate_of_id"] is not None
+    assert override.new_values["source_row_number"] == 3
+
+
+def test_blank_and_whitespace_reasons_normalize_to_none(client_id, accounts):
+    post_transaction(
+        client_id, _row(2), accounts["expense"], accounts["cash"], batch_id="JAN26"
+    )
+    _, imported = post_transaction(
+        client_id, _row(3), accounts["expense"], accounts["cash"], batch_id="JAN26",
+        duplicate_override=True, duplicate_override_reason="   ",
+    )
+
+    assert imported.duplicate_override_reason is None
+
+
+def test_three_identical_charges_can_all_be_imported(client_id, accounts):
+    """The case that prompted this: the AMEX statement has three identical
+    CWR Digital charges on one day, all real."""
+    post_transaction(
+        client_id, _row(2, description="CWR DIGITAL LLC", amount=-79.00),
+        accounts["expense"], accounts["cash"], batch_id="AMEX",
+    )
+    for source_row in (3, 4):
+        post_transaction(
+            client_id, _row(source_row, description="CWR DIGITAL LLC", amount=-79.00),
+            accounts["expense"], accounts["cash"], batch_id="AMEX",
+            duplicate_override=True,
+        )
+
+    assert len(JournalEntry.get_all(client_id)) == 3
+    assert len(ImportedTransaction.get_by_status(client_id, "Posted")) == 3
 
 
 def test_database_rejects_duplicate_idempotency_key(client_id, accounts):
