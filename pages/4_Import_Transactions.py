@@ -11,7 +11,7 @@ from models.account import Account
 from models.client import Client
 from models.journal_entry import JournalEntry
 from models.transaction import ImportedTransaction
-from services.csv_import import CSVImporter
+from services.csv_import import CSVImporter, SIGN_CONVENTIONS, default_sign_convention
 from services.import_verification import check_row_continuity, verify_against_source
 from services.categorization import CategorizationService
 from services.pattern_learning import PatternLearner
@@ -24,7 +24,7 @@ from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
-from utils.ui import view_switcher
+from utils.ui import apply_default_on_change, view_switcher
 from utils import icons
 from utils.import_review import ensure_row_ids, row_key, classify_review_rows
 
@@ -98,12 +98,7 @@ importable_accounts = cash_accounts + credit_card_accounts
 expense_accounts = [a for a in accounts if a.type == 'Expense']
 revenue_accounts = [a for a in accounts if a.type == 'Revenue']
 
-# Sign convention options
-SIGN_CONVENTIONS = {
-    "bank": "Bank Account (negative = expense, positive = deposit)",
-    "credit_card": "Credit Card (positive = expense, negative = payment/credit)",
-    "flip": "Flip All Signs (reverse the default interpretation)"
-}
+# Sign convention options live with the importer that applies them.
 
 # Track active tab in session state for programmatic switching
 if 'import_active_tab' not in st.session_state:
@@ -264,12 +259,27 @@ if selected_tab == "Upload CSV":
                             else:
                                 st.error("Account number and name required.")
 
+            # Follow the account: picking a credit card should not also require
+            # remembering to switch the convention. Re-applied only when the
+            # selected account changes, so a deliberate override survives.
+            selected_account = next(
+                (a for a in all_importable if a.id == selected_bank), None
+            )
+            apply_default_on_change(
+                "csv_sign_convention",
+                depends_on=selected_bank,
+                default_value=default_sign_convention(
+                    selected_account.type if selected_account else None
+                ),
+            )
+
             with col2:
                 sign_convention = st.selectbox(
                     "Sign Convention",
                     options=list(SIGN_CONVENTIONS.keys()),
                     format_func=lambda x: SIGN_CONVENTIONS[x],
-                    help="How does this statement show expenses vs deposits?"
+                    key="csv_sign_convention",
+                    help="Set from the account type — change it if this statement is reversed.",
                 )
 
             st.caption("""
@@ -470,12 +480,24 @@ if selected_tab == "Upload CSV":
                         format_func=lambda x: bank_account_options[x],
                         help="The bank or credit card account these transactions are from"
                     )
+                # Same account-follows-convention behaviour as single-account mode.
+                assign_account = next(
+                    (a for a in all_importable if a.id == selected_bank), None
+                )
+                apply_default_on_change(
+                    "multi_assign_sign_convention",
+                    depends_on=selected_bank,
+                    default_value=default_sign_convention(
+                        assign_account.type if assign_account else None
+                    ),
+                )
                 with col2:
                     sign_convention = st.selectbox(
                         "Sign Convention",
                         options=list(SIGN_CONVENTIONS.keys()),
                         format_func=lambda x: SIGN_CONVENTIONS[x],
-                        help="How does this statement show expenses vs deposits?"
+                        key="multi_assign_sign_convention",
+                        help="Set from the account type — change it if this statement is reversed.",
                     )
 
                 st.caption("""
@@ -685,15 +707,24 @@ elif selected_tab == "Upload Statement":
                 key="document_bank_account",
             )
         document_account = Account.get_by_id(document_bank_id, client_id=client_id)
+        # index= was ignored here: a keyed widget takes its value from session
+        # state, so the derived default applied on the first render only and
+        # switching to a credit-card account left "Bank Account" in place.
+        apply_default_on_change(
+            "document_sign_convention",
+            depends_on=document_bank_id,
+            default_value=default_sign_convention(
+                document_account.type if document_account else None
+            ),
+        )
         with setup_col2:
-            default_convention = "credit_card" if document_account.type == "Liability" else "bank"
             document_sign = st.selectbox(
                 "Printed amount convention",
                 options=list(SIGN_CONVENTIONS),
-                index=list(SIGN_CONVENTIONS).index(default_convention),
                 format_func=lambda value: SIGN_CONVENTIONS[value],
                 key="document_sign_convention",
-                help="Used by the local parser. AI-assisted parsing normalizes signs itself.",
+                help="Set from the account type. Used by the local parser; "
+                     "AI-assisted parsing normalizes signs itself.",
             )
         with setup_col3:
             statement_year = st.number_input(

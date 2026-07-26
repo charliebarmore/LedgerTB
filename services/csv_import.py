@@ -5,6 +5,27 @@ from io import StringIO
 import uuid
 
 
+# How a statement's amount signs should be read. Shared by the CSV and the
+# PDF/image statement importers so both offer the same choices.
+SIGN_CONVENTIONS = {
+    "bank": "Bank Account (negative = expense, positive = deposit)",
+    "credit_card": "Credit Card (positive = expense, negative = payment/credit)",
+    "flip": "Flip All Signs (reverse the default interpretation)",
+}
+
+
+def default_sign_convention(account_type: Optional[str]) -> str:
+    """The convention a statement for this kind of account normally uses.
+
+    Liability accounts are credit cards and loans, whose statements print
+    purchases positive and payments negative. Assets are bank and cash
+    accounts, where withdrawals are negative. Anything else falls back to the
+    bank convention, which is also the safer guess: it leaves amounts as the
+    file states them rather than inverting every row.
+    """
+    return "credit_card" if account_type == "Liability" else "bank"
+
+
 class CSVImporter:
     """Handles importing and parsing bank CSV files."""
 
