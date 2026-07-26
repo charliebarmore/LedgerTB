@@ -8,14 +8,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.client import Client
 from models.account import Account
-from models.journal_entry import JournalEntry
 from models.transaction import ImportedTransaction
 from models.reports import ReportGenerator
+from services.activity_feed import describe_when, get_recent_activity
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
 from utils.fiscal_dates import fiscal_year_bounds
+
+# Leading glyph per activity kind, so the feed can be scanned by shape.
+ACTIVITY_ICONS = {
+    "import": icons.IMPORT,
+    "journal": icons.JOURNAL_ENTRIES,
+    "audit": icons.AUDIT_TRAIL,
+}
 
 # Initialize database
 
@@ -42,7 +49,7 @@ st.caption(f"Viewing: **{client.name}**")
 # Get data for metrics
 accounts = Account.get_all(client_id, active_only=True)
 pending_count = ImportedTransaction.get_pending_count(client_id)
-recent_entries = JournalEntry.get_all(client_id, limit=5)
+recent_activity = get_recent_activity(client_id, limit=6)
 
 # Trial balance for totals
 tb_rows = ReportGenerator.trial_balance(client_id)
@@ -190,25 +197,31 @@ st.divider()
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("Recent Journal Entries")
+    st.subheader("Recent Activity")
 
-    if not recent_entries:
-        st.info("No journal entries yet. Create one to get started.")
+    if not recent_activity:
+        st.info("No activity yet. Import transactions or create a journal entry to get started.")
     else:
-        for entry in recent_entries:
-            col_a, col_b = st.columns([3, 1], vertical_alignment="center")
+        # Reported as work done ("imported 45 transactions into …"), not as
+        # individual entries — an imported month would otherwise fill this panel
+        # with rows that say nothing about what was actually done.
+        for event in recent_activity:
+            col_a, col_b = st.columns([4, 1], vertical_alignment="top")
             with col_a:
-                st.markdown(f"**#{entry.id}** · {entry.entry_date}  \n"
-                            f"{entry.description or 'No description'}")
+                line = f"{ACTIVITY_ICONS.get(event.kind, '')} **{event.summary}**"
+                if event.detail:
+                    line += f"  \n{event.detail}"
+                st.markdown(line)
             with col_b:
-                # Right-aligned so amounts line up as a column. Inside an HTML
-                # block markdown skips LaTeX, so the $ needs no escaping.
+                # Right-aligned so the timestamps form a column against the
+                # variable-length summaries on the left.
                 st.markdown(
-                    f"<div style='text-align: right'>${entry.total_debits():,.2f}</div>",
+                    f"<div style='text-align: right; color: #6b7280; font-size: 0.85em'>"
+                    f"{describe_when(event.when)}</div>",
                     unsafe_allow_html=True,
                 )
 
-    st.page_link("pages/2_Journal_Entries.py", label="View all entries", icon=icons.JOURNAL_ENTRIES)
+    st.page_link("pages/8_Audit_Trail.py", label="View full history", icon=icons.AUDIT_TRAIL)
 
 with col2:
     st.subheader("Quick Actions")
