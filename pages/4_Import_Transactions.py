@@ -977,7 +977,7 @@ elif selected_tab == "Upload Statement":
 elif selected_tab == "Review & Categorize":
     st.subheader("Review & Categorize Transactions")
 
-    # Show the result of a partial "Create Journal Entries" run (some rows kept).
+    # Show the result of a partial "Post Transactions" run (some rows kept).
     if st.session_state.get('post_result'):
         _pr = st.session_state.post_result
         if _pr.get('level') == 'warning':
@@ -1542,7 +1542,7 @@ elif selected_tab == "Review & Categorize":
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            if st.button("Create Journal Entries", type="primary"):
+            if st.button("Post Transactions", type="primary"):
                 plan = classify_review_rows(
                     transactions,
                     is_included=lambda t: st.session_state.get(row_key("include", t), True),
@@ -1599,9 +1599,10 @@ elif selected_tab == "Review & Categorize":
 
                 if not remaining:
                     # Everything selected was posted; excluded rows acknowledged.
-                    msg = f"Created {created} journal entries!"
+                    msg = f"Posted {created} transaction{'' if created == 1 else 's'}"
                     if skipped > 0:
-                        msg += f" ({skipped} excluded)"
+                        msg += f" — {skipped} excluded"
+                    msg += "."
                     st.session_state.transactions_to_review = []
                     st.session_state.import_complete = True
                     st.session_state.import_complete_msg = msg
@@ -1611,7 +1612,7 @@ elif selected_tab == "Review & Categorize":
                     st.session_state.transactions_to_review = remaining
                     parts = []
                     if created:
-                        parts.append(f"created {created}")
+                        parts.append(f"posted {created}")
                     if uncategorized:
                         parts.append(f"{uncategorized} still need a category")
                     if errors:
@@ -1620,7 +1621,7 @@ elif selected_tab == "Review & Categorize":
                         parts.append(f"{skipped} excluded")
                     st.session_state.post_result = {
                         'level': 'warning' if created else 'info',
-                        'text': "Journal entries: " + ", ".join(parts)
+                        'text': "Posting: " + ", ".join(parts)
                                 + ". Transactions needing attention are kept below.",
                         'errors': errors[:3],
                     }
