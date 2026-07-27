@@ -1444,6 +1444,18 @@ elif selected_tab == "Review & Categorize":
                         transactions[i]["duplicate_override_reason"] = reason
                         duplicate_select_disabled = not override
 
+                        # Ticking the override has to select the row too. The row
+                        # was force-deselected when the duplicate was detected and
+                        # nothing else would ever re-select it, so the override
+                        # appeared to do nothing: the row still posted as excluded.
+                        # Driven off the override's own transitions, so a row
+                        # deliberately deselected after overriding stays that way.
+                        apply_default_on_change(
+                            row_key("include", t),
+                            depends_on=override,
+                            default_value=override,
+                        )
+
                 if duplicate_select_disabled:
                     transactions[i]["include"] = False
                     st.session_state[row_key("include", t)] = False
@@ -1566,6 +1578,24 @@ elif selected_tab == "Review & Categorize":
                 remaining = plan.uncategorized + failed
                 uncategorized = len(plan.uncategorized)
                 skipped = len(plan.excluded)
+
+                # A run that posted nothing at all is a mistake, not a finished
+                # import — every row was deselected or blocked. Discarding the
+                # batch there means re-uploading to try again, so keep the rows
+                # and say what happened instead.
+                if created == 0 and skipped:
+                    st.session_state.transactions_to_review = transactions
+                    st.session_state.post_result = {
+                        'level': 'warning',
+                        'text': (
+                            f"Nothing was posted — all {skipped} row(s) were excluded. "
+                            "A row must be selected in the leftmost column to post; "
+                            "duplicates are deselected automatically until you tick "
+                            "\"Post this transaction anyway\"."
+                        ),
+                        'errors': errors[:3],
+                    }
+                    st.rerun()
 
                 if not remaining:
                     # Everything selected was posted; excluded rows acknowledged.
