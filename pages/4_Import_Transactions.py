@@ -11,7 +11,10 @@ from models.account import Account
 from models.client import Client
 from models.journal_entry import JournalEntry
 from models.transaction import ImportedTransaction
-from services.csv_import import CSVImporter, SIGN_CONVENTIONS, default_sign_convention
+from services.csv_import import (
+    CSVImporter, SIGN_CONVENTIONS, apply_sign_convention, default_sign_convention,
+    summarize_import_amounts,
+)
 from services.import_verification import check_row_continuity, verify_against_source
 from services.categorization import CategorizationService
 from services.pattern_learning import PatternLearner
@@ -208,6 +211,7 @@ if selected_tab == "Upload CSV":
 
         # Initialize variables
         selected_bank = None
+        selected_account = None  # set by whichever account picker renders below
         sign_convention = "bank"
         source_account_col = None  # Initialize here for use later
 
@@ -481,14 +485,14 @@ if selected_tab == "Upload CSV":
                         help="The bank or credit card account these transactions are from"
                     )
                 # Same account-follows-convention behaviour as single-account mode.
-                assign_account = next(
+                selected_account = next(
                     (a for a in all_importable if a.id == selected_bank), None
                 )
                 apply_default_on_change(
                     "multi_assign_sign_convention",
                     depends_on=selected_bank,
                     default_value=default_sign_convention(
-                        assign_account.type if assign_account else None
+                        selected_account.type if selected_account else None
                     ),
                 )
                 with col2:
@@ -547,22 +551,38 @@ if selected_tab == "Upload CSV":
             # dataframe parsed above rather than re-reading the file.
             total_rows = len(parsed_df)
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
+            # What went out, what came in, and the net — in the language of the
+            # account. A min-to-max range said nothing useful ("79.00 to 79.00"
+            # for a file of identical charges) and could not be reconciled
+            # against a statement. The detected date column is already reported
+            # by the column-mapping summary above, so it is not repeated here.
+            summary = None
+            if amount_col and amount_col in parsed_df.columns:
+                try:
+                    amounts = (parsed_df[amount_col].astype(str)
+                               .str.replace(',', '').str.replace('$', '')
+                               .str.replace('(', '-').str.replace(')', ''))
+                    amounts = pd.to_numeric(amounts, errors='coerce').dropna()
+                    summary = summarize_import_amounts(
+                        amounts.tolist(),
+                        sign_convention,
+                        selected_account.type if selected_account else None,
+                    )
+                except Exception:
+                    summary = None
+
+            if summary:
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Total Rows", total_rows)
+                col2.metric(summary["outflow_label"], f"${summary['outflow']:,.2f}")
+                col3.metric(summary["inflow_label"], f"${summary['inflow']:,.2f}")
+                col4.metric("Net change", f"${summary['net']:,.2f}")
+                st.caption(
+                    "Totals reflect the sign convention above — compare them "
+                    "against the statement before importing."
+                )
+            else:
                 st.metric("Total Rows", total_rows)
-            with col2:
-                if date_col in parsed_df.columns:
-                    st.metric("Date Column", date_col)
-            with col3:
-                if amount_col and amount_col in parsed_df.columns:
-                    try:
-                        amounts = (parsed_df[amount_col].astype(str)
-                                   .str.replace(',', '').str.replace('$', '')
-                                   .str.replace('(', '-').str.replace(')', ''))
-                        amounts = pd.to_numeric(amounts, errors='coerce')
-                        st.metric("Amount Range", f"${amounts.min():,.2f} to ${amounts.max():,.2f}")
-                    except Exception:
-                        pass
 
             # Confirmation checkbox
             confirmed = st.checkbox(
@@ -625,14 +645,10 @@ if selected_tab == "Upload CSV":
                                     # Asset accounts: no change needed (bank convention)
                                 else:
                                     # Single account mode OR multi-account without source column
-                                    # Both use the selected_bank and sign_convention
-                                    if sign_convention == "credit_card":
-                                        # Credit card: positive = expense, so flip to negative
-                                        t['amount'] = -t['amount']
-                                    elif sign_convention == "flip":
-                                        # Just flip whatever sign it has
-                                        t['amount'] = -t['amount']
-                                    # "bank" convention: no change needed (negative = expense)
+                                    # Both use the selected_bank and sign_convention.
+                                    # Same helper the Confirm Import totals use, so
+                                    # the preview cannot disagree with what posts.
+                                    t['amount'] = apply_sign_convention(t['amount'], sign_convention)
 
                                 valid_transactions.append(t)
 

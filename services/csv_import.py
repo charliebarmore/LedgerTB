@@ -14,6 +14,47 @@ SIGN_CONVENTIONS = {
 }
 
 
+def apply_sign_convention(amount: float, sign_convention: str) -> float:
+    """Normalize a statement amount so negative means money out.
+
+    Bank statements already read that way. Credit-card statements print
+    purchases positive, and "flip" exists for exports that are backwards, so
+    both are negated. Keeping this in one function means the totals previewed
+    before an import cannot disagree with what actually posts.
+    """
+    return -amount if sign_convention in ("credit_card", "flip") else amount
+
+
+def summarize_import_amounts(amounts, sign_convention: str,
+                             account_type: Optional[str] = None) -> Dict:
+    """Directional totals for a batch about to be imported.
+
+    A min-to-max range says almost nothing about a statement — a file of
+    identical charges reports "79.00 to 79.00". What a reader wants is how much
+    went out, how much came in, and the net, in the language of the account:
+    charges and payments for a card, disbursements and receipts for a bank.
+
+    Amounts are normalized first, so the totals describe what will be posted
+    rather than how the file happened to be written.
+    """
+    normalized = [apply_sign_convention(amount, sign_convention) for amount in amounts]
+    inflow = sum(amount for amount in normalized if amount > 0)
+    outflow = -sum(amount for amount in normalized if amount < 0)
+
+    if account_type == "Liability":
+        outflow_label, inflow_label = "Total charges", "Total payments"
+    else:
+        outflow_label, inflow_label = "Total disbursements", "Total receipts"
+
+    return {
+        "outflow_label": outflow_label,
+        "outflow": round(outflow, 2),
+        "inflow_label": inflow_label,
+        "inflow": round(inflow, 2),
+        "net": round(inflow - outflow, 2),
+    }
+
+
 def default_sign_convention(account_type: Optional[str]) -> str:
     """The convention a statement for this kind of account normally uses.
 
