@@ -53,6 +53,33 @@ def test_paginated_accounting_pages_render(client_id, accounts, monkeypatch):
     assert any(button.label == "Next" and not button.disabled for button in audit.button)
 
 
+def test_report_statements_render_with_balance_checks(client_id, accounts, monkeypatch):
+    """Each statement view renders as a statement and its check line passes."""
+    _select_client(monkeypatch, client_id)
+    post_entry(
+        client_id, date(2026, 1, 15),
+        [(accounts["cash"], 500, 0), (accounts["revenue"], 0, 500)],
+    )
+    post_entry(
+        client_id, date(2026, 2, 3),
+        [(accounts["expense"], 120, 0), (accounts["cash"], 0, 120)],
+    )
+
+    for view, expected in [
+        ("Trial Balance", "Trial balance is in balance."),
+        ("Income Statement", None),
+        ("Balance Sheet", "Balance sheet is balanced."),
+    ]:
+        page = AppTest.from_file("pages/5_Reports.py", default_timeout=30)
+        page.session_state["active_report"] = view
+        page.run()
+        assert not page.exception, view
+        if expected:
+            assert any(expected in str(s.value) for s in page.success), view
+        # the GL drill-down selectbox replaced the per-account buttons
+        assert any("gl_pick" in (box.key or "") for box in page.selectbox), view
+
+
 def test_year_close_checklist_page_renders(client_id, accounts, monkeypatch):
     _select_client(monkeypatch, client_id)
     worksheet = AppTest.from_file(
