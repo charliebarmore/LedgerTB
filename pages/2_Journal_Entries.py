@@ -19,14 +19,30 @@ from constants import EntryType
 from utils.fiscal_dates import fiscal_year_bounds
 
 
-_LINE_WIDGET_PREFIXES = ("account_", "debit_", "credit_", "memo_")
+_FORM_WIDGET_PREFIXES = ("account_", "debit_", "credit_", "memo_", "je_hdr_")
 
 
-def clear_entry_line_widgets():
-    """Clear keyed line widgets before they are instantiated on a rerun."""
-    for key in list(st.session_state):
-        if key.startswith(_LINE_WIDGET_PREFIXES):
-            del st.session_state[key]
+def start_new_form_generation():
+    """Give every entry-form widget a fresh key so the browser abandons its state.
+
+    Deleting a keyed widget's session-state entry resets only the server side:
+    the browser keeps the widget's value and re-imposes it when a widget with
+    the same key re-registers on the next run (which is why a saved entry's
+    lines reappeared in the cleared form). Embedding a generation counter in
+    every key changes the widgets' identity instead — the only reset the
+    frontend honors. Stale keys are pruned on the next run, before any
+    widget is instantiated.
+    """
+    st.session_state.je_form_gen = st.session_state.get("je_form_gen", 0) + 1
+    st.session_state._prune_je_form_widgets = True
+
+
+def line_key(name: str, i: int) -> str:
+    return f"{name}_{i}_g{st.session_state.je_form_gen}"
+
+
+def hdr_key(name: str) -> str:
+    return f"je_hdr_{name}_g{st.session_state.je_form_gen}"
 
 
 # Initialize database
@@ -62,15 +78,22 @@ if 'je_lines' not in st.session_state:
         {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''}
     ]
 
-if st.session_state.pop("_clear_je_line_widgets", False):
-    clear_entry_line_widgets()
+if "je_form_gen" not in st.session_state:
+    st.session_state.je_form_gen = 0
+
+if st.session_state.pop("_prune_je_form_widgets", False):
+    # Only stale-generation keys exist this early in the run; the current
+    # generation's widgets have not been instantiated yet.
+    for key in list(st.session_state):
+        if key.startswith(_FORM_WIDGET_PREFIXES):
+            del st.session_state[key]
 
 if 'editing_entry_id' not in st.session_state:
     st.session_state.editing_entry_id = None
 
 # Check if we're coming from General Ledger drill-down
 if 'edit_entry_id' in st.session_state:
-    clear_entry_line_widgets()
+    start_new_form_generation()
     entry_to_edit = JournalEntry.get_by_id(st.session_state.edit_entry_id, client_id=client_id)
     if entry_to_edit:
         import_link = ImportedTransaction.get_links_for_journal_entries(
@@ -103,10 +126,7 @@ if 'edit_entry_id' in st.session_state:
 
 
 def reset_entry_form():
-    # Streamlit's keyed widgets retain their own values and ignore a changed
-    # ``value`` on rerun. Defer their removal until the next run, before the
-    # widgets exist, so a saved entry cannot silently repopulate the form.
-    st.session_state._clear_je_line_widgets = True
+    start_new_form_generation()
     st.session_state.je_lines = [
         {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''},
         {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''}
@@ -138,7 +158,7 @@ def load_entry_for_edit(entry: JournalEntry):
     st.session_state.je_entry_type = entry.entry_type
     st.session_state.je_source_reference = entry.source_reference or ''
     st.session_state.je_description = entry.description or ''
-    st.session_state._clear_je_line_widgets = True
+    start_new_form_generation()
 
 
 def render_delete_control(entry_id: int):
@@ -282,6 +302,12 @@ tab1, tab2, tab3 = st.tabs(["New Entry", "View Entries", "Reverse Entry"])
 with tab1:
     st.subheader("Create Journal Entry" if not st.session_state.editing_entry_id else "Edit Journal Entry")
 
+    # Shown after the post-save rerun; a plain st.success before st.rerun()
+    # renders for one frame and is wiped before anyone can read it.
+    saved_message = st.session_state.pop("je_saved_message", None)
+    if saved_message:
+        st.success(saved_message)
+
     # Get all active accounts for dropdown
     accounts = Account.get_all(client_id, active_only=True)
     # No "-- Select Account --" pseudo-option: its label becomes the search
@@ -309,17 +335,19 @@ with tab1:
 
     col1, col2, col3 = st.columns(3)
 
+    # Generation-keyed (hdr_key) so saving or loading an entry actually resets
+    # them — unkeyed widgets keep their browser-side state across a reset.
     with col1:
-        entry_date = st.date_input("Date", value=default_date)
+        entry_date = st.date_input("Date", value=default_date, key=hdr_key("date"))
 
     with col2:
         type_index = entry_type_options.index(default_type) if default_type in entry_type_options else 0
-        entry_type = st.selectbox("Entry Type", options=entry_type_options, index=type_index)
+        entry_type = st.selectbox("Entry Type", options=entry_type_options, index=type_index, key=hdr_key("type"))
 
     with col3:
-        source_reference = st.text_input("Source Reference", value=default_ref, placeholder="e.g., Bank stmt pg 3")
+        source_reference = st.text_input("Source Reference", value=default_ref, placeholder="e.g., Bank stmt pg 3", key=hdr_key("ref"))
 
-    description = st.text_input("Description", value=default_desc, placeholder="Description of the entry")
+    description = st.text_input("Description", value=default_desc, placeholder="Description of the entry", key=hdr_key("desc"))
 
     st.divider()
 
@@ -342,6 +370,9 @@ with tab1:
         else:
             st.metric("Difference", f"${abs(difference):,.2f}", delta="Not balanced", delta_color="inverse")
 
+    st.caption("Totals pick up a value once it's applied — press Enter or click "
+               "out of the field after typing.")
+
     st.divider()
 
     # Line items
@@ -353,7 +384,7 @@ with tab1:
                 "Account",
                 options=list(account_options.keys()),
                 format_func=lambda x: account_options[x],
-                key=f"account_{i}",
+                key=line_key("account", i),
                 index=list(account_options.keys()).index(line['account_id']) if line['account_id'] in account_options else None,
                 placeholder="Type an account number or name",
             )
@@ -366,7 +397,7 @@ with tab1:
                 min_value=0.0,
                 value=float(line['debit']),
                 step=0.01,
-                key=f"debit_{i}"
+                key=line_key("debit", i)
             )
             st.session_state.je_lines[i]['debit'] = debit
 
@@ -376,7 +407,7 @@ with tab1:
                 min_value=0.0,
                 value=float(line['credit']),
                 step=0.01,
-                key=f"credit_{i}"
+                key=line_key("credit", i)
             )
             st.session_state.je_lines[i]['credit'] = credit
 
@@ -384,7 +415,7 @@ with tab1:
             memo = st.text_input(
                 "Memo",
                 value=line['memo'],
-                key=f"memo_{i}",
+                key=line_key("memo", i),
                 placeholder="Optional"
             )
             st.session_state.je_lines[i]['memo'] = memo
@@ -395,6 +426,9 @@ with tab1:
             if len(st.session_state.je_lines) > 2:
                 if st.button("Remove", key=f"delete_line_{i}", help="Remove this line"):
                     st.session_state.je_lines.pop(i)
+                    # New keys for the shifted lines, or the browser re-imposes
+                    # each row's old widget values onto its new neighbor.
+                    start_new_form_generation()
                     st.rerun()
 
     # Add line button
@@ -437,10 +471,11 @@ with tab1:
             else:
                 try:
                     entry.save()
-                    if st.session_state.editing_entry_id:
-                        st.success("Journal entry updated!")
-                    else:
-                        st.success(f"Journal entry #{entry.id} created!")
+                    st.session_state.je_saved_message = (
+                        f"Journal entry #{entry.id} updated!"
+                        if st.session_state.editing_entry_id
+                        else f"Journal entry #{entry.id} created!"
+                    )
                     reset_entry_form()
                     st.rerun()
                 except Exception as e:
