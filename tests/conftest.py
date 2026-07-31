@@ -1,7 +1,14 @@
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Before ANY app module loads: config reads the Anthropic key at import time,
+# falling back to the macOS credential vault. From a pytest process that read
+# can raise a Keychain authorization dialog no headless run can answer — the
+# suite hangs forever. A dummy env key short-circuits the vault entirely.
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-never-used")
 
 import pytest
 
@@ -10,6 +17,28 @@ from database.connection import init_database
 from models.client import Client
 from models.account import Account
 from models.journal_entry import JournalEntry, JournalEntryLine
+
+
+@pytest.fixture(autouse=True)
+def fake_credential_vault(request, monkeypatch):
+    """No test may touch the real credential vault (see the env note above)."""
+    if request.node.get_closest_marker("real_vault"):
+        # secure_store's own tests stub the keyring library directly.
+        return None
+
+    import utils.secure_store as secure_store
+
+    secrets = {}
+
+    def _set(name, value):
+        if not value:
+            raise ValueError("Secret value cannot be empty.")
+        secrets[name] = value
+
+    monkeypatch.setattr(secure_store, "get_secret", lambda name: secrets.get(name))
+    monkeypatch.setattr(secure_store, "set_secret", _set)
+    monkeypatch.setattr(secure_store, "delete_secret", lambda name: secrets.pop(name, None))
+    return secrets
 
 
 @pytest.fixture

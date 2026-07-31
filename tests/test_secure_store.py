@@ -1,4 +1,8 @@
+import pytest
+
 from utils.secure_store import get_secret, migrate_legacy_secret, set_secret
+
+pytestmark = pytest.mark.real_vault
 
 
 def test_secure_store_roundtrip(monkeypatch):

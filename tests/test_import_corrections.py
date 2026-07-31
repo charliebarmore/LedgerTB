@@ -54,6 +54,10 @@ def test_withdrawal_correction_reclassifies_without_touching_bank_leg(
     )
 
     assert correction.source_reference == f"Correction of imported JE #{original.id}"
+    # Regular, not Adjusting: a recategorization is routine bookkeeping and
+    # must not clutter the worksheet's AJE column or take an AJE reference.
+    assert correction.entry_type == "Regular"
+    assert correction.aje_reference is None
     assert [(line.account_id, line.debit, line.credit) for line in correction.lines] == [
         (travel, 75, 0),
         (accounts["expense"], 0, 75),

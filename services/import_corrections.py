@@ -116,12 +116,15 @@ def correct_imported_category(
                 ),
             ]
 
+        # Regular, not Adjusting: a recategorization is routine bookkeeping.
+        # The AJE column is reserved for deliberate period-end adjustments,
+        # and the audit event below already documents the correction fully.
         correction = JournalEntry(
             client_id=client_id,
             entry_date=correction_date,
             description=f"Category correction: {imported['description']}"[:200],
             source_reference=f"Correction of imported JE #{journal_entry_id}",
-            entry_type="Adjusting",
+            entry_type="Regular",
             lines=lines,
         )
         correction.save(conn=conn)
