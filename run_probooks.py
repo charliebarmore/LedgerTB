@@ -28,7 +28,10 @@ from pathlib import Path
 import pandas          # noqa: F401
 import numpy           # noqa: F401
 import openpyxl        # noqa: F401
-import sqlcipher3      # noqa: F401  (encrypted database driver)
+try:
+    import sqlcipher3  # noqa: F401  (encrypted database driver; the desktop bundle always ships it)
+except ImportError:
+    pass  # dev-only fallback: the app runs unencrypted via stdlib sqlite3
 import anthropic       # noqa: F401
 import dotenv          # noqa: F401
 import platformdirs    # noqa: F401

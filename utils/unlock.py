@@ -26,7 +26,29 @@ MIN_PASSPHRASE_LEN = 8
 
 
 def require_unlock():
-    """Ensure the database is unlocked, or render the gate and stop the page."""
+    """Ensure the database is unlocked, or render the gate and stop the page.
+
+    When the SQLCipher driver isn't installed (fallback mode, see
+    database/connection.py) there is no passphrase: an existing encrypted
+    database is refused outright, and otherwise the page runs unencrypted
+    behind a persistent warning.
+    """
+    if not dbconn.ENCRYPTION_AVAILABLE:
+        if database_state(DATABASE_PATH) == "encrypted":
+            st.markdown(f"## 🔒 {APP_NAME}")
+            st.error(
+                "This database is encrypted, but the SQLCipher driver "
+                "(`sqlcipher3`) is not installed on this machine, so it cannot "
+                "be unlocked. Install SQLCipher and relaunch."
+            )
+            st.stop()
+        st.warning(
+            "Encryption is off: the SQLCipher driver is not installed, so this "
+            "database is stored unencrypted. Fine for evaluating with sample "
+            "data; install `sqlcipher3` before keeping real books here.",
+            icon="🔓",
+        )
+        return
     if dbconn.has_active_key():
         return
     _render_gate(database_state(DATABASE_PATH))

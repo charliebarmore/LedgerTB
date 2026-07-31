@@ -13,7 +13,13 @@ import hashlib
 import shutil
 from pathlib import Path
 
-import sqlcipher3
+# Optional: when SQLCipher isn't installed the app runs unencrypted (see
+# database/connection.py). Only the helpers that actually touch an encrypted
+# file need the driver; they raise a clear error if it's missing.
+try:
+    import sqlcipher3
+except ImportError:
+    sqlcipher3 = None
 
 # Fixed application salt for the passphrase KDF. It is not secret. A fixed salt
 # (rather than a random per-install one) keeps the derived key a pure function of
@@ -73,6 +79,8 @@ def database_state(path: Path) -> str:
 
 def verify_passphrase(path: Path, passphrase: str) -> bool:
     """True if ``passphrase`` opens the encrypted database at ``path``."""
+    if sqlcipher3 is None:
+        raise RuntimeError("SQLCipher (sqlcipher3) is not installed; cannot open an encrypted database.")
     try:
         conn = sqlcipher3.connect(str(path))
         try:
@@ -93,6 +101,8 @@ def encrypt_plaintext_db(path: Path, passphrase: str) -> Path:
     ``<name>.plaintext.bak`` so a botched passphrase can't lose data. Returns the
     backup path.
     """
+    if sqlcipher3 is None:
+        raise RuntimeError("SQLCipher (sqlcipher3) is not installed; cannot encrypt the database.")
     path = Path(path)
     tmp_enc = path.with_suffix(path.suffix + ".enc.tmp")
     if tmp_enc.exists():

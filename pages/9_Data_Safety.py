@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import APP_VERSION, DATABASE_PATH
 from database import init_database
+from database import connection as dbconn
 from models.audit_log import AuditLog
 from models.client import Client
 from services.backups import backup_health, create_backup, list_backups, restore_backup
@@ -51,7 +52,10 @@ for check in get_readiness_checks():
 
 st.divider()
 st.subheader("Verified backups")
-st.warning("Backups are verified but remain plaintext until SQLCipher encryption is implemented.")
+if dbconn.ENCRYPTION_AVAILABLE:
+    st.caption("Backups are written encrypted under the same passphrase as the database.")
+else:
+    st.warning("Encryption is off (SQLCipher not installed), so backups are plaintext like the database.")
 health = backup_health()
 if health["latest"]:
     latest = health["latest"]

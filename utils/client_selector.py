@@ -8,6 +8,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.client import Client
 from models.transaction import ImportedTransaction
+from database import connection as db_connection
+from services.backups import backup_health
 from utils import icons
 
 
@@ -72,6 +74,11 @@ section[data-testid="stSidebar"] button[data-testid="stBaseButton-tertiary"]:hov
     background: rgba(151, 166, 195, 0.15);
     color: inherit;
 }
+
+/* Streamlit's default caption gray misses WCAG AA on a white background. */
+[data-testid="stCaptionContainer"] {
+    color: #606773;
+}
 </style>
 """
 
@@ -85,7 +92,19 @@ def apply_sidebar_style():
     if wordmark.exists():
         st.logo(str(wordmark), size="large",
                 icon_image=str(_ASSETS_DIR / "probooks-mark.png"))
-    st.markdown(_SIDEBAR_CSS, unsafe_allow_html=True)
+    st.html(_SIDEBAR_CSS)
+
+
+def render_safety_status():
+    """Keep encryption and backup posture visible without dominating navigation."""
+    health = backup_health()
+    encryption_ready = db_connection.ENCRYPTION_AVAILABLE
+    needs_attention = not encryption_ready or not health["healthy"]
+    label = "Data Safety (action needed)" if needs_attention else "Data Safety"
+    st.sidebar.page_link("pages/9_Data_Safety.py", label=label, icon=icons.SECURITY)
+    if needs_attention:
+        reason = "Encryption is off." if not encryption_ready else health["reason"]
+        st.sidebar.caption(f"Safety: {reason}")
 
 
 def render_client_selector() -> Optional[int]:
@@ -95,12 +114,6 @@ def render_client_selector() -> Optional[int]:
     """
     apply_sidebar_style()
 
-    # The sidebar "TEST DATA ONLY" readiness banner and Data Safety link were
-    # removed at the owner's request (single-user local tool; owner manages PII
-    # safety via FileVault + their own backup posture). The Data Safety page
-    # (pages/9_Data_Safety.py) and services.production_readiness still exist and
-    # can be re-linked here if that guardrail is ever wanted back.
-
     clients = Client.get_all(active_only=True)
 
     if not clients:
@@ -109,6 +122,8 @@ def render_client_selector() -> Optional[int]:
                              key="nav_create_first_client", type="tertiary", width="stretch"):
             st.session_state['clients_view'] = "Add Client"
             st.switch_page("pages/0_Clients.py")
+        st.sidebar.divider()
+        render_safety_status()
         return None
 
     # Build options dict
@@ -165,6 +180,7 @@ def render_client_selector() -> Optional[int]:
         st.sidebar.page_link("pages/6_Transactions.py", label="Transactions", icon=icons.TRANSACTIONS)
         st.sidebar.page_link("pages/10_Bank_Reconciliation.py", label="Bank Reconciliation", icon=icons.RECONCILIATION)
         st.sidebar.page_link("pages/8_Audit_Trail.py", label="Audit Trail", icon=icons.AUDIT_TRAIL)
+        render_safety_status()
 
         # Quick report links (collapsible)
         with st.sidebar.expander("Quick Reports"):
