@@ -229,6 +229,53 @@ class ImportedTransaction:
         return count
 
     @staticmethod
+    def get_links_for_journal_entries(
+        client_id: int, journal_entry_ids: List[int]
+    ) -> dict[int, dict]:
+        """Return lightweight import metadata keyed by linked journal entry."""
+        entry_ids = sorted({int(entry_id) for entry_id in journal_entry_ids if entry_id})
+        if not entry_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in entry_ids)
+        with get_cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT it.id, it.journal_entry_id, it.transaction_date,
+                       it.description, it.amount, it.bank_account_id,
+                       it.suggested_account_id, it.status, it.source_filename,
+                       ba.account_number AS bank_account_number,
+                       ba.name AS bank_account_name,
+                       sa.account_number AS suggested_account_number,
+                       sa.name AS suggested_account_name
+                FROM imported_transactions it
+                LEFT JOIN accounts ba ON ba.id = it.bank_account_id
+                LEFT JOIN accounts sa ON sa.id = it.suggested_account_id
+                WHERE it.client_id = ?
+                  AND it.journal_entry_id IN ({placeholders})
+                """,
+                [client_id, *entry_ids],
+            )
+            rows = cursor.fetchall()
+        return {
+            row["journal_entry_id"]: {
+                "id": row["id"],
+                "journal_entry_id": row["journal_entry_id"],
+                "transaction_date": date.fromisoformat(row["transaction_date"]),
+                "description": row["description"],
+                "amount": to_dollars(row["amount"]),
+                "bank_account_id": row["bank_account_id"],
+                "bank_account_number": row["bank_account_number"],
+                "bank_account_name": row["bank_account_name"],
+                "suggested_account_id": row["suggested_account_id"],
+                "suggested_account_number": row["suggested_account_number"],
+                "suggested_account_name": row["suggested_account_name"],
+                "status": row["status"],
+                "source_filename": row["source_filename"],
+            }
+            for row in rows
+        }
+
+    @staticmethod
     def bulk_insert(transactions: List['ImportedTransaction']):
         """Insert multiple transactions at once."""
         from models.audit_log import AuditLog
