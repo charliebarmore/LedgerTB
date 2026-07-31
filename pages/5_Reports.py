@@ -14,29 +14,9 @@ from models.reports import ReportGenerator
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
-from utils.ui import financial_statement, view_switcher
+from utils.ui import financial_statement, ledger_table, view_switcher
 
 
-def gl_drill_down(options, key, start_date, end_date):
-    """One selectbox + button instead of a button per account row."""
-    if not options:
-        return
-    dd1, dd2 = st.columns([3, 1])
-    with dd1:
-        picked = st.selectbox(
-            "Drill into general ledger",
-            options=list(options.keys()),
-            format_func=lambda account_id: options[account_id],
-            key=f"{key}_gl_pick",
-        )
-    with dd2:
-        st.write("")
-        if st.button("Open GL →", width="stretch", key=f"{key}_gl_open"):
-            st.session_state.gl_account_id = picked
-            st.session_state.gl_start_date = start_date
-            st.session_state.gl_end_date = end_date
-            st.session_state.active_report = "General Ledger"
-            st.rerun()
 from utils import icons
 from utils.export import sanitize_df
 from utils.fiscal_dates import fiscal_year_bounds
@@ -63,6 +43,28 @@ if not client_id:
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
 current_fy_start, _ = fiscal_year_bounds(date.today(), client.fiscal_year_end_month)
+
+
+def gl_drill_down(options, key, start_date, end_date):
+    """One selectbox + button instead of a button per account row."""
+    if not options:
+        return
+    dd1, dd2 = st.columns([3, 1])
+    with dd1:
+        picked = st.selectbox(
+            "Drill into general ledger",
+            options=list(options.keys()),
+            format_func=lambda account_id: options[account_id],
+            key=f"{key}_gl_pick",
+        )
+    with dd2:
+        st.write("")
+        if st.button("Open GL →", width="stretch", key=f"{key}_gl_open"):
+            st.session_state.gl_account_id = picked
+            st.session_state.gl_start_date = start_date
+            st.session_state.gl_end_date = end_date
+            st.session_state.active_report = "General Ledger"
+            st.rerun()
 
 # Track active report in session state for sidebar navigation
 if 'active_report' not in st.session_state:
@@ -357,67 +359,46 @@ elif selected_report == "General Ledger":
             if entries and entries[0].entry_id == 0:
                 beginning_balance = entries[0].balance
 
-            # Display entries as interactive table with clickable Entry #
-            st.caption("Click an Entry # to edit that journal entry")
-
-            # Header row
-            header_cols = st.columns([1, 0.8, 2.5, 1.5, 1, 1, 1])
-            with header_cols[0]:
-                st.markdown("**Date**")
-            with header_cols[1]:
-                st.markdown("**Entry #**")
-            with header_cols[2]:
-                st.markdown("**Description**")
-            with header_cols[3]:
-                st.markdown("**Reference**")
-            with header_cols[4]:
-                st.markdown("**Debit**")
-            with header_cols[5]:
-                st.markdown("**Credit**")
-            with header_cols[6]:
-                st.markdown("**Balance**")
-
-            for idx, e in enumerate(entries):
-                cols = st.columns([1, 0.8, 2.5, 1.5, 1, 1, 1])
-                with cols[0]:
-                    st.text(e.entry_date.isoformat())
-                with cols[1]:
-                    if e.entry_id == 0:
-                        st.text("")  # Beginning balance has no entry
-                    else:
-                        # Make entry # clickable to edit (use idx for unique key).
-                        # No width="stretch", for the same reason as the other
-                        # drill-down links: content-width reads as a compact tag,
-                        # full-width reads as an empty input field.
-                        if st.button(f"#{e.entry_id}", key=f"gl_je_{idx}"):
-                            st.session_state.edit_entry_id = e.entry_id
-                            st.switch_page("pages/2_Journal_Entries.py")
-                with cols[2]:
-                    st.text(e.description[:35] if e.description else "")
-                with cols[3]:
-                    st.text(e.source_reference[:18] if e.source_reference else "")
-                with cols[4]:
-                    st.text(f"${e.debit:,.2f}" if e.debit > 0 else "")
-                with cols[5]:
-                    st.text(f"${e.credit:,.2f}" if e.credit > 0 else "")
-                with cols[6]:
-                    st.text(f"${e.balance:,.2f}")
-
-            # Summary
             account = Account.get_by_id(selected_account, client_id=client_id)
             final_balance = entries[-1].balance if entries else 0
 
-            st.divider()
-            st.markdown("**Summary**")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Beginning Balance", f"${beginning_balance:,.2f}")
-            with col2:
-                st.metric("Period Debits", f"${period_debits:,.2f}")
-            with col3:
-                st.metric("Period Credits", f"${period_credits:,.2f}")
-            with col4:
-                st.metric("Ending Balance", f"${final_balance:,.2f}")
+            ledger_table(
+                headers=["Date", "Entry #", "Description", "Reference",
+                         "Debit", "Credit", "Balance"],
+                rows=[
+                    [e.entry_date.isoformat(),
+                     f"#{e.entry_id}" if e.entry_id else "",
+                     (e.description or "")[:48],
+                     (e.source_reference or "")[:24],
+                     f"{e.debit:,.2f}" if e.debit > 0 else "",
+                     f"{e.credit:,.2f}" if e.credit > 0 else "",
+                     f"{e.balance:,.2f}"]
+                    for e in entries
+                ],
+                align=["l", "l", "l", "l", "r", "r", "r"],
+                total_row=["", "", "Period totals · ending balance", "",
+                           f"${period_debits:,.2f}", f"${period_credits:,.2f}",
+                           f"${final_balance:,.2f}"],
+            )
+
+            # One control instead of a button per row.
+            open_options = {e.entry_id: (f"#{e.entry_id} · {e.entry_date} · "
+                                         f"{(e.description or '')[:34]}")
+                            for e in entries if e.entry_id}
+            if open_options:
+                oc1, oc2 = st.columns([3, 1])
+                with oc1:
+                    picked_entry = st.selectbox(
+                        "Open journal entry",
+                        options=list(open_options.keys()),
+                        format_func=lambda entry_id: open_options[entry_id],
+                        key="gl_open_entry_pick",
+                    )
+                with oc2:
+                    st.write("")
+                    if st.button("Open entry →", width="stretch", key="gl_open_entry"):
+                        st.session_state.edit_entry_id = picked_entry
+                        st.switch_page("pages/2_Journal_Entries.py")
 
             # Export
             st.divider()

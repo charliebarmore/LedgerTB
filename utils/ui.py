@@ -175,3 +175,53 @@ def financial_statement(rows, headers=None):
         parts.append(f"<tr class='{kind}'><td class='lbl'>{label_html}</td>{cells}</tr>")
 
     st.html(_STATEMENT_CSS + f"<table class='pb-statement'>{''.join(parts)}</table>")
+
+
+_LEDGER_CSS = """
+<style>
+table.pb-ledger {
+    width: 100%;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.92em;
+    margin: 0.25rem 0 0.75rem 0;
+}
+table.pb-ledger td, table.pb-ledger th {
+    border: none;
+    padding: 0.22rem 0.5rem 0.22rem 0.25rem;
+    vertical-align: top;
+    text-align: left;
+}
+table.pb-ledger th {
+    font-weight: 600; color: #6b7280; font-size: 0.85em;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    border-bottom: 1px solid #b9bec7;
+}
+table.pb-ledger td.r, table.pb-ledger th.r { text-align: right; white-space: nowrap; }
+table.pb-ledger tr:nth-child(even) td { background: rgba(151, 166, 195, 0.08); }
+table.pb-ledger tr.total td {
+    font-weight: 700; border-top: 1px solid #565d68; background: none;
+}
+</style>
+"""
+
+
+def ledger_table(headers, rows, align, total_row=None):
+    """A clean listing table for ledger-style reports.
+
+    headers: column headings; rows: lists of display strings;
+    align: 'l'/'r' per column; total_row: optional bold ruled last row.
+    """
+    import html as _html
+
+    def cells(values, tag):
+        return "".join(
+            f"<{tag} class='{'r' if a == 'r' else ''}'>{_html.escape(str(v))}</{tag}>"
+            for v, a in zip(values, align)
+        )
+
+    body = [f"<tr>{cells(headers, 'th')}</tr>"]
+    body += [f"<tr>{cells(row, 'td')}</tr>" for row in rows]
+    if total_row is not None:
+        body.append(f"<tr class='total'>{cells(total_row, 'td')}</tr>")
+    st.html(_LEDGER_CSS + f"<table class='pb-ledger'>{''.join(body)}</table>")

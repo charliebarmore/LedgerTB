@@ -240,12 +240,13 @@ def test_dashboard_balances_show_totals_and_equation(client_id, accounts, monkey
     dashboard = AppTest.from_file("pages/7_Dashboard.py", default_timeout=30).run()
     assert not dashboard.exception
 
-    markdown = "\n".join(str(m.value) for m in dashboard.markdown)
+    # The balances summary renders as financial statements via st.html.
+    html = "\n".join(str(e.body) for e in dashboard.get("html") if hasattr(e, "body"))
     for label in ["Total assets", "Total liabilities", "Total equity",
                   "Total revenue", "Total expenses", "Net income (fiscal YTD)",
-                  "**Equity**"]:
-        assert label in markdown, f"missing {label!r}"
-    assert "$1,080.00" in markdown  # total assets: 900 + 300 - 120
+                  ">Equity<"]:
+        assert label in html, f"missing {label!r}"
+    assert "$1,080.00" in html  # total assets: 900 + 300 - 120
 
     success = "\n".join(str(s.value) for s in dashboard.success)
     assert "In balance" in success
