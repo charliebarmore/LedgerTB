@@ -28,6 +28,7 @@ from pathlib import Path
 import pandas          # noqa: F401
 import numpy           # noqa: F401
 import openpyxl        # noqa: F401
+import reportlab       # noqa: F401  (close-package PDF export)
 try:
     import sqlcipher3  # noqa: F401  (encrypted database driver; the desktop bundle always ships it)
 except ImportError:
@@ -124,6 +125,8 @@ def _selfcheck() -> int:
     mods = ["sqlcipher3", "database.connection", "database.crypto", "streamlit", "pandas",
             "numpy", "pyarrow", "altair", "openpyxl",
             "openpyxl.styles", "openpyxl.utils", "openpyxl.utils.dataframe",
+            "reportlab", "reportlab.platypus", "reportlab.lib.pagesizes",
+            "reportlab.lib.styles", "reportlab.pdfgen.canvas",
             "anthropic", "pydantic", "pydantic_core", "dotenv", "platformdirs",
             "config", "constants", "money", "models.journal_entry", "models.reconciliation",
             "services.categorization", "services.document_import", "fitz", "PIL",

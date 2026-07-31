@@ -28,7 +28,7 @@ from models.reports import ReportGenerator
 from models.journal_entry import JournalEntry, JournalEntryLine
 from models.account import Account
 from models.audit_log import AuditLog
-from services.close_package import build_close_package
+from services.close_package import build_close_package, build_close_package_pdf
 
 
 st.set_page_config(
@@ -483,20 +483,37 @@ with btn_cols[1]:
         )
 
 with btn_cols[2]:
-    # One workbook with everything needed to hand off a finished period:
-    # final TB, all transactions, the AJEs, and receipts/disbursements per
-    # cash account. (Replaced the old attest-claw bridge export.)
+    # Everything needed to hand off a finished period: final TB, all
+    # transactions, the AJEs, and receipts/disbursements per cash account.
+    # PDF is the file/record copy; the Excel workbook is for further work.
+    # (Replaced the old attest-claw bridge export.)
     if rows:
+        pdf = build_close_package_pdf(
+            client_id, client.name, period_start, period_end, rows
+        )
+        st.download_button(
+            label="Close Package (PDF)",
+            data=pdf,
+            file_name=f"ClosePackage_{client.name}_{period_end.strftime('%Y%m%d')}.pdf",
+            mime="application/pdf",
+            help="One PDF: summary with tie-outs, final trial balance, "
+                 "transactions, adjusting entries, receipts & disbursements",
+            on_click=AuditLog.log_event,
+            args=(client_id, "EXPORT", "close_package_export", {
+                "format": "pdf",
+                "period_start": period_start, "period_end": period_end,
+                "row_count": len(rows),
+            }),
+        )
         package = build_close_package(
             client_id, client.name, period_start, period_end, rows
         )
         st.download_button(
-            label="Export Close Package",
+            label="Close Package (Excel)",
             data=package,
             file_name=f"ClosePackage_{client.name}_{period_end.strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            help="Excel workbook: final trial balance, transactions, "
-                 "adjusting entries, and receipts & disbursements",
+            help="Same package as an Excel workbook, one sheet per report",
             on_click=AuditLog.log_event,
             args=(client_id, "EXPORT", "close_package_export", {
                 "format": "xlsx",
