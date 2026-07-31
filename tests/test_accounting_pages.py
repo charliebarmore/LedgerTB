@@ -117,6 +117,56 @@ def test_journal_totals_reflect_committed_values_immediately(
     assert diff_metric.value == "$0.00"
 
 
+def test_hand_keyed_adjusting_entry_gets_aje_reference(client_id, accounts, monkeypatch):
+    """AJEs keyed on this page must get the next AJE-00x, like worksheet AJEs."""
+    _select_client(monkeypatch, client_id)
+    journal = AppTest.from_file(
+        "pages/2_Journal_Entries.py", default_timeout=30
+    ).run()
+    journal.selectbox(key="je_hdr_type_g0").set_value("Adjusting").run()
+    journal.selectbox(key="account_0_g0").set_value(accounts["expense"]).run()
+    journal.number_input(key="debit_0_g0").set_value(10.0).run()
+    journal.selectbox(key="account_1_g0").set_value(accounts["revenue"]).run()
+    journal.number_input(key="credit_1_g0").set_value(10.0).run()
+    next(b for b in journal.button if b.label == "Save Entry").click().run()
+
+    assert not journal.exception
+    entry = JournalEntry.get_all(client_id=client_id)[0]
+    assert entry.entry_type == "Adjusting"
+    assert entry.aje_reference == "AJE-001"
+
+
+def test_editing_an_aje_preserves_its_reference(client_id, accounts, monkeypatch):
+    """The update statement overwrites aje_reference; editing must carry it."""
+    from models.journal_entry import JournalEntryLine
+
+    entry = JournalEntry(
+        client_id=client_id,
+        entry_date=date(2026, 3, 31),
+        description="Worksheet AJE",
+        entry_type="Adjusting",
+        aje_reference="AJE-007",
+        lines=[
+            JournalEntryLine(account_id=accounts["expense"], debit=25, credit=0),
+            JournalEntryLine(account_id=accounts["revenue"], debit=0, credit=25),
+        ],
+    )
+    entry.save()
+
+    _select_client(monkeypatch, client_id)
+    journal = AppTest.from_file(
+        "pages/2_Journal_Entries.py", default_timeout=30
+    )
+    journal.session_state["edit_entry_id"] = entry.id
+    journal.run()
+    assert not journal.exception
+    next(b for b in journal.button if b.label == "Save Entry").click().run()
+
+    assert not journal.exception
+    saved = JournalEntry.get_by_id(entry.id, client_id=client_id)
+    assert saved.aje_reference == "AJE-007"
+
+
 def test_dashboard_balances_show_totals_and_equation(client_id, accounts, monkeypatch):
     """Every section totals, equity is shown, and the equation check passes."""
     post_entry(

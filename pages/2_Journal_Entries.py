@@ -121,6 +121,7 @@ if 'edit_entry_id' in st.session_state:
             st.session_state.je_entry_type = entry_to_edit.entry_type
             st.session_state.je_source_reference = entry_to_edit.source_reference or ''
             st.session_state.je_description = entry_to_edit.description or ''
+            st.session_state.je_aje_reference = entry_to_edit.aje_reference
             st.success(f"Loaded Journal Entry #{entry_to_edit.id} for editing")
     del st.session_state.edit_entry_id
 
@@ -141,6 +142,8 @@ def reset_entry_form():
         del st.session_state.je_source_reference
     if 'je_description' in st.session_state:
         del st.session_state.je_description
+    if 'je_aje_reference' in st.session_state:
+        del st.session_state.je_aje_reference
 
 
 def load_entry_for_edit(entry: JournalEntry):
@@ -158,6 +161,7 @@ def load_entry_for_edit(entry: JournalEntry):
     st.session_state.je_entry_type = entry.entry_type
     st.session_state.je_source_reference = entry.source_reference or ''
     st.session_state.je_description = entry.description or ''
+    st.session_state.je_aje_reference = entry.aje_reference
     start_new_form_generation()
 
 
@@ -466,6 +470,21 @@ with tab1:
                         memo=line['memo'] if line['memo'] else None
                     ))
 
+            # Keep an edited entry's AJE reference (the update overwrites the
+            # column), and give a hand-keyed adjusting entry the next AJE-00x
+            # so it is findable everywhere AJEs are listed by reference.
+            aje_reference = st.session_state.get('je_aje_reference')
+            if entry_type == 'Adjusting':
+                if not aje_reference:
+                    fy_first, fy_last = fiscal_year_bounds(
+                        entry_date, client.fiscal_year_end_month
+                    )
+                    aje_reference = JournalEntry.get_next_aje_reference(
+                        client_id, fy_first, fy_last
+                    )
+            else:
+                aje_reference = None
+
             entry = JournalEntry(
                 id=st.session_state.editing_entry_id,
                 client_id=client_id,
@@ -473,6 +492,7 @@ with tab1:
                 description=description,
                 source_reference=source_reference if source_reference else None,
                 entry_type=entry_type,
+                aje_reference=aje_reference,
                 lines=lines
             )
 
@@ -595,10 +615,13 @@ with tab2:
         st.info("No journal entries found for the selected filters.")
     else:
         for entry in entries:
-            # Build header with AJE reference if applicable
+            # The collapsed row must reveal the entry type — an AJE that looks
+            # identical to a regular entry can't be found by scanning the list.
             header = f"**#{entry.id}**"
-            if entry.entry_type == 'Adjusting' and entry.aje_reference:
-                header += f" ({entry.aje_reference})"
+            if entry.entry_type == 'Adjusting':
+                header += f" ({entry.aje_reference or 'AJE'})"
+            elif entry.entry_type != 'Regular':
+                header += f" ({entry.entry_type})"
             header += f" | {entry.entry_date} | {entry.description or 'No description'} | ${entry.total_debits():,.2f}"
 
             # Use different styling for special entry types
