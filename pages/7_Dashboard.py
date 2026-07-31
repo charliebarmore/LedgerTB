@@ -209,8 +209,13 @@ with col1:
             col_a, col_b = st.columns([4, 1], vertical_alignment="top")
             with col_a:
                 line = f"{ACTIVITY_ICONS.get(event.kind, '')} **{event.summary}**"
-                if event.detail:
-                    line += f"  \n{event.detail}"
+                # Attribution rides on the detail line ("· by Charlie Barmore").
+                # Events from before actor tracking simply omit it.
+                detail = event.detail or ""
+                if event.actor:
+                    detail = f"{detail} · by {event.actor}" if detail else f"by {event.actor}"
+                if detail:
+                    line += f"  \n{detail}"
                 st.markdown(line)
             with col_b:
                 # Right-aligned so the timestamps form a column against the

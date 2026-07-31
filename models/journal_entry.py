@@ -123,13 +123,15 @@ class JournalEntry:
 
             if is_new:
                 # Insert new entry
+                from utils.actor import current_actor
                 cursor.execute(
                     """
-                    INSERT INTO journal_entries (client_id, entry_date, description, source_reference, entry_type, aje_reference)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO journal_entries (client_id, entry_date, description, source_reference, entry_type, aje_reference, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (self.client_id, self.entry_date.isoformat(), self.description,
-                     self.source_reference, self.entry_type, self.aje_reference)
+                     self.source_reference, self.entry_type, self.aje_reference,
+                     current_actor())
                 )
                 self.id = cursor.lastrowid
             else:
@@ -277,7 +279,7 @@ class JournalEntry:
         """
         query = """
             SELECT je.id, je.entry_date, je.description, je.entry_type,
-                   je.aje_reference,
+                   je.aje_reference, je.created_by,
                    datetime(je.created_at, 'localtime') created_at_local,
                    COALESCE(SUM(jel.debit), 0) total_debits
             FROM journal_entries je
@@ -300,6 +302,7 @@ class JournalEntry:
             "entry_type": row["entry_type"],
             "aje_reference": row["aje_reference"],
             "created_at": row["created_at_local"],
+            "created_by": row["created_by"],
             "total_debits": to_dollars(row["total_debits"] or 0),
         } for row in rows]
 

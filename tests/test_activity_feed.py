@@ -224,3 +224,17 @@ def test_every_event_offers_somewhere_to_go(client_id, accounts):
     for event in get_recent_activity(client_id, limit=10):
         assert event.page and event.page.startswith("pages/")
         assert event.summary
+
+
+def test_every_event_carries_who_did_it(client_id, accounts):
+    """New activity is attributed to the person at the keyboard."""
+    from utils.actor import current_actor
+
+    _import(client_id, accounts, "JAN", [("CANVA", -15.00)])
+    _manual_entry(client_id, accounts, "An entry")
+    AuditLog.log_event(client_id, "BACKUP", "database_backup")
+
+    events = get_recent_activity(client_id, limit=10)
+    assert events
+    for event in events:
+        assert event.actor == current_actor(), event.summary

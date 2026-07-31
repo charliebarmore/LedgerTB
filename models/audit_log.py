@@ -26,6 +26,7 @@ class AuditLog:
     new_values: Optional[Dict[str, Any]] = None
     changed_at: Optional[datetime] = None
     session_id: Optional[str] = None
+    performed_by: Optional[str] = None
 
     @staticmethod
     def get_session_id() -> str:
@@ -84,17 +85,19 @@ class AuditLog:
         # entries (past UTC midnight) appear dated "tomorrow", inverting the
         # audit page's default date range and mislabeling when the user acted.
         changed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        from utils.actor import current_actor
         cursor.execute(
             """
             INSERT INTO audit_log
                 (client_id, table_name, record_id, action, old_values, new_values,
-                 session_id, changed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 session_id, changed_at, performed_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 client_id, table_name, record_id, action,
                 AuditLog._json(old_values), AuditLog._json(new_values),
                 session_id or AuditLog._current_session_id(), changed_at,
+                current_actor(),
             ),
         )
         return cursor.lastrowid
@@ -250,7 +253,8 @@ class AuditLog:
                     old_values=json.loads(row['old_values']) if row['old_values'] else None,
                     new_values=json.loads(row['new_values']) if row['new_values'] else None,
                     changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
-                    session_id=row['session_id']
+                    session_id=row['session_id'],
+                    performed_by=row['performed_by'] if 'performed_by' in row.keys() else None,
                 ))
 
         return logs
@@ -302,7 +306,8 @@ class AuditLog:
                     old_values=json.loads(row['old_values']) if row['old_values'] else None,
                     new_values=json.loads(row['new_values']) if row['new_values'] else None,
                     changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
-                    session_id=row['session_id']
+                    session_id=row['session_id'],
+                    performed_by=row['performed_by'] if 'performed_by' in row.keys() else None,
                 ))
 
         return logs
@@ -403,7 +408,8 @@ class AuditLog:
                     old_values=json.loads(row['old_values']) if row['old_values'] else None,
                     new_values=json.loads(row['new_values']) if row['new_values'] else None,
                     changed_at=datetime.fromisoformat(row['changed_at']) if row['changed_at'] else None,
-                    session_id=row['session_id']
+                    session_id=row['session_id'],
+                    performed_by=row['performed_by'] if 'performed_by' in row.keys() else None,
                 ))
 
         return logs
