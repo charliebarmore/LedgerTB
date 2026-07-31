@@ -78,7 +78,9 @@ def view_switcher(options, key, label="View"):
     if st.session_state.get(shadow_key) != current:
         st.session_state[widget_key] = current
 
-    st.markdown(_SWITCHER_CSS.format(wkey=widget_key), unsafe_allow_html=True)
+    # ``st.html`` treats this as styling rather than Markdown content, keeping
+    # the raw CSS out of screen-reader and browser accessibility trees.
+    st.html(_SWITCHER_CSS.format(wkey=widget_key))
     selected = st.radio(label, options, key=widget_key,
                         horizontal=True, label_visibility="collapsed")
 
