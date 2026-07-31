@@ -24,6 +24,18 @@ def _csv(row_count):
     return header + rows
 
 
+def test_decode_upload_supports_common_bank_export_encodings():
+    assert CSVImporter.decode_upload(b"\xef\xbb\xbfDate,Description\n") == (
+        "Date,Description\n"
+    )
+    assert "Café" in CSVImporter.decode_upload(
+        "Date,Description\n1/2/2026,Café\n".encode("cp1252")
+    )
+    assert "Description" in CSVImporter.decode_upload(
+        "Date,Description\n".encode("utf-16")
+    )
+
+
 def test_preview_samples_ten_rows_by_default():
     df, columns = CSVImporter.preview_csv(_csv(45))
 
