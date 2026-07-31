@@ -263,7 +263,11 @@ if correction_entry_id:
             )
             correction_date = st.date_input(
                 "Correction date",
-                value=date.today(),
+                # Default to the transaction's own date so the correction lands
+                # in the same period as the posting it fixes — defaulting to
+                # today silently pushed prior-period corrections into the
+                # current month.
+                value=correction_link.get("transaction_date") or date.today(),
                 key=f"correction_date_{correction_entry_id}",
                 help="Use an open accounting period. The imported transaction date is not changed.",
             )
