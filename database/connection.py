@@ -2,7 +2,20 @@ import os
 import threading
 from contextlib import contextmanager
 
-import sqlcipher3
+# SQLCipher is the preferred driver (encrypted database at rest). When it isn't
+# installed -- it needs the system SQLCipher library, which a first-time
+# evaluator may not have -- fall back to the stdlib driver and run UNENCRYPTED.
+# The unlock gate (utils/unlock.require_unlock) is what makes this safe: in
+# fallback mode it refuses to open an existing encrypted database (plain sqlite3
+# would just fail on it) and shows a persistent "encryption is off" warning.
+try:
+    import sqlcipher3 as _driver
+
+    ENCRYPTION_AVAILABLE = True
+except ImportError:
+    import sqlite3 as _driver
+
+    ENCRYPTION_AVAILABLE = False
 
 from config import DATABASE_PATH
 from .crypto import key_pragma
@@ -49,27 +62,31 @@ def has_active_key() -> bool:
 
 
 def get_connection():
-    """Open a SQLCipher connection keyed with the active passphrase.
+    """Open a database connection, keyed with the active passphrase when the
+    SQLCipher driver is present.
 
-    Requires set_active_key() to have run first (the unlock gate does this).
-    The key PRAGMA is issued before any other statement, as SQLCipher requires.
+    Encrypted mode requires set_active_key() to have run first (the unlock gate
+    does this); the key PRAGMA is issued before any other statement, as
+    SQLCipher requires. Fallback mode (stdlib sqlite3) has no passphrase and no
+    key requirement.
     """
-    if _active_key is None:
+    if ENCRYPTION_AVAILABLE and _active_key is None:
         raise DatabaseLocked("Database is locked; unlock with the passphrase first.")
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(DATABASE_PATH.parent, 0o700)
     except OSError:
         pass
-    conn = sqlcipher3.connect(DATABASE_PATH, check_same_thread=False)
-    # The key must be applied before touching any table, so this is the first
-    # statement on the connection.
-    conn.execute(f"PRAGMA key = {key_pragma(_active_key)}")
+    conn = _driver.connect(DATABASE_PATH, check_same_thread=False)
+    if ENCRYPTION_AVAILABLE:
+        # The key must be applied before touching any table, so this is the
+        # first statement on the connection.
+        conn.execute(f"PRAGMA key = {key_pragma(_active_key)}")
     try:
         os.chmod(DATABASE_PATH, 0o600)
     except OSError:
         pass
-    conn.row_factory = sqlcipher3.Row
+    conn.row_factory = _driver.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -79,13 +96,15 @@ def open_keyed(path):
 
     Used by the backup/restore paths, which must read and write SQLCipher files
     (a backup of an encrypted database must itself be encrypted). Requires the
-    passphrase to be set, same as get_connection().
+    passphrase to be set, same as get_connection(). In fallback mode there is no
+    key, so backups are plaintext like the database itself.
     """
-    if _active_key is None:
+    if ENCRYPTION_AVAILABLE and _active_key is None:
         raise DatabaseLocked("Database is locked; unlock with the passphrase first.")
-    conn = sqlcipher3.connect(str(path), check_same_thread=False)
-    conn.execute(f"PRAGMA key = {key_pragma(_active_key)}")
-    conn.row_factory = sqlcipher3.Row
+    conn = _driver.connect(str(path), check_same_thread=False)
+    if ENCRYPTION_AVAILABLE:
+        conn.execute(f"PRAGMA key = {key_pragma(_active_key)}")
+    conn.row_factory = _driver.Row
     return conn
 
 
