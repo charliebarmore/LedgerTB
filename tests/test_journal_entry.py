@@ -81,3 +81,35 @@ def test_closed_year_entry_cannot_be_moved_to_open_year(client_id, accounts):
         entry.save()
 
     assert JournalEntry.get_by_id(entry.id).entry_date == date(2025, 12, 31)
+
+
+def test_entry_list_filters_by_search_and_account(client_id, accounts):
+    """Search matches description/reference/amount; account filter matches lines."""
+    transfer = post_entry(
+        client_id, date(2026, 3, 21),
+        [(accounts["cash"], 1200, 0), (accounts["equity"], 0, 1200)],
+    )
+    transfer.description = "Transfer from Relay #7313"
+    transfer.save()
+    post_entry(
+        client_id, date(2026, 2, 1),
+        [(accounts["expense"], 15, 0), (accounts["credit_card"], 0, 15)],
+    )
+
+    by_text = JournalEntry.get_all(client_id, search_term="relay")
+    assert [e.id for e in by_text] == [transfer.id]
+
+    by_amount = JournalEntry.get_all(client_id, search_term="1,200.00")
+    assert [e.id for e in by_amount] == [transfer.id]
+
+    by_account = JournalEntry.get_all(client_id, account_id=accounts["credit_card"])
+    assert len(by_account) == 1 and by_account[0].id != transfer.id
+
+    # a zero search must not match the whole journal via empty line sides
+    assert JournalEntry.get_all(client_id, search_term="0.00") == []
+
+    summary = JournalEntry.get_filtered_summary(
+        client_id, search_term="relay"
+    )
+    assert summary["total_count"] == 1
+    assert summary["total_debits"] == 1200.0
