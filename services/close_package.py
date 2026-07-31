@@ -17,7 +17,9 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
+    Image,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -29,6 +31,7 @@ from reportlab.platypus import (
 from database.connection import get_cursor
 from models.reports import TrialBalanceWorksheetRow
 from money import to_dollars
+from services.branding import FirmBranding, get_branding
 
 _HEADER_FONT = Font(bold=True)
 _MONEY_FMT = "#,##0.00"
@@ -162,10 +165,15 @@ def build_close_package(
     ws.title = "Summary"
     total_dr = round(sum(r.adjusted_dr for r in tb_rows), 2)
     total_cr = round(sum(r.adjusted_cr for r in tb_rows), 2)
+    branding = get_branding()
     lines = [
         (client_name, ""),
         ("Close package", f"{period_start.isoformat()} to {period_end.isoformat()}"),
         ("Generated", datetime.now().strftime("%Y-%m-%d %H:%M")),
+    ]
+    if branding.firm_name:
+        lines.append(("Prepared by", branding.firm_name))
+    lines += [
         ("", ""),
         ("Final trial balance — total debits", total_dr),
         ("Final trial balance — total credits", total_cr),
@@ -321,6 +329,20 @@ def _pdf_table(headers, data_rows, col_widths, money_from: int,
     return table
 
 
+def _logo_flowable(branding: FirmBranding, max_height: float):
+    """The firm logo scaled to the masthead, or None."""
+    if not branding.logo:
+        return None
+    try:
+        reader = ImageReader(BytesIO(branding.logo))
+        width, height = reader.getSize()
+        scale = max_height / float(height)
+        return Image(BytesIO(branding.logo),
+                     width=width * scale, height=max_height)
+    except Exception:
+        return None  # a corrupt logo must never block the close package
+
+
 def build_close_package_pdf(
     client_id: int,
     client_name: str,
@@ -334,19 +356,29 @@ def build_close_package_pdf(
     cash = get_cash_activity(client_id, period_start, period_end)
     period_label = f"{period_start.strftime('%B %-d, %Y')} to {period_end.strftime('%B %-d, %Y')}"
 
+    branding = get_branding()
+    accent = colors.HexColor(branding.accent_hex) if branding.accent_hex else colors.black
+    heading_1 = ParagraphStyle("bh1", parent=_PDF_H1, textColor=accent)
+    heading_2 = ParagraphStyle("bh2", parent=_PDF_H2, textColor=accent)
+
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=landscape(letter),
         leftMargin=0.5 * inch, rightMargin=0.5 * inch,
         topMargin=0.6 * inch, bottomMargin=0.55 * inch,
-        title=f"Close Package — {client_name}", author="ProBooks",
+        title=f"Close Package — {client_name}",
+        author=branding.firm_name or "ProBooks",
     )
+
+    footer_left = f"{client_name} — {period_label}"
+    if branding.firm_name:
+        footer_left = f"{branding.firm_name} · {footer_left}"
 
     def _footer(canvas, _doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 7.5)
         canvas.setFillColor(colors.HexColor("#666666"))
-        canvas.drawString(0.5 * inch, 0.3 * inch, f"{client_name} — {period_label}")
+        canvas.drawString(0.5 * inch, 0.3 * inch, footer_left)
         canvas.drawRightString(
             doc.pagesize[0] - 0.5 * inch, 0.3 * inch, f"Page {canvas.getPageNumber()}"
         )
@@ -356,13 +388,23 @@ def build_close_package_pdf(
     total_cr = round(sum(r.adjusted_cr for r in tb_rows), 2)
     balanced = abs(total_dr - total_cr) < 0.01
 
-    story = [
-        Paragraph(client_name, _PDF_H1),
+    masthead = []
+    logo = _logo_flowable(branding, max_height=0.45 * inch)
+    if logo:
+        logo.hAlign = "LEFT"
+        masthead += [logo, Spacer(1, 6)]
+    if branding.firm_name:
+        firm_line = branding.firm_name + (f" · {branding.tagline}" if branding.tagline else "")
+        masthead.append(Paragraph(firm_line, _PDF_META))
+        masthead.append(Spacer(1, 10))
+
+    story = masthead + [
+        Paragraph(client_name, heading_1),
         Paragraph("Close Package", _PDF_META),
         Paragraph(period_label, _PDF_META),
         Paragraph(f"Generated {datetime.now().strftime('%B %-d, %Y at %-I:%M %p')}", _PDF_META),
         Spacer(1, 18),
-        Paragraph("Summary", _PDF_H2),
+        Paragraph("Summary", heading_2),
         _pdf_table(
             ["", ""],
             [
@@ -375,7 +417,7 @@ def build_close_package_pdf(
             [3.4 * inch, 1.6 * inch], money_from=1,
         ),
         Spacer(1, 14),
-        Paragraph("Cash Activity", _PDF_H2),
+        Paragraph("Cash Activity", heading_2),
         _pdf_table(
             ["Acct #", "Cash Account", "Beginning", "Total Receipts",
              "Total Disbursements", "Ending"],
@@ -397,7 +439,7 @@ def build_close_package_pdf(
     ]
 
     # ---- Final Trial Balance
-    story.append(Paragraph("Final Trial Balance", _PDF_H2))
+    story.append(Paragraph("Final Trial Balance", heading_2))
     money_w = 0.72 * inch
     story.append(_pdf_table(
         ["Acct #", "Account Name", "Beg Dr", "Beg Cr", "Activity Dr",
@@ -421,7 +463,7 @@ def build_close_package_pdf(
     story.append(PageBreak())
 
     # ---- Transactions
-    story.append(Paragraph("Transactions", _PDF_H2))
+    story.append(Paragraph("Transactions", heading_2))
     if transactions:
         story.append(_pdf_table(
             ["Date", "Entry #", "Type", "Description", "Acct #", "Account",
@@ -439,7 +481,7 @@ def build_close_package_pdf(
     story.append(PageBreak())
 
     # ---- Adjusting Entries
-    story.append(Paragraph("Adjusting Journal Entries", _PDF_H2))
+    story.append(Paragraph("Adjusting Journal Entries", heading_2))
     if ajes:
         story.append(_pdf_table(
             ["Date", "Entry #", "AJE Ref", "Description", "Acct #", "Account",
