@@ -17,6 +17,7 @@ from utils.unlock import require_unlock
 from utils import icons
 from constants import EntryType
 from utils.fiscal_dates import fiscal_year_bounds
+from utils.ui import view_switcher
 
 
 _FORM_WIDGET_PREFIXES = ("account_", "debit_", "credit_", "memo_", "je_hdr_")
@@ -106,6 +107,7 @@ if 'edit_entry_id' in st.session_state:
                 "and reconciliation history remain intact."
             )
         else:
+            st.session_state.journal_active_tab = "New Entry"
             st.session_state.editing_entry_id = entry_to_edit.id
             st.session_state.je_lines = [
                 {
@@ -201,6 +203,8 @@ def render_entry_controls(entry: JournalEntry, import_link: dict | None):
 
     if st.button("Edit", key=f"edit_entry_{entry.id}"):
         load_entry_for_edit(entry)
+        # Land the user on the form, or the click appears to do nothing.
+        st.session_state.journal_active_tab = "New Entry"
         st.rerun()
     render_delete_control(entry.id)
 
@@ -301,9 +305,18 @@ if correction_entry_id:
 
 
 # Tabs
-tab1, tab2, tab3 = st.tabs(["New Entry", "View Entries", "Reverse Entry"])
+# A switchable view rather than st.tabs: tabs cannot be preselected, so
+# "Edit" on the entry list could load the form but never show it — the page
+# appeared to do nothing. Any code may set st.session_state.journal_active_tab
+# and rerun to land the user on that view.
+if "journal_active_tab" not in st.session_state:
+    st.session_state.journal_active_tab = "New Entry"
 
-with tab1:
+active_view = view_switcher(
+    ["New Entry", "View Entries", "Reverse Entry"], key="journal_active_tab"
+)
+
+if active_view == "New Entry":
     st.subheader("Create Journal Entry" if not st.session_state.editing_entry_id else "Edit Journal Entry")
 
     # Shown after the post-save rerun; a plain st.success before st.rerun()
@@ -518,7 +531,7 @@ with tab1:
             reset_entry_form()
             st.rerun()
 
-with tab2:
+elif active_view == "View Entries":
     st.subheader("Journal Entry List")
 
     # Quick search by Entry ID
@@ -537,6 +550,7 @@ with tab2:
                         st.session_state.correct_import_entry_id = found_entry.id
                     else:
                         load_entry_for_edit(found_entry)
+                        st.session_state.journal_active_tab = "New Entry"
                     st.rerun()
                 else:
                     st.error(f"Entry #{search_id} not found for this client.")
@@ -562,10 +576,16 @@ with tab2:
             placeholder="Description, reference, AJE #, or amount",
         )
     with account_col:
+        # Own options dict — the New Entry view builds its own and only one
+        # view's code runs per render.
+        filter_account_options = {
+            a.id: a.display_name()
+            for a in Account.get_all(client_id, active_only=True)
+        }
         filter_account = st.selectbox(
             "Account",
-            options=list(account_options.keys()),
-            format_func=lambda x: account_options[x],
+            options=list(filter_account_options.keys()),
+            format_func=lambda x: filter_account_options[x],
             key="filter_account",
             index=None,
             placeholder="All accounts",
@@ -710,7 +730,7 @@ with tab2:
                     with col2:
                         render_entry_controls(entry, import_links.get(entry.id))
 
-with tab3:
+elif active_view == "Reverse Entry":
     st.subheader("Reverse a Journal Entry")
     st.caption(
         "A reversal creates a new equal-and-opposite entry. The original remains intact "
