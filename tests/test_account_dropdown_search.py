@@ -74,7 +74,7 @@ def test_journal_entry_lines_have_no_placeholder_option(
     journal = AppTest.from_file("pages/2_Journal_Entries.py", default_timeout=30).run()
 
     assert not journal.exception
-    line_box = journal.selectbox(key="account_0")
+    line_box = journal.selectbox(key="account_0_g0")
     assert line_box.value is None
     labels = [str(option) for option in line_box.options]
     assert not any(SENTINEL in label for label in labels)

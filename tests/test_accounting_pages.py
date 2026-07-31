@@ -71,18 +71,25 @@ def test_journal_form_clears_keyed_line_widgets_after_save(
     ).run()
     assert not journal.exception
 
-    journal.selectbox(key="account_0").set_value(accounts["cash"]).run()
-    journal.number_input(key="debit_0").set_value(125.0).run()
-    journal.selectbox(key="account_1").set_value(accounts["revenue"]).run()
-    journal.number_input(key="credit_1").set_value(125.0).run()
+    journal.selectbox(key="account_0_g0").set_value(accounts["cash"]).run()
+    journal.number_input(key="debit_0_g0").set_value(125.0).run()
+    journal.selectbox(key="account_1_g0").set_value(accounts["revenue"]).run()
+    journal.number_input(key="credit_1_g0").set_value(125.0).run()
+    journal.text_input(key="je_hdr_desc_g0").set_value("Test entry").run()
     next(button for button in journal.button if button.label == "Save Entry").click().run()
 
     assert not journal.exception
     assert JournalEntry.count(client_id) == 1
-    assert journal.selectbox(key="account_0").value is None
-    assert journal.selectbox(key="account_1").value is None
-    assert journal.number_input(key="debit_0").value == 0.0
-    assert journal.number_input(key="credit_1").value == 0.0
+    # Saving starts a new widget generation: fresh keys, so the browser cannot
+    # re-impose the saved entry's values on the cleared form.
+    assert journal.session_state["je_form_gen"] == 1
+    assert journal.selectbox(key="account_0_g1").value is None
+    assert journal.selectbox(key="account_1_g1").value is None
+    assert journal.number_input(key="debit_0_g1").value == 0.0
+    assert journal.number_input(key="credit_1_g1").value == 0.0
+    # Header widgets reset too — description clears and type returns to Regular.
+    assert journal.text_input(key="je_hdr_desc_g1").value == ""
+    assert journal.selectbox(key="je_hdr_type_g1").value == "Regular"
 
 
 def test_journal_delete_requires_confirmation(client_id, accounts, monkeypatch):
