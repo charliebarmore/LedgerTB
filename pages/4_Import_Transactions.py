@@ -1461,31 +1461,12 @@ elif selected_tab == "Review & Categorize":
             else:
                 st.success("All transactions have been categorized!")
         else:
-            st.warning("AI categorization is not configured.")
-
-            with st.expander("Set up AI Categorization", expanded=True):
-                st.markdown("Enter your Anthropic API key to enable AI-powered transaction categorization.")
-                api_key_input = st.text_input(
-                    "Anthropic API Key",
-                    type="password",
-                    placeholder="sk-ant-...",
-                    help="Get your API key at https://console.anthropic.com/"
-                )
-
-                if api_key_input:
-                    if st.button("Save & Enable AI", type="primary"):
-                        from utils.secure_store import set_secret
-                        try:
-                            set_secret("anthropic_api_key", api_key_input.strip())
-                            st.success("API key saved in the system credential vault. Please restart ProBooks.")
-                        except Exception as exc:
-                            st.error(f"Could not save the API key securely: {exc}")
-
-                st.caption(
-                    "Your API key is stored in the system credential vault. When you run AI "
-                    "categorization, transaction dates, descriptions, amounts, and available "
-                    "account names/numbers are sent to Anthropic's API to suggest accounts."
-                )
+            # Configuration lives on Data Safety with the rest of the app-level
+            # setup; this workflow page only points there.
+            st.caption("AI categorization is off — add your Anthropic API key "
+                       "on the Data Safety page to enable suggestions here.")
+            st.page_link("pages/9_Data_Safety.py",
+                         label="Set up AI categorization", icon=icons.SECURITY)
 
         # Bulk categorization section
         st.divider()
