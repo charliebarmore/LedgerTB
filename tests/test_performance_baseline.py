@@ -68,9 +68,11 @@ def test_10k_journal_entries_query_and_render_baseline(client_id, accounts, monk
     ))
 
     _select_client(monkeypatch, client_id)
-    journals, journal_render_seconds = _timed(lambda: AppTest.from_file(
+    journal_page = AppTest.from_file(
         "pages/2_Journal_Entries.py", default_timeout=MAX_PAGE_SECONDS,
-    ).run())
+    )
+    journal_page.session_state["journal_active_tab"] = "View Entries"
+    journals, journal_render_seconds = _timed(journal_page.run)
     audit_page, audit_render_seconds = _timed(lambda: AppTest.from_file(
         "pages/8_Audit_Trail.py", default_timeout=MAX_PAGE_SECONDS,
     ).run())

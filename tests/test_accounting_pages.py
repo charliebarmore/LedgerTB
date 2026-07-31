@@ -40,7 +40,9 @@ def test_paginated_accounting_pages_render(client_id, accounts, monkeypatch):
     assert any(metric.label == "Filtered Transactions" for metric in transactions.metric)
     assert any(button.label == "Next" and not button.disabled for button in transactions.button)
 
-    journals = AppTest.from_file("pages/2_Journal_Entries.py", default_timeout=30).run()
+    journals = AppTest.from_file("pages/2_Journal_Entries.py", default_timeout=30)
+    journals.session_state["journal_active_tab"] = "View Entries"
+    journals.run()
     assert not journals.exception
     assert any(metric.label == "Filtered Entries" for metric in journals.metric)
     assert any(button.label == "Next" and not button.disabled for button in journals.button)
@@ -136,6 +138,27 @@ def test_hand_keyed_adjusting_entry_gets_aje_reference(client_id, accounts, monk
     assert entry.aje_reference == "AJE-001"
 
 
+def test_edit_button_lands_on_the_form(client_id, accounts, monkeypatch):
+    """Edit must switch to the New Entry view — with st.tabs it loaded the
+    form invisibly and the click appeared to do nothing."""
+    _select_client(monkeypatch, client_id)
+    entry = post_entry(
+        client_id, date(2026, 3, 21),
+        [(accounts["cash"], 60, 0), (accounts["revenue"], 0, 60)],
+    )
+    journal = AppTest.from_file(
+        "pages/2_Journal_Entries.py", default_timeout=30
+    )
+    journal.session_state["journal_active_tab"] = "View Entries"
+    journal.run()
+
+    journal.button(key=f"edit_entry_{entry.id}").click().run()
+    assert not journal.exception
+    assert journal.session_state["journal_active_tab"] == "New Entry"
+    assert journal.session_state["editing_entry_id"] == entry.id
+    assert any("Edit Journal Entry" in h.value for h in journal.subheader)
+
+
 def test_editing_an_aje_preserves_its_reference(client_id, accounts, monkeypatch):
     """The update statement overwrites aje_reference; editing must carry it."""
     from models.journal_entry import JournalEntryLine
@@ -217,7 +240,9 @@ def test_journal_delete_requires_confirmation(client_id, accounts, monkeypatch):
     )
     journal = AppTest.from_file(
         "pages/2_Journal_Entries.py", default_timeout=30
-    ).run()
+    )
+    journal.session_state["journal_active_tab"] = "View Entries"
+    journal.run()
 
     journal.button(key=f"delete_entry_{entry.id}").click().run()
     assert JournalEntry.get_by_id(entry.id) is not None
@@ -255,7 +280,9 @@ def test_imported_journal_uses_guided_category_correction(
     )
     journal = AppTest.from_file(
         "pages/2_Journal_Entries.py", default_timeout=30
-    ).run()
+    )
+    journal.session_state["journal_active_tab"] = "View Entries"
+    journal.run()
 
     assert journal.button(key=f"correct_import_{original.id}")
     assert not any(
