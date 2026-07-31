@@ -79,6 +79,20 @@ section[data-testid="stSidebar"] button[data-testid="stBaseButton-tertiary"]:hov
 [data-testid="stCaptionContainer"] {
     color: #606773;
 }
+
+/* Streamlit renders the number-input "Press Enter to apply" hint INSIDE the
+   input box, where it overlaps the typed value in narrow columns (e.g. the
+   journal entry line grid). Re-anchor its absolutely-positioned wrapper just
+   below the box instead. Text inputs already show the hint sensibly. */
+[data-testid="stNumberInput"] div:has(> [data-testid="InputInstructions"]) {
+    top: 100%;
+    bottom: auto;
+    left: auto;
+    right: 0.25rem;
+}
+[data-testid="stNumberInput"] [data-testid="InputInstructions"] {
+    white-space: nowrap;
+}
 </style>
 """
 
