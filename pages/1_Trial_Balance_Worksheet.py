@@ -28,6 +28,7 @@ from models.reports import ReportGenerator
 from models.journal_entry import JournalEntry, JournalEntryLine
 from models.account import Account
 from models.audit_log import AuditLog
+from services.close_package import build_close_package
 
 
 st.set_page_config(
@@ -482,36 +483,23 @@ with btn_cols[1]:
         )
 
 with btn_cols[2]:
-    # Export the ADJUSTED trial balance for import into attest-claw.
-    # attest-claw's TB importer auto-detects columns by header regex
-    # (code ^account|code|number|acct, name ^name|description|account name,
-    #  debit ^debit|dr, credit ^credit|cr), so the headers below must match
-    # exactly. Values are the adjusted TB. See probooks-attestclaw bridge.
+    # One workbook with everything needed to hand off a finished period:
+    # final TB, all transactions, the AJEs, and receipts/disbursements per
+    # cash account. (Replaced the old attest-claw bridge export.)
     if rows:
-        import csv as _csv
-        import io as _io
-
-        _buf = _io.StringIO()
-        _writer = _csv.writer(_buf)
-        _writer.writerow(["Account Code", "Account Name", "Debit", "Credit"])
-        for row in rows:
-            # One side will be 0.00; attest-claw treats blank/0 as no amount.
-            _writer.writerow([
-                row.account_number,
-                row.account_name,
-                f"{row.adjusted_dr:.2f}" if row.adjusted_dr > 0 else "",
-                f"{row.adjusted_cr:.2f}" if row.adjusted_cr > 0 else "",
-            ])
-
+        package = build_close_package(
+            client_id, client.name, period_start, period_end, rows
+        )
         st.download_button(
-            label="Export for attest-claw",
-            data=_buf.getvalue(),
-            file_name=f"AdjTB_attestclaw_{client.name}_{period_end.strftime('%Y%m%d')}.csv",
-            mime="text/csv",
-            help="Adjusted TB as CSV for import into attest-claw (TB Import → post as opening balances)",
+            label="Export Close Package",
+            data=package,
+            file_name=f"ClosePackage_{client.name}_{period_end.strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Excel workbook: final trial balance, transactions, "
+                 "adjusting entries, and receipts & disbursements",
             on_click=AuditLog.log_event,
-            args=(client_id, "EXPORT", "adjusted_trial_balance_export", {
-                "format": "csv", "destination": "attest-claw",
+            args=(client_id, "EXPORT", "close_package_export", {
+                "format": "xlsx",
                 "period_start": period_start, "period_end": period_end,
                 "row_count": len(rows),
             }),
