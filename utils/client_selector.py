@@ -189,6 +189,7 @@ def render_client_selector() -> Optional[int]:
         st.sidebar.page_link("pages/5_Reports.py", label="Reports", icon=icons.REPORTS)
         st.sidebar.page_link("pages/6_Transactions.py", label="Transactions", icon=icons.TRANSACTIONS)
         st.sidebar.page_link("pages/10_Bank_Reconciliation.py", label="Bank Reconciliation", icon=icons.RECONCILIATION)
+        st.sidebar.page_link("pages/11_Book_Review.py", label="Book Review", icon=icons.REVIEW)
         st.sidebar.page_link("pages/8_Audit_Trail.py", label="Audit Trail", icon=icons.AUDIT_TRAIL)
         render_safety_status()
 
