@@ -31,6 +31,7 @@ from models.transaction import ImportedTransaction
 # something they did.
 NOTABLE_AUDIT_ACTIONS = (
     "EXPORT", "BACKUP", "RESTORE", "CLOSE", "REOPEN", "REVERSE", "OVERRIDE",
+    "REVIEW",
 )
 
 _AUDIT_PHRASING = {
@@ -41,6 +42,7 @@ _AUDIT_PHRASING = {
     "REOPEN": "Reopened a period",
     "REVERSE": "Reversed a journal entry",
     "OVERRIDE": "Overrode a duplicate warning",
+    "REVIEW": "Ran a book review",
 }
 
 _ENTRY_PHRASING = {

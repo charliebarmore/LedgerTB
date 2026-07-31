@@ -184,6 +184,7 @@ else:
             "BACKUP": "Backed up",
             "RESTORE": "Restored",
             "OVERRIDE": "Overrode duplicate warning for",
+            "REVIEW": "Reviewed",
         }.get(log.action, log.action.title())
 
         header = f"{action_label} · {log.table_name} #{log.record_id}"

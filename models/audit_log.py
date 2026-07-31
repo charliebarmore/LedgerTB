@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 AUDIT_ACTIONS = {
     "INSERT", "UPDATE", "DELETE", "EXPORT", "BACKUP", "RESTORE",
-    "CLOSE", "REOPEN", "REVERSE", "OVERRIDE",
+    "CLOSE", "REOPEN", "REVERSE", "OVERRIDE", "REVIEW",
 }
 
 
