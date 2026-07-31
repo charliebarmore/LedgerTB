@@ -1308,10 +1308,11 @@ elif selected_tab == "Review & Categorize":
     else:
         transactions = st.session_state.transactions_to_review
 
-        # Account options for dropdowns
+        # Account options for dropdowns. No "-- Select Account --" pseudo-option:
+        # its label becomes the search text, so typing an account number appends
+        # to it and matches nothing. Unset is selectbox index=None instead.
         all_accounts = Account.get_all(client_id, active_only=True)
-        account_options = {0: "-- Select Account --"}
-        account_options.update({a.id: a.display_name() for a in all_accounts})
+        account_options = {a.id: a.display_name() for a in all_accounts}
 
         # Ensure a stable per-transaction id (used to key all per-row widgets so
         # their state follows the transaction across re-sorts) and include flags.
@@ -1322,7 +1323,7 @@ elif selected_tab == "Review & Categorize":
 
         # Summary and bulk actions
         included_count = sum(1 for t in transactions if t.get('include', True))
-        uncategorized_count = sum(1 for t in transactions if t.get('selected_account_id', 0) == 0 and 'suggested_account_id' not in t)
+        uncategorized_count = sum(1 for t in transactions if not t.get('selected_account_id') and 'suggested_account_id' not in t)
         duplicate_count = sum(1 for t in transactions if t.get('is_duplicate', False))
 
         col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
@@ -1413,7 +1414,7 @@ elif selected_tab == "Review & Categorize":
             # Check session state for current selection, not transaction dict.
             uncategorized = [
                 t for t in transactions
-                if st.session_state.get(row_key("cat", t), 0) == 0
+                if not st.session_state.get(row_key("cat", t))
             ]
 
             if uncategorized:
@@ -1516,11 +1517,13 @@ elif selected_tab == "Review & Categorize":
                 "Account to apply",
                 options=list(account_options.keys()),
                 format_func=lambda x: account_options[x],
-                key="bulk_account_select"
+                key="bulk_account_select",
+                index=None,
+                placeholder="Type an account number or name",
             )
         with col2:
             if st.button("Apply to Selected", type="primary"):
-                if bulk_account == 0:
+                if not bulk_account:
                     st.warning("Please select an account first")
                 else:
                     applied_count = 0
@@ -1546,15 +1549,15 @@ elif selected_tab == "Review & Categorize":
                     st.rerun()
         with col3:
             if st.button("Apply to Uncategorized"):
-                if bulk_account == 0:
+                if not bulk_account:
                     st.warning("Please select an account first")
                 else:
                     applied_count = 0
                     for t in transactions:
                         is_selected = st.session_state.get(row_key("include", t), True)
-                        # Check session state for current category selection (0 = uncategorized)
-                        current_category = st.session_state.get(row_key("cat", t), 0)
-                        if is_selected and current_category == 0:
+                        # None/0/absent all mean uncategorized
+                        current_category = st.session_state.get(row_key("cat", t))
+                        if is_selected and not current_category:
                             t['selected_account_id'] = bulk_account
                             t['suggested_account_id'] = bulk_account
                             # Update the selectbox session state
@@ -1680,8 +1683,7 @@ elif selected_tab == "Review & Categorize":
 
         # Build transfer account options (only Asset/Liability accounts for transfers)
         transfer_accounts = [a for a in all_accounts if a.type in ('Asset', 'Liability')]
-        transfer_options = {0: "-- Select Account --"}
-        transfer_options.update({a.id: a.display_name() for a in transfer_accounts})
+        transfer_options = {a.id: a.display_name() for a in transfer_accounts}
 
         for i, t in enumerate(transactions):
             duplicate_select_disabled = False
@@ -1803,34 +1805,38 @@ elif selected_tab == "Review & Categorize":
                 # Initialize session state for this selectbox if not already set
                 cat_key = row_key("cat", t)
                 if cat_key not in st.session_state:
-                    # Use suggested_account_id if available, otherwise 0
-                    st.session_state[cat_key] = t.get('suggested_account_id', 0)
+                    st.session_state[cat_key] = t.get('suggested_account_id') or None
 
                 if is_transfer:
                     # For transfers, show only bank/liability accounts
                     # Ensure the current value is valid for transfer options
                     if st.session_state[cat_key] not in transfer_options:
-                        st.session_state[cat_key] = 0
+                        st.session_state[cat_key] = None
                     selected = st.selectbox(
                         "Transfer To/From",
                         options=list(transfer_options.keys()),
                         format_func=lambda x: transfer_options[x],
                         key=cat_key,
+                        index=None,
+                        placeholder="Type an account number or name",
                         label_visibility="collapsed"
                     )
                 else:
                     # For regular transactions, show all accounts
                     # Ensure the current value is valid for account options
                     if st.session_state[cat_key] not in account_options:
-                        st.session_state[cat_key] = 0
+                        st.session_state[cat_key] = None
                     selected = st.selectbox(
                         "Account",
                         options=list(account_options.keys()),
                         format_func=lambda x: account_options[x],
                         key=cat_key,
+                        index=None,
+                        placeholder="Type an account number or name",
                         label_visibility="collapsed"
                     )
-                transactions[i]['selected_account_id'] = selected
+                # Row dicts keep 0 for "unset" so posting validation is unchanged.
+                transactions[i]['selected_account_id'] = selected or 0
 
         st.divider()
 

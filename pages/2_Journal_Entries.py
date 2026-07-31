@@ -219,15 +219,19 @@ if correction_entry_id:
                     correction_link.get("suggested_account_id"),
                 }
             ]
-            correction_options = {0: "-- Select corrected category --"}
-            correction_options.update(
-                {account.id: account.display_name() for account in correction_accounts}
-            )
+            # No placeholder pseudo-option: a real "-- Select --" option becomes
+            # the search text, so type-to-search matches nothing. index=None is
+            # Streamlit's native empty state and keeps the box searchable.
+            correction_options = {
+                account.id: account.display_name() for account in correction_accounts
+            }
             target_account_id = st.selectbox(
                 "Corrected category",
                 options=list(correction_options),
                 format_func=lambda account_id: correction_options[account_id],
                 key=f"correction_target_{correction_entry_id}",
+                index=None,
+                placeholder="Type an account number or name",
             )
             correction_date = st.date_input(
                 "Correction date",
@@ -280,8 +284,10 @@ with tab1:
 
     # Get all active accounts for dropdown
     accounts = Account.get_all(client_id, active_only=True)
-    account_options = {0: "-- Select Account --"}
-    account_options.update({a.id: a.display_name() for a in accounts})
+    # No "-- Select Account --" pseudo-option: its label becomes the search
+    # text, so typing an account number appends to it and matches nothing.
+    # An unset line is represented by selectbox index=None instead.
+    account_options = {a.id: a.display_name() for a in accounts}
     # Preserve an entry's historical account selections while editing even if
     # an account has since been deactivated. Inactive accounts remain unavailable
     # for brand-new lines, but editing must not silently reset an existing line.
@@ -348,9 +354,11 @@ with tab1:
                 options=list(account_options.keys()),
                 format_func=lambda x: account_options[x],
                 key=f"account_{i}",
-                index=list(account_options.keys()).index(line['account_id']) if line['account_id'] in account_options else 0
+                index=list(account_options.keys()).index(line['account_id']) if line['account_id'] in account_options else None,
+                placeholder="Type an account number or name",
             )
-            st.session_state.je_lines[i]['account_id'] = account_id
+            # je_lines keeps 0 for "unset" so validation and older entries agree.
+            st.session_state.je_lines[i]['account_id'] = account_id or 0
 
         with col2:
             debit = st.number_input(
