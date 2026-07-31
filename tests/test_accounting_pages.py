@@ -117,6 +117,47 @@ def test_journal_totals_reflect_committed_values_immediately(
     assert diff_metric.value == "$0.00"
 
 
+def test_dashboard_balances_show_totals_and_equation(client_id, accounts, monkeypatch):
+    """Every section totals, equity is shown, and the equation check passes."""
+    post_entry(
+        client_id, date(2026, 1, 10),
+        [(accounts["cash"], 900, 0), (accounts["equity"], 0, 900)],
+    )
+    post_entry(
+        client_id, date(2026, 2, 5),
+        [(accounts["cash"], 300, 0), (accounts["revenue"], 0, 300)],
+    )
+    post_entry(
+        client_id, date(2026, 2, 20),
+        [(accounts["expense"], 120, 0), (accounts["cash"], 0, 120)],
+    )
+    post_entry(
+        client_id, date(2026, 3, 3),
+        [(accounts["expense"], 50, 0), (accounts["credit_card"], 0, 50)],
+    )
+
+    _select_client(monkeypatch, client_id)
+    dashboard = AppTest.from_file("pages/7_Dashboard.py", default_timeout=30).run()
+    assert not dashboard.exception
+
+    markdown = "\n".join(str(m.value) for m in dashboard.markdown)
+    for label in ["Total assets", "Total liabilities", "Total equity",
+                  "Total revenue", "Total expenses", "Net income (fiscal YTD)",
+                  "**Equity**"]:
+        assert label in markdown, f"missing {label!r}"
+    assert "$1,080.00" in markdown  # total assets: 900 + 300 - 120
+
+    success = "\n".join(str(s.value) for s in dashboard.success)
+    assert "In balance" in success
+    assert "assets $1,080.00" in success
+    # liabilities 50 + equity 900 + net income (300 - 170) = 1,080
+    assert "liabilities $50.00" in success
+    assert "net income $130.00" in success
+
+    captions = "\n".join(str(c.value) for c in dashboard.caption)
+    assert "As of" in captions
+
+
 def test_journal_delete_requires_confirmation(client_id, accounts, monkeypatch):
     _select_client(monkeypatch, client_id)
     entry = post_entry(
