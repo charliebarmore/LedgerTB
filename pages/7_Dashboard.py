@@ -16,6 +16,7 @@ from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
 from utils.fiscal_dates import fiscal_year_bounds
+from utils.ui import financial_statement
 
 # Leading glyph per activity kind, so the feed can be scanned by shape.
 ACTIVITY_ICONS = {
@@ -273,45 +274,38 @@ section_totals = {bucket: round(sum(bal for _, bal in rows), 2)
 summary_net_income = round(section_totals['Revenue'] - section_totals['Expenses'], 2)
 
 
-def _balance_section(heading, bucket, empty_text, total_label):
-    st.markdown(f"**{heading}**")
-    rows = balance_data[bucket]
-    if not rows:
-        st.caption(empty_text)
-        return
-    # Every account, not a top-N: a truncated list hides exactly the account
-    # someone is looking for and makes the section total look wrong.
-    for name, bal in sorted(rows, key=lambda x: -x[1]):
-        col_a, col_b = st.columns([3, 1])
-        with col_a:
-            st.text(name[:35])
-        with col_b:
-            st.text(f"${bal:,.2f}")
-    col_a, col_b = st.columns([3, 1])
-    with col_a:
-        st.markdown(f"**{total_label}**")
-    with col_b:
-        st.markdown(f"**${section_totals[bucket]:,.2f}**")
+def _section_rows(heading, bucket, empty_text, total_label):
+    rows = [("section", heading, [])]
+    entries = balance_data[bucket]
+    if entries:
+        # Every account, not a top-N: a truncated list hides exactly the
+        # account someone is looking for and makes the total look wrong.
+        rows += [("item", name, [bal])
+                 for name, bal in sorted(entries, key=lambda x: -x[1])]
+    else:
+        rows.append(("note", empty_text, []))
+    rows.append(("subtotal", total_label, [section_totals[bucket]]))
+    return rows
 
 
 col1, col2 = st.columns(2)
 
 with col1:
-    _balance_section("Assets", 'Assets', "No assets with balances", "Total assets")
-    _balance_section("Liabilities", 'Liabilities', "No liabilities with balances",
-                     "Total liabilities")
-    _balance_section("Equity", 'Equity', "No equity balances", "Total equity")
+    financial_statement(
+        _section_rows("Assets", 'Assets', "No assets with balances", "Total assets")
+        + _section_rows("Liabilities", 'Liabilities',
+                        "No liabilities with balances", "Total liabilities")
+        + _section_rows("Equity", 'Equity', "No equity balances", "Total equity")
+    )
 
 with col2:
-    _balance_section("Revenue (Fiscal YTD)", 'Revenue', "No revenue recorded",
-                     "Total revenue")
-    _balance_section("Expenses (Fiscal YTD)", 'Expenses', "No expenses recorded",
-                     "Total expenses")
-    col_a, col_b = st.columns([3, 1])
-    with col_a:
-        st.markdown("**Net income (fiscal YTD)**")
-    with col_b:
-        st.markdown(f"**${summary_net_income:,.2f}**")
+    financial_statement(
+        _section_rows("Revenue (Fiscal YTD)", 'Revenue', "No revenue recorded",
+                      "Total revenue")
+        + _section_rows("Expenses (Fiscal YTD)", 'Expenses',
+                        "No expenses recorded", "Total expenses")
+        + [("total", "Net income (fiscal YTD)", [summary_net_income])]
+    )
 
 # The accounting equation, checked from the same balances shown above. Any gap
 # means a journal entry posted one-sided or an account type is misassigned.
