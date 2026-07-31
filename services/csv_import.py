@@ -91,6 +91,18 @@ class CSVImporter:
     }
 
     @staticmethod
+    def decode_upload(content: bytes) -> str:
+        """Decode common bank-export encodings into text."""
+        if content.startswith((b"\xff\xfe", b"\xfe\xff")):
+            return content.decode("utf-16")
+        try:
+            return content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            # Many older financial exports use Windows-1252 for smart quotes
+            # and accented merchant names.
+            return content.decode("cp1252")
+
+    @staticmethod
     def preview_csv(file_content: str, num_rows: Optional[int] = 10, header_row: int = 0) -> Tuple[pd.DataFrame, List[str]]:
         """
         Preview a CSV file and return sample data with column names.
