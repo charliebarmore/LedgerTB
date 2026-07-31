@@ -87,3 +87,91 @@ def view_switcher(options, key, label="View"):
     st.session_state[key] = selected
     st.session_state[shadow_key] = selected
     return selected
+
+
+_STATEMENT_CSS = """
+<style>
+table.pb-statement {
+    width: 100%;
+    max-width: 44rem;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+    margin: 0.25rem 0 0.75rem 0;
+}
+table.pb-statement td {
+    border: none;
+    padding: 0.16rem 0.25rem;
+    vertical-align: bottom;
+}
+table.pb-statement td.amt { text-align: right; white-space: nowrap; width: 8.5rem; }
+table.pb-statement td.note-cell { color: #6b7280; font-size: 0.85em; }
+table.pb-statement span.muted { color: #6b7280; font-size: 0.85em; margin-left: 0.5rem; }
+table.pb-statement tr.head td {
+    font-weight: 600; color: #6b7280; font-size: 0.8em;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    border-bottom: 1px solid #b9bec7;
+}
+table.pb-statement tr.section td {
+    font-weight: 700; font-size: 1.02em; padding-top: 0.9rem;
+}
+table.pb-statement tr.item td.lbl { padding-left: 1.3rem; }
+table.pb-statement tr.subtotal td {
+    font-weight: 700; border-top: 1px solid #565d68; padding-bottom: 0.5rem;
+}
+table.pb-statement tr.total td {
+    font-weight: 700; font-size: 1.02em; border-top: 1px solid #565d68;
+}
+table.pb-statement tr.total td.amt { border-bottom: 3px double #565d68; }
+</style>
+"""
+
+
+def _statement_amount(value, lead_dollar):
+    if value is None:
+        return ""
+    body = f"{abs(value):,.2f}"
+    if value < 0:
+        body = f"({body})"
+    return f"${body}" if lead_dollar else body
+
+
+def financial_statement(rows, headers=None):
+    """Render rows as an actual financial statement, not a widget pile.
+
+    rows: iterables of (kind, label, amounts, note) — note optional.
+      kind: 'section' (bold heading, no amounts), 'item' (indented line),
+            'subtotal' (bold, top rule), 'total' (bold, double-ruled amount),
+            'note' (muted caption line).
+      amounts: list of floats/None, one per amount column (usually one;
+               two for debit/credit layouts). Dollar signs appear on
+               subtotal/total rows, accounting-style; negatives in parens.
+    headers: optional list of amount-column headings.
+    """
+    import html as _html
+
+    columns = max((len(r[2]) for r in rows if len(r) > 2 and r[2]), default=1)
+    parts = []
+    if headers:
+        cells = "".join(f"<td class='amt'>{_html.escape(h)}</td>" for h in headers)
+        parts.append(f"<tr class='head'><td class='lbl'></td>{cells}</tr>")
+    for row in rows:
+        kind, label = row[0], row[1]
+        amounts = row[2] if len(row) > 2 and row[2] is not None else []
+        note = row[3] if len(row) > 3 else None
+        label_html = _html.escape(str(label))
+        if note:
+            label_html += f"<span class='muted'>{_html.escape(str(note))}</span>"
+        if kind == "note":
+            parts.append(
+                f"<tr class='note'><td class='lbl note-cell' colspan='{columns + 1}'>"
+                f"{label_html}</td></tr>"
+            )
+            continue
+        lead = kind in ("subtotal", "total")
+        padded = list(amounts) + [None] * (columns - len(amounts))
+        cells = "".join(
+            f"<td class='amt'>{_statement_amount(a, lead)}</td>" for a in padded
+        )
+        parts.append(f"<tr class='{kind}'><td class='lbl'>{label_html}</td>{cells}</tr>")
+
+    st.html(_STATEMENT_CSS + f"<table class='pb-statement'>{''.join(parts)}</table>")

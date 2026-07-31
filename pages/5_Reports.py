@@ -14,7 +14,29 @@ from models.reports import ReportGenerator
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
-from utils.ui import view_switcher
+from utils.ui import financial_statement, view_switcher
+
+
+def gl_drill_down(options, key, start_date, end_date):
+    """One selectbox + button instead of a button per account row."""
+    if not options:
+        return
+    dd1, dd2 = st.columns([3, 1])
+    with dd1:
+        picked = st.selectbox(
+            "Drill into general ledger",
+            options=list(options.keys()),
+            format_func=lambda account_id: options[account_id],
+            key=f"{key}_gl_pick",
+        )
+    with dd2:
+        st.write("")
+        if st.button("Open GL →", width="stretch", key=f"{key}_gl_open"):
+            st.session_state.gl_account_id = picked
+            st.session_state.gl_start_date = start_date
+            st.session_state.gl_end_date = end_date
+            st.session_state.active_report = "General Ledger"
+            st.rerun()
 from utils import icons
 from utils.export import sanitize_df
 from utils.fiscal_dates import fiscal_year_bounds
@@ -73,61 +95,34 @@ if selected_report == "Trial Balance":
     if not rows:
         st.info("No transactions recorded yet.")
     else:
-        # Display report
         total_debits = sum(r.debit for r in rows)
         total_credits = sum(r.credit for r in rows)
 
-        st.caption("Click an account to view its General Ledger")
+        st.markdown(f"**As of {as_of_date.strftime('%B %-d, %Y')}**")
+        statement_rows = [
+            ("item",
+             f"{row.account_number} - {row.account_name}",
+             [row.debit if row.debit > 0 else None,
+              row.credit if row.credit > 0 else None],
+             row.account_type)
+            for row in rows
+        ]
+        statement_rows.append(("total", "Totals", [total_debits, total_credits]))
+        financial_statement(statement_rows, headers=["Debit", "Credit"])
 
-        # Display as interactive rows instead of dataframe
-        header_cols = st.columns([1, 3, 1, 1, 1])
-        with header_cols[0]:
-            st.markdown("**Account #**")
-        with header_cols[1]:
-            st.markdown("**Account Name**")
-        with header_cols[2]:
-            st.markdown("**Type**")
-        with header_cols[3]:
-            st.markdown("**Debit**")
-        with header_cols[4]:
-            st.markdown("**Credit**")
-
-        for row in rows:
-            cols = st.columns([1, 3, 1, 1, 1])
-            with cols[0]:
-                st.text(row.account_number)
-            with cols[1]:
-                # Make account name clickable. No width="stretch" here --
-                # a full-width bordered button reads as a text input; a
-                # content-width one reads as a link.
-                account_id = account_id_lookup.get(row.account_number)
-                if account_id and st.button(row.account_name, key=f"tb_acct_{row.account_number}"):
-                    st.session_state.gl_account_id = account_id
-                    st.session_state.gl_start_date = fiscal_year_bounds(
-                        as_of_date, client.fiscal_year_end_month
-                    )[0]
-                    st.session_state.gl_end_date = as_of_date
-                    st.session_state.active_report = "General Ledger"
-                    st.rerun()
-            with cols[2]:
-                st.text(row.account_type)
-            with cols[3]:
-                st.text(f"${row.debit:,.2f}" if row.debit > 0 else "")
-            with cols[4]:
-                st.text(f"${row.credit:,.2f}" if row.credit > 0 else "")
-
-        # Totals
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col2:
-            st.markdown(f"**Total Debits: ${total_debits:,.2f}**")
-        with col3:
-            st.markdown(f"**Total Credits: ${total_credits:,.2f}**")
-
-        # Check if balanced
         if abs(total_debits - total_credits) < 0.01:
             st.success("Trial balance is in balance.")
         else:
             st.error(f"Trial balance is OUT OF BALANCE by ${abs(total_debits - total_credits):,.2f}")
+
+        gl_drill_down(
+            {account_id_lookup[r.account_number]:
+                 f"{r.account_number} - {r.account_name}"
+             for r in rows if r.account_number in account_id_lookup},
+            key="tb",
+            start_date=fiscal_year_bounds(as_of_date, client.fiscal_year_end_month)[0],
+            end_date=as_of_date,
+        )
 
         # Export
         st.divider()
@@ -168,67 +163,40 @@ elif selected_report == "Income Statement":
     accounts = Account.get_all(client_id, active_only=False)
     account_id_lookup = {a.account_number: a.id for a in accounts}
 
-    def is_drill_down_link(account_number, account_name, balance, key_prefix):
-        """Same drill-down pattern as the Trial Balance / Balance Sheet views,
-        scoped to the Income Statement's own date range."""
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            account_id = account_id_lookup.get(account_number)
-            if account_id:
-                if st.button(f"{account_number} - {account_name}", key=f"{key_prefix}_{account_number}"):
-                    st.session_state.gl_account_id = account_id
-                    st.session_state.gl_start_date = is_start
-                    st.session_state.gl_end_date = is_end
-                    st.session_state.active_report = "General Ledger"
-                    st.rerun()
-            else:
-                st.text(f"  {account_name}")
-        with col2:
-            st.text(f"${balance:,.2f}")
+    st.markdown(
+        f"**{is_start.strftime('%B %-d, %Y')} to {is_end.strftime('%B %-d, %Y')}**"
+    )
 
-    st.markdown(f"**Period: {is_start} to {is_end}**")
-    st.caption("Click an account to view its General Ledger")
-    st.divider()
-
-    # Revenue section
-    st.markdown("### Revenue")
+    statement_rows = [("section", "Revenue", [])]
     if report['revenues']:
-        for r in report['revenues']:
-            is_drill_down_link(r['account_number'], r['name'], r['balance'], "is_rev")
+        statement_rows += [
+            ("item", f"{r['account_number']} - {r['name']}", [r['balance']])
+            for r in report['revenues']
+        ]
     else:
-        st.caption("  No revenue recorded")
+        statement_rows.append(("note", "No revenue recorded", []))
+    statement_rows.append(("subtotal", "Total Revenue", [report['total_revenue']]))
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("**Total Revenue**")
-    with col2:
-        st.markdown(f"**${report['total_revenue']:,.2f}**")
-
-    st.divider()
-
-    # Expenses section
-    st.markdown("### Expenses")
+    statement_rows.append(("section", "Expenses", []))
     if report['expenses']:
-        for e in report['expenses']:
-            is_drill_down_link(e['account_number'], e['name'], e['balance'], "is_exp")
+        statement_rows += [
+            ("item", f"{e['account_number']} - {e['name']}", [e['balance']])
+            for e in report['expenses']
+        ]
     else:
-        st.caption("  No expenses recorded")
+        statement_rows.append(("note", "No expenses recorded", []))
+    statement_rows.append(("subtotal", "Total Expenses", [report['total_expenses']]))
+    statement_rows.append(("total", "Net Income", [report['net_income']]))
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("**Total Expenses**")
-    with col2:
-        st.markdown(f"**${report['total_expenses']:,.2f}**")
+    financial_statement(statement_rows)
 
-    st.divider()
-
-    # Net Income
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("## Net Income")
-    with col2:
-        color = "green" if report['net_income'] >= 0 else "red"
-        st.markdown(f"## :{color}[${report['net_income']:,.2f}]")
+    gl_drill_down(
+        {account_id_lookup[r['account_number']]:
+             f"{r['account_number']} - {r['name']}"
+         for r in report['revenues'] + report['expenses']
+         if r['account_number'] in account_id_lookup},
+        key="is", start_date=is_start, end_date=is_end,
+    )
 
     # Export
     st.divider()
@@ -263,90 +231,45 @@ elif selected_report == "Balance Sheet":
     accounts = Account.get_all(client_id, active_only=False)
     account_id_lookup = {a.account_number: a.id for a in accounts}
 
-    def drill_down_link(account_number, account_name, balance, key_prefix):
-        """Create a clickable account link for drill-down. Falls back to plain
-        text when there's no backing account (e.g. computed Current Year Earnings)."""
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            account_id = account_id_lookup.get(account_number) if account_number else None
-            if account_id:
-                if st.button(f"  {account_number} - {account_name}", key=f"{key_prefix}_{account_number}"):
-                    st.session_state.gl_account_id = account_id
-                    st.session_state.gl_start_date = fiscal_year_bounds(
-                        bs_date, client.fiscal_year_end_month
-                    )[0]
-                    st.session_state.gl_end_date = bs_date
-                    st.session_state.active_report = "General Ledger"
-                    st.rerun()
-            else:
-                st.text(f"  {account_name}")
-        with col2:
-            st.text(f"${balance:,.2f}")
+    st.markdown(f"**As of {bs_date.strftime('%B %-d, %Y')}**")
 
-    st.markdown(f"**As of: {bs_date}**")
-    st.caption("Click an account to view its General Ledger")
-    st.divider()
+    def _section(title, entries, subtotal_label, subtotal_value):
+        rows = [("section", title, [])]
+        if entries:
+            rows += [
+                ("item", (f"{e['account_number']} - {e['name']}"
+                          if e['account_number'] else e['name']),
+                 [e['balance']])
+                for e in entries
+            ]
+        else:
+            rows.append(("note", f"No {title.lower()} recorded", []))
+        rows.append(("subtotal", subtotal_label, [subtotal_value]))
+        return rows
 
-    # Assets
-    st.markdown("### Assets")
-    if report['assets']:
-        for a in report['assets']:
-            drill_down_link(a['account_number'], a['name'], a['balance'], "bs_asset")
-    else:
-        st.caption("  No assets recorded")
+    statement_rows = (
+        _section("Assets", report['assets'], "Total Assets", report['total_assets'])
+        + _section("Liabilities", report['liabilities'],
+                   "Total Liabilities", report['total_liabilities'])
+        + _section("Equity", report['equity'], "Total Equity", report['total_equity'])
+        + [("total", "Total Liabilities & Equity", [report['total_liabilities_equity']])]
+    )
+    financial_statement(statement_rows)
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("**Total Assets**")
-    with col2:
-        st.markdown(f"**${report['total_assets']:,.2f}**")
-
-    st.divider()
-
-    # Liabilities
-    st.markdown("### Liabilities")
-    if report['liabilities']:
-        for l in report['liabilities']:
-            drill_down_link(l['account_number'], l['name'], l['balance'], "bs_liab")
-    else:
-        st.caption("  No liabilities recorded")
-
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("**Total Liabilities**")
-    with col2:
-        st.markdown(f"**${report['total_liabilities']:,.2f}**")
-
-    st.divider()
-
-    # Equity
-    st.markdown("### Equity")
-    if report['equity']:
-        for e in report['equity']:
-            drill_down_link(e['account_number'], e['name'], e['balance'], "bs_equity")
-    else:
-        st.caption("  No equity recorded")
-
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("**Total Equity**")
-    with col2:
-        st.markdown(f"**${report['total_equity']:,.2f}**")
-
-    st.divider()
-
-    # Total L&E
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("## Total Liabilities & Equity")
-    with col2:
-        st.markdown(f"## ${report['total_liabilities_equity']:,.2f}")
-
-    # Balance check
     if abs(report['total_assets'] - report['total_liabilities_equity']) < 0.01:
         st.success("Balance sheet is balanced.")
     else:
         st.error("Balance sheet is OUT OF BALANCE!")
+
+    gl_drill_down(
+        {account_id_lookup[e['account_number']]:
+             f"{e['account_number']} - {e['name']}"
+         for e in report['assets'] + report['liabilities'] + report['equity']
+         if e['account_number'] and e['account_number'] in account_id_lookup},
+        key="bs",
+        start_date=fiscal_year_bounds(bs_date, client.fiscal_year_end_month)[0],
+        end_date=bs_date,
+    )
 
     # Export
     st.divider()
