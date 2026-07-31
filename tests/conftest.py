@@ -40,8 +40,16 @@ def accounts(client_id):
         account.save()
         return account.id
 
+    def make_cash(account_number, name):
+        # subtype "Cash" matches the real chart-of-accounts convention and is
+        # what the close package's receipts & disbursements sheet keys on.
+        account = Account(client_id=client_id, account_number=account_number,
+                          name=name, type="Asset", subtype="Cash")
+        account.save()
+        return account.id
+
     return {
-        "cash": make("1000", "Cash", "Asset"),
+        "cash": make_cash("1000", "Cash"),
         "credit_card": make("2000", "Credit Card Payable", "Liability"),
         "equity": make("3000", "Owner's Equity", "Equity"),
         "revenue": make("4000", "Service Revenue", "Revenue"),
@@ -49,13 +57,14 @@ def accounts(client_id):
     }
 
 
-def post_entry(client_id, entry_date, lines, entry_type="Regular"):
+def post_entry(client_id, entry_date, lines, entry_type="Regular", source_reference=None):
     """lines: list of (account_id, debit, credit) tuples."""
     entry = JournalEntry(
         client_id=client_id,
         entry_date=entry_date,
         description="test entry",
         entry_type=entry_type,
+        source_reference=source_reference,
         lines=[JournalEntryLine(account_id=a, debit=d, credit=c) for a, d, c in lines],
     )
     entry.save()
