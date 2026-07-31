@@ -198,6 +198,8 @@ else:
                 st.text(f"Table: {log.table_name}")
                 st.text(f"Record ID: {log.record_id}")
                 st.text(f"Action: {log.action}")
+                if log.performed_by:
+                    st.text(f"By: {log.performed_by}")
                 if log.changed_at:
                     st.text(f"Changed At: {log.changed_at.strftime('%m/%d/%Y %H:%M:%S')}")
                 if log.session_id:

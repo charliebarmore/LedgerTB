@@ -60,6 +60,7 @@ class ActivityEvent:
     summary: str       # the headline — what was done
     detail: Optional[str] = None
     page: Optional[str] = None   # page to open for more
+    actor: Optional[str] = None  # who did it (None on rows from before tracking)
 
 
 def _parse(value) -> Optional[datetime]:
@@ -108,6 +109,7 @@ def _import_events(client_id: int) -> List[ActivityEvent]:
             ),
             detail=detail,
             page="pages/4_Import_Transactions.py",
+            actor=batch.get("created_by"),
         ))
     return events
 
@@ -138,6 +140,7 @@ def _journal_events(client_id: int, limit: int) -> List[ActivityEvent]:
             summary=summary,
             detail=" · ".join(pieces),
             page="pages/2_Journal_Entries.py",
+            actor=entry.get("created_by"),
         ))
     return events
 
@@ -166,6 +169,7 @@ def _audit_events(client_id: int, limit: int) -> List[ActivityEvent]:
                 summary=summary,
                 detail=None,
                 page="pages/8_Audit_Trail.py",
+                actor=log.performed_by,
             ))
     return events
 

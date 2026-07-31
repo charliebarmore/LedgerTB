@@ -4,6 +4,7 @@ from datetime import date
 from database.connection import get_connection, get_cursor
 from money import to_cents, to_dollars
 from utils.fiscal_dates import require_valid_range
+from utils.actor import current_actor
 
 
 @dataclass
@@ -58,8 +59,8 @@ class ImportedTransaction:
                     (client_id, import_batch, transaction_date, description, amount, bank_account_id,
                      suggested_account_id, status, journal_entry_id, source_id, source_filename,
                      source_row_number, row_fingerprint, idempotency_key, duplicate_override,
-                     duplicate_override_reason, duplicate_of_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     duplicate_override_reason, duplicate_of_id, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         self.client_id,
@@ -79,6 +80,7 @@ class ImportedTransaction:
                         int(self.duplicate_override),
                         self.duplicate_override_reason,
                         self.duplicate_of_id,
+                        current_actor(),
                     )
                 )
                 self.id = cursor.lastrowid
@@ -287,8 +289,8 @@ class ImportedTransaction:
                     (client_id, import_batch, transaction_date, description, amount, bank_account_id,
                      suggested_account_id, status, journal_entry_id, source_id, source_filename,
                      source_row_number, row_fingerprint, idempotency_key, duplicate_override,
-                     duplicate_override_reason, duplicate_of_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     duplicate_override_reason, duplicate_of_id, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         transaction.client_id, transaction.import_batch,
@@ -300,6 +302,7 @@ class ImportedTransaction:
                         transaction.source_row_number, transaction.row_fingerprint,
                         transaction.idempotency_key, int(transaction.duplicate_override),
                         transaction.duplicate_override_reason, transaction.duplicate_of_id,
+                        current_actor(),
                     ),
                 )
                 transaction.id = cursor.lastrowid
@@ -565,6 +568,7 @@ class ImportedTransaction:
                        -- created_at is stored UTC (CURRENT_TIMESTAMP), so convert
                        -- for display or evening imports show tomorrow's date.
                        MIN(datetime(it.created_at, 'localtime')) imported_at,
+                       MAX(it.created_by) created_by,
                        MIN(it.created_at) sort_key
                 FROM imported_transactions it
                 WHERE it.client_id = ? AND it.import_batch IS NOT NULL
@@ -595,6 +599,7 @@ class ImportedTransaction:
             "first_date": date.fromisoformat(row["first_date"]) if row["first_date"] else None,
             "last_date": date.fromisoformat(row["last_date"]) if row["last_date"] else None,
             "imported_at": row["imported_at"],
+            "created_by": row["created_by"],
         } for row in rows]
 
     @staticmethod
