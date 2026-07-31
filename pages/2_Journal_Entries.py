@@ -555,12 +555,30 @@ with tab2:
     with col3:
         filter_type = st.selectbox("Entry Type", options=['All'] + EntryType.ALL, key="filter_type")
 
+    search_col, account_col = st.columns([2, 1])
+    with search_col:
+        filter_search = st.text_input(
+            "Search", key="filter_search",
+            placeholder="Description, reference, AJE #, or amount",
+        )
+    with account_col:
+        filter_account = st.selectbox(
+            "Account",
+            options=list(account_options.keys()),
+            format_func=lambda x: account_options[x],
+            key="filter_account",
+            index=None,
+            placeholder="All accounts",
+        )
+
     if filter_start > filter_end:
         st.error("Journal entry filter start date cannot be after the end date.")
         st.stop()
 
     entry_type_param = filter_type if filter_type != 'All' else None
-    filter_signature = (filter_start, filter_end, entry_type_param)
+    search_param = filter_search.strip() or None
+    filter_signature = (filter_start, filter_end, entry_type_param,
+                        search_param, filter_account)
     if st.session_state.get("journal_filter_signature") != filter_signature:
         st.session_state.journal_filter_signature = filter_signature
         st.session_state.journal_page = 1
@@ -568,7 +586,8 @@ with tab2:
     page_size = 25
     summary = JournalEntry.get_filtered_summary(
         client_id=client_id, start_date=filter_start, end_date=filter_end,
-        entry_type=entry_type_param,
+        entry_type=entry_type_param, search_term=search_param,
+        account_id=filter_account,
     )
     page_count = max(1, (summary["total_count"] + page_size - 1) // page_size)
     current_page = min(max(1, st.session_state.get("journal_page", 1)), page_count)
@@ -604,6 +623,8 @@ with tab2:
         start_date=filter_start,
         end_date=filter_end,
         entry_type=entry_type_param,
+        search_term=search_param,
+        account_id=filter_account,
         limit=page_size,
         offset=(current_page - 1) * page_size,
     )

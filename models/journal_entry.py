@@ -377,32 +377,78 @@ class JournalEntry:
             return cursor.fetchone()[0]
 
     @staticmethod
+    def _entry_filters(
+        client_id: int,
+        start_date: Optional[date],
+        end_date: Optional[date],
+        entry_type: Optional[str],
+        search_term: Optional[str] = None,
+        account_id: Optional[int] = None,
+    ):
+        """Shared WHERE clauses so the list and its totals cannot disagree."""
+        require_valid_range(start_date, end_date, "Journal entry filter")
+        clauses = ["journal_entries.client_id = ?"]
+        params: List = [client_id]
+        if start_date:
+            clauses.append("journal_entries.entry_date >= ?")
+            params.append(start_date.isoformat())
+        if end_date:
+            clauses.append("journal_entries.entry_date <= ?")
+            params.append(end_date.isoformat())
+        if entry_type:
+            clauses.append("journal_entries.entry_type = ?")
+            params.append(entry_type)
+        if search_term and search_term.strip():
+            term = search_term.strip()
+            like = f"%{term}%"
+            matches = [
+                "journal_entries.description LIKE ?",
+                "journal_entries.source_reference LIKE ?",
+                "journal_entries.aje_reference LIKE ?",
+            ]
+            params.extend([like, like, like])
+            # A numeric search also matches any line amount, so "1,200" finds
+            # the transfer even when the description says something else.
+            try:
+                cents = to_cents(term.replace(",", "").replace("$", ""))
+            except Exception:
+                cents = None
+            # Nonzero only: every entry line has a zero on one side, so a
+            # search of "0" would otherwise match the whole journal.
+            if cents:
+                matches.append(
+                    "EXISTS (SELECT 1 FROM journal_entry_lines sl "
+                    "WHERE sl.journal_entry_id = journal_entries.id "
+                    "AND (sl.debit = ? OR sl.credit = ?))"
+                )
+                params.extend([cents, cents])
+            clauses.append("(" + " OR ".join(matches) + ")")
+        if account_id:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM journal_entry_lines al "
+                "WHERE al.journal_entry_id = journal_entries.id "
+                "AND al.account_id = ?)"
+            )
+            params.append(account_id)
+        return clauses, params
+
+    @staticmethod
     def get_all(
         client_id: int,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         entry_type: Optional[str] = None,
+        search_term: Optional[str] = None,
+        account_id: Optional[int] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> List['JournalEntry']:
         """Get journal entries for a client with optional filters."""
-        require_valid_range(start_date, end_date, "Journal entry filter")
+        clauses, params = JournalEntry._entry_filters(
+            client_id, start_date, end_date, entry_type, search_term, account_id
+        )
         with get_cursor() as cursor:
-            query = "SELECT * FROM journal_entries WHERE client_id = ?"
-            params = [client_id]
-
-            if start_date:
-                query += " AND entry_date >= ?"
-                params.append(start_date.isoformat())
-
-            if end_date:
-                query += " AND entry_date <= ?"
-                params.append(end_date.isoformat())
-
-            if entry_type:
-                query += " AND entry_type = ?"
-                params.append(entry_type)
-
+            query = "SELECT * FROM journal_entries WHERE " + " AND ".join(clauses)
             query += " ORDER BY entry_date DESC, id DESC LIMIT ? OFFSET ?"
             params.extend([max(1, int(limit)), max(0, int(offset))])
 
@@ -435,20 +481,13 @@ class JournalEntry:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
         entry_type: Optional[str] = None,
+        search_term: Optional[str] = None,
+        account_id: Optional[int] = None,
     ) -> dict:
         """Return SQL-backed counts and totals for all matching entries."""
-        require_valid_range(start_date, end_date, "Journal entry filter")
-        clauses = ["client_id = ?"]
-        params = [client_id]
-        if start_date:
-            clauses.append("entry_date >= ?")
-            params.append(start_date.isoformat())
-        if end_date:
-            clauses.append("entry_date <= ?")
-            params.append(end_date.isoformat())
-        if entry_type:
-            clauses.append("entry_type = ?")
-            params.append(entry_type)
+        clauses, params = JournalEntry._entry_filters(
+            client_id, start_date, end_date, entry_type, search_term, account_id
+        )
 
         with get_cursor() as cursor:
             cursor.execute(
