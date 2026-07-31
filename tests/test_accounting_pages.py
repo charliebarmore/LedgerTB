@@ -79,8 +79,8 @@ def test_journal_form_clears_keyed_line_widgets_after_save(
 
     assert not journal.exception
     assert JournalEntry.count(client_id) == 1
-    assert journal.selectbox(key="account_0").value == 0
-    assert journal.selectbox(key="account_1").value == 0
+    assert journal.selectbox(key="account_0").value is None
+    assert journal.selectbox(key="account_1").value is None
     assert journal.number_input(key="debit_0").value == 0.0
     assert journal.number_input(key="credit_1").value == 0.0
 
