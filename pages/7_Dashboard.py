@@ -236,71 +236,95 @@ st.divider()
 
 # Account balances summary
 st.subheader("Account Balances Summary")
+_summary_fy_start, _ = fiscal_year_bounds(date.today(), client.fiscal_year_end_month)
+st.caption(
+    f"As of {date.today().strftime('%B %-d, %Y')} · revenue and expenses are "
+    f"fiscal year-to-date ({_summary_fy_start.strftime('%-m/%-d/%Y')} – "
+    f"{date.today().strftime('%-m/%-d/%Y')})"
+)
 
-# Get balances by type
+# Get balances by type. Balances are signed by each account's normal balance
+# (contra accounts show negative), so every section total is a simple sum and
+# the accounting-equation check below is exact.
 balance_data = {
     'Assets': [],
     'Liabilities': [],
+    'Equity': [],
     'Revenue': [],
     'Expenses': []
 }
+_TYPE_BUCKET = {'Asset': 'Assets', 'Liability': 'Liabilities',
+                'Equity': 'Equity', 'Revenue': 'Revenue', 'Expense': 'Expenses'}
 
 for account in accounts:
     balance = Account.get_balance(account.id)
     if abs(balance) > 0.01:
-        if account.type == 'Asset':
-            balance_data['Assets'].append((account.display_name(), balance))
-        elif account.type == 'Liability':
-            balance_data['Liabilities'].append((account.display_name(), balance))
-        elif account.type == 'Revenue':
-            balance_data['Revenue'].append((account.display_name(), balance))
-        elif account.type == 'Expense':
-            balance_data['Expenses'].append((account.display_name(), balance))
+        bucket = _TYPE_BUCKET.get(account.type)
+        if bucket:
+            balance_data[bucket].append((account.display_name(), balance))
+
+section_totals = {bucket: round(sum(bal for _, bal in rows), 2)
+                  for bucket, rows in balance_data.items()}
+summary_net_income = round(section_totals['Revenue'] - section_totals['Expenses'], 2)
+
+
+def _balance_section(heading, bucket, empty_text, total_label):
+    st.markdown(f"**{heading}**")
+    rows = balance_data[bucket]
+    if not rows:
+        st.caption(empty_text)
+        return
+    # Every account, not a top-N: a truncated list hides exactly the account
+    # someone is looking for and makes the section total look wrong.
+    for name, bal in sorted(rows, key=lambda x: -x[1]):
+        col_a, col_b = st.columns([3, 1])
+        with col_a:
+            st.text(name[:35])
+        with col_b:
+            st.text(f"${bal:,.2f}")
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        st.markdown(f"**{total_label}**")
+    with col_b:
+        st.markdown(f"**${section_totals[bucket]:,.2f}**")
+
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("**Assets**")
-    if balance_data['Assets']:
-        for name, bal in sorted(balance_data['Assets'], key=lambda x: -x[1])[:5]:
-            col_a, col_b = st.columns([3, 1])
-            with col_a:
-                st.text(name[:35])
-            with col_b:
-                st.text(f"${bal:,.2f}")
-    else:
-        st.caption("No assets with balances")
-
-    st.markdown("**Liabilities**")
-    if balance_data['Liabilities']:
-        for name, bal in sorted(balance_data['Liabilities'], key=lambda x: -x[1])[:5]:
-            col_a, col_b = st.columns([3, 1])
-            with col_a:
-                st.text(name[:35])
-            with col_b:
-                st.text(f"${bal:,.2f}")
-    else:
-        st.caption("No liabilities with balances")
+    _balance_section("Assets", 'Assets', "No assets with balances", "Total assets")
+    _balance_section("Liabilities", 'Liabilities', "No liabilities with balances",
+                     "Total liabilities")
+    _balance_section("Equity", 'Equity', "No equity balances", "Total equity")
 
 with col2:
-    st.markdown("**Revenue (Fiscal YTD)**")
-    if balance_data['Revenue']:
-        for name, bal in sorted(balance_data['Revenue'], key=lambda x: -x[1])[:5]:
-            col_a, col_b = st.columns([3, 1])
-            with col_a:
-                st.text(name[:35])
-            with col_b:
-                st.text(f"${bal:,.2f}")
-    else:
-        st.caption("No revenue recorded")
+    _balance_section("Revenue (Fiscal YTD)", 'Revenue', "No revenue recorded",
+                     "Total revenue")
+    _balance_section("Expenses (Fiscal YTD)", 'Expenses', "No expenses recorded",
+                     "Total expenses")
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        st.markdown("**Net income (fiscal YTD)**")
+    with col_b:
+        st.markdown(f"**${summary_net_income:,.2f}**")
 
-    st.markdown("**Expenses (Fiscal YTD)**")
-    if balance_data['Expenses']:
-        for name, bal in sorted(balance_data['Expenses'], key=lambda x: -x[1])[:5]:
-            col_a, col_b = st.columns([3, 1])
-            with col_a:
-                st.text(name[:35])
-            with col_b:
-                st.text(f"${bal:,.2f}")
-    else:
-        st.caption("No expenses recorded")
+# The accounting equation, checked from the same balances shown above. Any gap
+# means a journal entry posted one-sided or an account type is misassigned.
+equation_gap = round(
+    section_totals['Assets']
+    - (section_totals['Liabilities'] + section_totals['Equity'] + summary_net_income),
+    2,
+)
+if abs(equation_gap) < 0.01:
+    st.success(
+        f"In balance — assets ${section_totals['Assets']:,.2f} = "
+        f"liabilities ${section_totals['Liabilities']:,.2f} "
+        f"+ equity ${section_totals['Equity']:,.2f} "
+        f"+ net income ${summary_net_income:,.2f}"
+    )
+else:
+    st.error(
+        f"OUT OF BALANCE by ${abs(equation_gap):,.2f} — assets "
+        f"${section_totals['Assets']:,.2f} vs liabilities + equity + net income "
+        f"${section_totals['Liabilities'] + section_totals['Equity'] + summary_net_income:,.2f}"
+    )
