@@ -3,7 +3,10 @@ from datetime import date, timedelta
 from streamlit.testing.v1 import AppTest
 import streamlit as st
 
+from models.account import Account
+from models.journal_entry import JournalEntry
 from models.transaction import ImportedTransaction
+from services.posting import post_transaction
 from tests.conftest import post_entry
 
 
@@ -57,3 +60,96 @@ def test_year_close_checklist_page_renders(client_id, accounts, monkeypatch):
     assert any(
         heading.value == "Year-close checklist" for heading in worksheet.subheader
     )
+
+
+def test_journal_form_clears_keyed_line_widgets_after_save(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    journal = AppTest.from_file(
+        "pages/2_Journal_Entries.py", default_timeout=30
+    ).run()
+    assert not journal.exception
+
+    journal.selectbox(key="account_0").set_value(accounts["cash"]).run()
+    journal.number_input(key="debit_0").set_value(125.0).run()
+    journal.selectbox(key="account_1").set_value(accounts["revenue"]).run()
+    journal.number_input(key="credit_1").set_value(125.0).run()
+    next(button for button in journal.button if button.label == "Save Entry").click().run()
+
+    assert not journal.exception
+    assert JournalEntry.count(client_id) == 1
+    assert journal.selectbox(key="account_0").value == 0
+    assert journal.selectbox(key="account_1").value == 0
+    assert journal.number_input(key="debit_0").value == 0.0
+    assert journal.number_input(key="credit_1").value == 0.0
+
+
+def test_journal_delete_requires_confirmation(client_id, accounts, monkeypatch):
+    _select_client(monkeypatch, client_id)
+    entry = post_entry(
+        client_id,
+        date(2026, 1, 15),
+        [(accounts["cash"], 40, 0), (accounts["revenue"], 0, 40)],
+    )
+    journal = AppTest.from_file(
+        "pages/2_Journal_Entries.py", default_timeout=30
+    ).run()
+
+    journal.button(key=f"delete_entry_{entry.id}").click().run()
+    assert JournalEntry.get_by_id(entry.id) is not None
+    assert journal.button(key=f"confirm_delete_entry_{entry.id}")
+
+    journal.button(key=f"confirm_delete_entry_{entry.id}").click().run()
+    assert JournalEntry.get_by_id(entry.id) is None
+
+
+def test_imported_journal_uses_guided_category_correction(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    travel = Account(
+        client_id=client_id,
+        account_number="6100",
+        name="Travel Expense",
+        type="Expense",
+    )
+    travel.save()
+    original, _ = post_transaction(
+        client_id=client_id,
+        transaction={
+            "date": date(2026, 1, 10),
+            "description": "Imported merchant",
+            "amount": -80,
+            "source_id": "guided-correction",
+            "source_filename": "bank.csv",
+            "source_row_number": 2,
+        },
+        target_account_id=accounts["expense"],
+        bank_account_id=accounts["cash"],
+        batch_id="guided-correction",
+        learn=False,
+    )
+    journal = AppTest.from_file(
+        "pages/2_Journal_Entries.py", default_timeout=30
+    ).run()
+
+    assert journal.button(key=f"correct_import_{original.id}")
+    assert not any(
+        button.key == f"edit_entry_{original.id}" for button in journal.button
+    )
+    journal.button(key=f"correct_import_{original.id}").click().run()
+    assert any("Correct category" in heading.value for heading in journal.subheader)
+
+    journal.selectbox(key=f"correction_target_{original.id}").set_value(travel.id).run()
+    journal.text_input(key=f"correction_reason_{original.id}").set_value(
+        "Client travel"
+    ).run()
+    journal.button(key=f"post_correction_{original.id}").click().run()
+
+    assert not journal.exception
+    assert JournalEntry.count(client_id) == 2
+    link = ImportedTransaction.get_links_for_journal_entries(client_id, [original.id])[
+        original.id
+    ]
+    assert link["suggested_account_id"] == travel.id

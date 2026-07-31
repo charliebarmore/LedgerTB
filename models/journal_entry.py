@@ -68,6 +68,8 @@ class JournalEntry:
         for i, line in enumerate(self.lines):
             if line.account_id == 0:
                 errors.append(f"Line {i+1}: Account is required")
+            if line.debit < 0 or line.credit < 0:
+                errors.append(f"Line {i+1}: Debit and credit cannot be negative")
             if line.debit == 0 and line.credit == 0:
                 errors.append(f"Line {i+1}: Must have either debit or credit")
             if line.debit > 0 and line.credit > 0:
@@ -139,6 +141,16 @@ class JournalEntry:
                 old_row = cursor.fetchone()
                 if not old_row:
                     raise ValueError("Journal entry not found for the selected client.")
+                cursor.execute(
+                    "SELECT 1 FROM imported_transactions "
+                    "WHERE journal_entry_id = ? AND client_id = ? LIMIT 1",
+                    (self.id, self.client_id),
+                )
+                if cursor.fetchone():
+                    raise ValueError(
+                        "Imported postings cannot be edited in place. "
+                        "Use Correct category so the source and ledger history stay intact."
+                    )
                 old_entry_date = date.fromisoformat(old_row['entry_date'])
                 old_closed = FiscalPeriod.get_closed_period_for_date(
                     self.client_id, old_entry_date
@@ -544,29 +556,17 @@ class JournalEntry:
                         "Unselect it (or reopen the completed reconciliation) before deleting."
                     )
 
-                # Unlink any imported transactions that reference this entry first.
-                # imported_transactions.journal_entry_id is a RESTRICT foreign key
-                # (no ON DELETE clause) and PRAGMA foreign_keys is ON, so deleting an
-                # import-posted entry without this would raise IntegrityError. This
-                # mirrors ON DELETE SET NULL semantics at the application layer.
                 cursor.execute(
-                    "SELECT * FROM imported_transactions WHERE journal_entry_id = ?",
+                    "SELECT 1 FROM imported_transactions WHERE journal_entry_id = ? LIMIT 1",
                     (entry_id,),
                 )
-                linked_imports = cursor.fetchall()
-                cursor.execute(
-                    "UPDATE imported_transactions SET journal_entry_id = NULL "
-                    "WHERE journal_entry_id = ?",
-                    (entry_id,)
-                )
+                if cursor.fetchone():
+                    raise ValueError(
+                        "This entry was created from an imported transaction. "
+                        "Reverse it instead so the source history remains intact."
+                    )
 
                 cursor.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
-                for imported in linked_imports:
-                    AuditLog.write(
-                        cursor, client_id, "imported_transactions", imported["id"], "UPDATE",
-                        old_values={"journal_entry_id": entry_id, "status": imported["status"]},
-                        new_values={"journal_entry_id": None, "status": imported["status"]},
-                    )
                 AuditLog.write(
                     cursor, client_id, 'journal_entries', entry_id, 'DELETE',
                     old_values=old_values,

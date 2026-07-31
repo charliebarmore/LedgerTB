@@ -9,12 +9,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.account import Account
 from models.client import Client
 from models.journal_entry import JournalEntry, JournalEntryLine
+from models.transaction import ImportedTransaction
+from services.import_corrections import correct_imported_category
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
 from constants import EntryType
 from utils.fiscal_dates import fiscal_year_bounds
+
+
+_LINE_WIDGET_PREFIXES = ("account_", "debit_", "credit_", "memo_")
+
+
+def clear_entry_line_widgets():
+    """Clear keyed line widgets before they are instantiated on a rerun."""
+    for key in list(st.session_state):
+        if key.startswith(_LINE_WIDGET_PREFIXES):
+            del st.session_state[key]
+
 
 # Initialize database
 
@@ -49,33 +62,51 @@ if 'je_lines' not in st.session_state:
         {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''}
     ]
 
+if st.session_state.pop("_clear_je_line_widgets", False):
+    clear_entry_line_widgets()
+
 if 'editing_entry_id' not in st.session_state:
     st.session_state.editing_entry_id = None
 
 # Check if we're coming from General Ledger drill-down
 if 'edit_entry_id' in st.session_state:
+    clear_entry_line_widgets()
     entry_to_edit = JournalEntry.get_by_id(st.session_state.edit_entry_id, client_id=client_id)
     if entry_to_edit:
-        st.session_state.editing_entry_id = entry_to_edit.id
-        st.session_state.je_lines = [
-            {
-                'account_id': line.account_id,
-                'debit': line.debit,
-                'credit': line.credit,
-                'memo': line.memo or ''
-            }
-            for line in entry_to_edit.lines
-        ]
-        # Also store header fields
-        st.session_state.je_entry_date = entry_to_edit.entry_date
-        st.session_state.je_entry_type = entry_to_edit.entry_type
-        st.session_state.je_source_reference = entry_to_edit.source_reference or ''
-        st.session_state.je_description = entry_to_edit.description or ''
-        st.success(f"Loaded Journal Entry #{entry_to_edit.id} for editing")
+        import_link = ImportedTransaction.get_links_for_journal_entries(
+            client_id, [entry_to_edit.id]
+        ).get(entry_to_edit.id)
+        if import_link:
+            st.session_state.correct_import_entry_id = entry_to_edit.id
+            st.info(
+                "Imported postings use a category correction so their source "
+                "and reconciliation history remain intact."
+            )
+        else:
+            st.session_state.editing_entry_id = entry_to_edit.id
+            st.session_state.je_lines = [
+                {
+                    'account_id': line.account_id,
+                    'debit': line.debit,
+                    'credit': line.credit,
+                    'memo': line.memo or ''
+                }
+                for line in entry_to_edit.lines
+            ]
+            # Also store header fields
+            st.session_state.je_entry_date = entry_to_edit.entry_date
+            st.session_state.je_entry_type = entry_to_edit.entry_type
+            st.session_state.je_source_reference = entry_to_edit.source_reference or ''
+            st.session_state.je_description = entry_to_edit.description or ''
+            st.success(f"Loaded Journal Entry #{entry_to_edit.id} for editing")
     del st.session_state.edit_entry_id
 
 
 def reset_entry_form():
+    # Streamlit's keyed widgets retain their own values and ignore a changed
+    # ``value`` on rerun. Defer their removal until the next run, before the
+    # widgets exist, so a saved entry cannot silently repopulate the form.
+    st.session_state._clear_je_line_widgets = True
     st.session_state.je_lines = [
         {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''},
         {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''}
@@ -90,6 +121,155 @@ def reset_entry_form():
         del st.session_state.je_source_reference
     if 'je_description' in st.session_state:
         del st.session_state.je_description
+
+
+def load_entry_for_edit(entry: JournalEntry):
+    st.session_state.editing_entry_id = entry.id
+    st.session_state.je_lines = [
+        {
+            'account_id': line.account_id,
+            'debit': line.debit,
+            'credit': line.credit,
+            'memo': line.memo or '',
+        }
+        for line in entry.lines
+    ]
+    st.session_state.je_entry_date = entry.entry_date
+    st.session_state.je_entry_type = entry.entry_type
+    st.session_state.je_source_reference = entry.source_reference or ''
+    st.session_state.je_description = entry.description or ''
+    st.session_state._clear_je_line_widgets = True
+
+
+def render_delete_control(entry_id: int):
+    """Require a second, explicit action before permanently deleting an entry."""
+    confirmation_key = "confirm_delete_entry_id"
+    if st.session_state.get(confirmation_key) != entry_id:
+        if st.button("Delete", key=f"delete_entry_{entry_id}"):
+            st.session_state[confirmation_key] = entry_id
+            st.rerun()
+        return
+
+    st.warning("Permanently delete this entry?")
+    confirm_col, cancel_col = st.columns(2)
+    with confirm_col:
+        if st.button("Confirm delete", key=f"confirm_delete_entry_{entry_id}"):
+            try:
+                JournalEntry.delete(entry_id, client_id=client_id)
+                st.session_state.pop(confirmation_key, None)
+                st.success("Entry deleted!")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+    with cancel_col:
+        if st.button("Cancel", key=f"cancel_delete_entry_{entry_id}"):
+            st.session_state.pop(confirmation_key, None)
+            st.rerun()
+
+
+def render_entry_controls(entry: JournalEntry, import_link: dict | None):
+    if import_link:
+        st.caption("Imported posting")
+        if st.button("Correct category", key=f"correct_import_{entry.id}"):
+            st.session_state.correct_import_entry_id = entry.id
+            st.rerun()
+        return
+
+    if st.button("Edit", key=f"edit_entry_{entry.id}"):
+        load_entry_for_edit(entry)
+        st.rerun()
+    render_delete_control(entry.id)
+
+
+correction_success = st.session_state.pop("import_correction_success", None)
+if correction_success:
+    st.success(correction_success)
+
+correction_entry_id = st.session_state.get("correct_import_entry_id")
+if correction_entry_id:
+    correction_entry = JournalEntry.get_by_id(correction_entry_id, client_id=client_id)
+    correction_link = ImportedTransaction.get_links_for_journal_entries(
+        client_id, [correction_entry_id]
+    ).get(correction_entry_id)
+    if not correction_entry or not correction_link:
+        st.session_state.pop("correct_import_entry_id", None)
+        st.error("The imported posting could not be found.")
+    else:
+        with st.container(border=True):
+            st.subheader(f"Correct category for imported JE #{correction_entry_id}")
+            st.caption(
+                "This posts a separate reclassification entry. The original import, "
+                "bank leg, and reconciliation history remain unchanged."
+            )
+            source_col, current_col, amount_col = st.columns(3)
+            source_name = correction_link.get("source_filename") or "Imported transaction"
+            source_col.markdown(f"**Source**  \n{source_name}")
+            current_name = correction_link.get("suggested_account_name") or "Unknown"
+            current_number = correction_link.get("suggested_account_number") or "—"
+            current_col.markdown(
+                f"**Current category**  \n{current_number} - {current_name}"
+            )
+            amount_col.markdown(f"**Amount**  \n${correction_link['amount']:,.2f}")
+
+            correction_accounts = [
+                account
+                for account in Account.get_all(client_id, active_only=True)
+                if account.id not in {
+                    correction_link.get("bank_account_id"),
+                    correction_link.get("suggested_account_id"),
+                }
+            ]
+            correction_options = {0: "-- Select corrected category --"}
+            correction_options.update(
+                {account.id: account.display_name() for account in correction_accounts}
+            )
+            target_account_id = st.selectbox(
+                "Corrected category",
+                options=list(correction_options),
+                format_func=lambda account_id: correction_options[account_id],
+                key=f"correction_target_{correction_entry_id}",
+            )
+            correction_date = st.date_input(
+                "Correction date",
+                value=date.today(),
+                key=f"correction_date_{correction_entry_id}",
+                help="Use an open accounting period. The imported transaction date is not changed.",
+            )
+            reason = st.text_input(
+                "Reason for correction",
+                key=f"correction_reason_{correction_entry_id}",
+                placeholder="e.g., Merchant was client travel, not office expense",
+            )
+            action_col, cancel_col, _ = st.columns([1, 1, 2])
+            with action_col:
+                if st.button(
+                    "Post correction",
+                    type="primary",
+                    disabled=not target_account_id or not reason.strip(),
+                    key=f"post_correction_{correction_entry_id}",
+                ):
+                    try:
+                        correction = correct_imported_category(
+                            client_id=client_id,
+                            journal_entry_id=correction_entry_id,
+                            target_account_id=target_account_id,
+                            correction_date=correction_date,
+                            reason=reason,
+                        )
+                        st.session_state.pop("correct_import_entry_id", None)
+                        st.session_state.import_correction_success = (
+                            f"Correction posted as journal entry #{correction.id}."
+                        )
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+            with cancel_col:
+                if st.button("Cancel", key=f"cancel_correction_{correction_entry_id}"):
+                    st.session_state.pop("correct_import_entry_id", None)
+                    st.rerun()
+        # Keep the correction task focused instead of showing an unrelated new
+        # entry form immediately beneath it.
+        st.stop()
 
 
 # Tabs
@@ -275,21 +455,13 @@ with tab2:
             if st.button("Go to Entry", key="search_btn"):
                 found_entry = JournalEntry.get_by_id(search_id, client_id=client_id)
                 if found_entry:
-                    # Load into edit form (including header fields)
-                    st.session_state.editing_entry_id = found_entry.id
-                    st.session_state.je_lines = [
-                        {
-                            'account_id': line.account_id,
-                            'debit': line.debit,
-                            'credit': line.credit,
-                            'memo': line.memo or ''
-                        }
-                        for line in found_entry.lines
-                    ]
-                    st.session_state.je_entry_date = found_entry.entry_date
-                    st.session_state.je_entry_type = found_entry.entry_type
-                    st.session_state.je_source_reference = found_entry.source_reference or ''
-                    st.session_state.je_description = found_entry.description or ''
+                    import_link = ImportedTransaction.get_links_for_journal_entries(
+                        client_id, [found_entry.id]
+                    ).get(found_entry.id)
+                    if import_link:
+                        st.session_state.correct_import_entry_id = found_entry.id
+                    else:
+                        load_entry_for_edit(found_entry)
                     st.rerun()
                 else:
                     st.error(f"Entry #{search_id} not found for this client.")
@@ -360,6 +532,9 @@ with tab2:
         limit=page_size,
         offset=(current_page - 1) * page_size,
     )
+    import_links = ImportedTransaction.get_links_for_journal_entries(
+        client_id, [entry.id for entry in entries]
+    )
 
     if not entries:
         st.info("No journal entries found for the selected filters.")
@@ -391,31 +566,7 @@ with tab2:
                             st.text(f"  {line.account_number} - {line.account_name}: Dr {debit_str} Cr {credit_str}{memo_str}")
 
                     with col2:
-                        if st.button("Edit", key=f"edit_entry_{entry.id}"):
-                            # Load entry into form (including header fields)
-                            st.session_state.editing_entry_id = entry.id
-                            st.session_state.je_lines = [
-                                {
-                                    'account_id': line.account_id,
-                                    'debit': line.debit,
-                                    'credit': line.credit,
-                                    'memo': line.memo or ''
-                                }
-                                for line in entry.lines
-                            ]
-                            st.session_state.je_entry_date = entry.entry_date
-                            st.session_state.je_entry_type = entry.entry_type
-                            st.session_state.je_source_reference = entry.source_reference or ''
-                            st.session_state.je_description = entry.description or ''
-                            st.rerun()
-
-                        if st.button("Delete", key=f"delete_entry_{entry.id}"):
-                            try:
-                                JournalEntry.delete(entry.id, client_id=client_id)
-                                st.success("Entry deleted!")
-                                st.rerun()
-                            except ValueError as e:
-                                st.error(str(e))
+                        render_entry_controls(entry, import_links.get(entry.id))
 
             elif entry.entry_type == 'Adjusting':
                 with st.expander(header, expanded=False):
@@ -438,31 +589,7 @@ with tab2:
                             st.text(f"  {line.account_number} - {line.account_name}: Dr {debit_str} Cr {credit_str}{memo_str}")
 
                     with col2:
-                        if st.button("Edit", key=f"edit_entry_{entry.id}"):
-                            # Load entry into form (including header fields)
-                            st.session_state.editing_entry_id = entry.id
-                            st.session_state.je_lines = [
-                                {
-                                    'account_id': line.account_id,
-                                    'debit': line.debit,
-                                    'credit': line.credit,
-                                    'memo': line.memo or ''
-                                }
-                                for line in entry.lines
-                            ]
-                            st.session_state.je_entry_date = entry.entry_date
-                            st.session_state.je_entry_type = entry.entry_type
-                            st.session_state.je_source_reference = entry.source_reference or ''
-                            st.session_state.je_description = entry.description or ''
-                            st.rerun()
-
-                        if st.button("Delete", key=f"delete_entry_{entry.id}"):
-                            try:
-                                JournalEntry.delete(entry.id, client_id=client_id)
-                                st.success("Entry deleted!")
-                                st.rerun()
-                            except ValueError as e:
-                                st.error(str(e))
+                        render_entry_controls(entry, import_links.get(entry.id))
 
             else:
                 with st.expander(header):
@@ -482,31 +609,7 @@ with tab2:
                             st.text(f"  {line.account_number} - {line.account_name}: Dr {debit_str} Cr {credit_str}{memo_str}")
 
                     with col2:
-                        if st.button("Edit", key=f"edit_entry_{entry.id}"):
-                            # Load entry into form (including header fields)
-                            st.session_state.editing_entry_id = entry.id
-                            st.session_state.je_lines = [
-                                {
-                                    'account_id': line.account_id,
-                                    'debit': line.debit,
-                                    'credit': line.credit,
-                                    'memo': line.memo or ''
-                                }
-                                for line in entry.lines
-                            ]
-                            st.session_state.je_entry_date = entry.entry_date
-                            st.session_state.je_entry_type = entry.entry_type
-                            st.session_state.je_source_reference = entry.source_reference or ''
-                            st.session_state.je_description = entry.description or ''
-                            st.rerun()
-
-                        if st.button("Delete", key=f"delete_entry_{entry.id}"):
-                            try:
-                                JournalEntry.delete(entry.id, client_id=client_id)
-                                st.success("Entry deleted!")
-                                st.rerun()
-                            except ValueError as e:
-                                st.error(str(e))
+                        render_entry_controls(entry, import_links.get(entry.id))
 
 with tab3:
     st.subheader("Reverse a Journal Entry")
