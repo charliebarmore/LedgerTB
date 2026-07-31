@@ -1,9 +1,10 @@
-"""One-workbook close package: everything a reviewer needs to tie out a period.
+"""Close package: everything a reviewer needs to tie out a finished period.
 
-Sheets: Summary, Trial Balance (the full worksheet columns), Transactions
-(every journal line in the period), Adjusting Entries, and Receipts &
-Disbursements per cash account. Built for the end of a close — the export
-that hands the finished period to a tax file, a reviewer, or another system.
+Two formats from the same underlying data — an Excel workbook for further
+work, and a single multi-section PDF for the permanent file: Summary, final
+Trial Balance (with the worksheet columns), Transactions (every journal line
+in the period), Adjusting Entries, and Receipts & Disbursements per cash
+account.
 """
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -12,6 +13,18 @@ from typing import List
 
 import openpyxl
 from openpyxl.styles import Font
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import landscape, letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import (
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 from database.connection import get_cursor
 from models.reports import TrialBalanceWorksheetRow
@@ -259,3 +272,189 @@ def build_close_package(
     wb.save(output)
     output.seek(0)
     return output
+
+
+# --------------------------------------------------------------------- PDF
+
+_PDF_BODY = ParagraphStyle("body", fontName="Helvetica", fontSize=8, leading=10)
+_PDF_H1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=16, leading=20,
+                         spaceAfter=6)
+_PDF_H2 = ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=12, leading=15,
+                         spaceBefore=6, spaceAfter=8)
+_PDF_META = ParagraphStyle("meta", fontName="Helvetica", fontSize=10, leading=14,
+                           textColor=colors.HexColor("#444444"))
+
+
+def _money(value: float) -> str:
+    return f"{value:,.2f}" if value else ""
+
+
+def _wrap(text: str) -> Paragraph:
+    return Paragraph((text or "").replace("&", "&amp;").replace("<", "&lt;"), _PDF_BODY)
+
+
+def _pdf_table(headers, data_rows, col_widths, money_from: int,
+               totals_row=None) -> Table:
+    """A report table: bold repeating header, right-aligned money columns."""
+    rows = [headers] + data_rows
+    if totals_row is not None:
+        rows.append(totals_row)
+    table = Table(rows, colWidths=col_widths, repeatRows=1, hAlign="LEFT")
+    style = [
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.75, colors.black),
+        ("ALIGN", (money_from, 0), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [colors.white, colors.HexColor("#F4F4F0")]),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+    if totals_row is not None:
+        style += [
+            ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+            ("LINEABOVE", (0, -1), (-1, -1), 0.75, colors.black),
+        ]
+    table.setStyle(TableStyle(style))
+    return table
+
+
+def build_close_package_pdf(
+    client_id: int,
+    client_name: str,
+    period_start: date,
+    period_end: date,
+    tb_rows: List[TrialBalanceWorksheetRow],
+) -> BytesIO:
+    """One presentable PDF: Summary, TB, Transactions, AJEs, R&D."""
+    transactions = get_period_transactions(client_id, period_start, period_end)
+    ajes = [t for t in transactions if t["entry_type"] == "Adjusting"]
+    cash = get_cash_activity(client_id, period_start, period_end)
+    period_label = f"{period_start.strftime('%B %-d, %Y')} to {period_end.strftime('%B %-d, %Y')}"
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=landscape(letter),
+        leftMargin=0.5 * inch, rightMargin=0.5 * inch,
+        topMargin=0.6 * inch, bottomMargin=0.55 * inch,
+        title=f"Close Package — {client_name}", author="ProBooks",
+    )
+
+    def _footer(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7.5)
+        canvas.setFillColor(colors.HexColor("#666666"))
+        canvas.drawString(0.5 * inch, 0.3 * inch, f"{client_name} — {period_label}")
+        canvas.drawRightString(
+            doc.pagesize[0] - 0.5 * inch, 0.3 * inch, f"Page {canvas.getPageNumber()}"
+        )
+        canvas.restoreState()
+
+    total_dr = round(sum(r.adjusted_dr for r in tb_rows), 2)
+    total_cr = round(sum(r.adjusted_cr for r in tb_rows), 2)
+    balanced = abs(total_dr - total_cr) < 0.01
+
+    story = [
+        Paragraph(client_name, _PDF_H1),
+        Paragraph("Close Package", _PDF_META),
+        Paragraph(period_label, _PDF_META),
+        Paragraph(f"Generated {datetime.now().strftime('%B %-d, %Y at %-I:%M %p')}", _PDF_META),
+        Spacer(1, 18),
+        Paragraph("Summary", _PDF_H2),
+        _pdf_table(
+            ["", ""],
+            [
+                ["Final trial balance — total debits", _money(total_dr)],
+                ["Final trial balance — total credits", _money(total_cr)],
+                ["In balance", "Yes" if balanced else "OUT OF BALANCE"],
+                ["Journal lines in period", str(len(transactions))],
+                ["Adjusting entry lines", str(len(ajes))],
+            ],
+            [3.4 * inch, 1.6 * inch], money_from=1,
+        ),
+        Spacer(1, 14),
+        Paragraph("Cash Activity", _PDF_H2),
+        _pdf_table(
+            ["Acct #", "Cash Account", "Beginning", "Total Receipts",
+             "Total Disbursements", "Ending"],
+            [[r.account_number, _wrap(r.account_name), _money(r.beginning),
+              f"{r.receipts:,.2f}", f"{r.disbursements:,.2f}", _money(r.ending)]
+             for r in cash] or [["", "No cash accounts", "", "", "", ""]],
+            [0.6 * inch, 2.6 * inch, 1.1 * inch, 1.2 * inch, 1.5 * inch, 1.1 * inch],
+            money_from=2,
+            totals_row=(
+                ["", "TOTALS",
+                 _money(round(sum(r.beginning for r in cash), 2)),
+                 f"{sum(r.receipts for r in cash):,.2f}",
+                 f"{sum(r.disbursements for r in cash):,.2f}",
+                 _money(round(sum(r.ending for r in cash), 2))]
+                if cash else None
+            ),
+        ),
+        PageBreak(),
+    ]
+
+    # ---- Final Trial Balance
+    story.append(Paragraph("Final Trial Balance", _PDF_H2))
+    money_w = 0.72 * inch
+    story.append(_pdf_table(
+        ["Acct #", "Account Name", "Beg Dr", "Beg Cr", "Activity Dr",
+         "Activity Cr", "AJE Dr", "AJE Cr", "Final Dr", "Final Cr"],
+        [[r.account_number, _wrap(r.account_name),
+          _money(r.beginning_dr), _money(r.beginning_cr),
+          _money(r.period_debits), _money(r.period_credits),
+          _money(r.aje_debits), _money(r.aje_credits),
+          _money(r.adjusted_dr), _money(r.adjusted_cr)]
+         for r in tb_rows],
+        [0.6 * inch, 2.9 * inch] + [money_w] * 8, money_from=2,
+        totals_row=["", "TOTALS",
+                    _money(round(sum(r.beginning_dr for r in tb_rows), 2)),
+                    _money(round(sum(r.beginning_cr for r in tb_rows), 2)),
+                    _money(round(sum(r.period_debits for r in tb_rows), 2)),
+                    _money(round(sum(r.period_credits for r in tb_rows), 2)),
+                    _money(round(sum(r.aje_debits for r in tb_rows), 2)),
+                    _money(round(sum(r.aje_credits for r in tb_rows), 2)),
+                    _money(total_dr), _money(total_cr)],
+    ))
+    story.append(PageBreak())
+
+    # ---- Transactions
+    story.append(Paragraph("Transactions", _PDF_H2))
+    if transactions:
+        story.append(_pdf_table(
+            ["Date", "Entry #", "Type", "Description", "Acct #", "Account",
+             "Debit", "Credit", "Memo"],
+            [[t["entry_date"], str(t["entry_id"]), t["entry_type"],
+              _wrap(t["description"]), t["account_number"],
+              _wrap(t["account_name"]), _money(t["debit"]),
+              _money(t["credit"]), _wrap(t["memo"])]
+             for t in transactions],
+            [0.75 * inch, 0.55 * inch, 0.75 * inch, 2.5 * inch, 0.55 * inch,
+             1.9 * inch, 0.8 * inch, 0.8 * inch, 1.4 * inch], money_from=6,
+        ))
+    else:
+        story.append(Paragraph("No transactions in this period.", _PDF_BODY))
+    story.append(PageBreak())
+
+    # ---- Adjusting Entries
+    story.append(Paragraph("Adjusting Journal Entries", _PDF_H2))
+    if ajes:
+        story.append(_pdf_table(
+            ["Date", "Entry #", "AJE Ref", "Description", "Acct #", "Account",
+             "Debit", "Credit", "Memo"],
+            [[t["entry_date"], str(t["entry_id"]), t["source_reference"],
+              _wrap(t["description"]), t["account_number"],
+              _wrap(t["account_name"]), _money(t["debit"]),
+              _money(t["credit"]), _wrap(t["memo"])]
+             for t in ajes],
+            [0.75 * inch, 0.55 * inch, 0.75 * inch, 2.5 * inch, 0.55 * inch,
+             1.9 * inch, 0.8 * inch, 0.8 * inch, 1.4 * inch], money_from=6,
+        ))
+    else:
+        story.append(Paragraph("No adjusting entries in this period.", _PDF_BODY))
+
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    buffer.seek(0)
+    return buffer

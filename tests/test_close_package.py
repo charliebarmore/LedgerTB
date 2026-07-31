@@ -5,9 +5,12 @@ from io import BytesIO
 import openpyxl
 import pytest
 
+import fitz
+
 from models.reports import ReportGenerator
 from services.close_package import (
     build_close_package,
+    build_close_package_pdf,
     get_cash_activity,
     get_period_transactions,
 )
@@ -90,3 +93,23 @@ def test_workbook_sheets_and_tie_outs(booked_period, accounts):
     assert cells["Final trial balance — total debits"] == pytest.approx(
         sum(r.adjusted_dr for r in tb_rows)
     )
+
+
+def test_pdf_package_contains_every_section(booked_period, accounts):
+    client_id = booked_period
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+    pdf = build_close_package_pdf(client_id, "Test Co", *Q1, tb_rows)
+    raw = pdf.read()
+    assert raw.startswith(b"%PDF")
+
+    doc = fitz.open(stream=raw, filetype="pdf")
+    text = "\n".join(page.get_text() for page in doc)
+    for heading in ["Close Package", "Summary", "Cash Activity",
+                    "Final Trial Balance", "Transactions",
+                    "Adjusting Journal Entries"]:
+        assert heading in text, f"missing section {heading!r}"
+    # tie-outs appear in print: cash walk and the AJE reference
+    assert "AJE-1" in text
+    assert "690.00" in text          # ending cash
+    assert "TOTALS" in text
+    assert doc.page_count >= 4

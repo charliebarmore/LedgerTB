@@ -82,9 +82,10 @@ hiddenimports = st_hiddenimports + [
     "keyring", "keyring.backends.macOS",
     "fitz", "PIL", "Quartz", "objc",
     "sqlcipher3", "sqlcipher3.dbapi2",  # encrypted database driver (native ext)
-] + collect_submodules("openpyxl")  # bundle ALL openpyxl submodules (styles, utils,
-    # utils.dataframe, …). Pages are bundled as data files, so PyInstaller can't see
-    # which openpyxl submodules they import; collect them all to avoid ModuleNotFound.
+] + collect_submodules("openpyxl") + collect_submodules("reportlab")
+    # Bundle ALL openpyxl and reportlab submodules. Pages/services are bundled as
+    # data files, so PyInstaller can't see which submodules they import; collect
+    # them all to avoid ModuleNotFound (the openpyxl.utils.dataframe lesson).
 
 a = Analysis(
     ["run_probooks.py"],
