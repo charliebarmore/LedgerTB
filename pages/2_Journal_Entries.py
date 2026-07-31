@@ -354,9 +354,21 @@ with tab1:
     # Entry lines
     st.markdown("**Entry Lines**")
 
-    # Display running totals
-    total_debits = sum(line['debit'] for line in st.session_state.je_lines)
-    total_credits = sum(line['credit'] for line in st.session_state.je_lines)
+    # Display running totals. Read the widgets' committed session state, not
+    # je_lines: the widgets write into je_lines AFTER this block runs, so
+    # je_lines is one commit behind here and the totals would always trail the
+    # values visible in the boxes by one interaction.
+    def committed_amount(name: str, i: int, fallback: float) -> float:
+        return float(st.session_state.get(line_key(name, i), fallback))
+
+    total_debits = sum(
+        committed_amount("debit", i, line['debit'])
+        for i, line in enumerate(st.session_state.je_lines)
+    )
+    total_credits = sum(
+        committed_amount("credit", i, line['credit'])
+        for i, line in enumerate(st.session_state.je_lines)
+    )
     difference = total_debits - total_credits
 
     col1, col2, col3 = st.columns(3)

@@ -92,6 +92,31 @@ def test_journal_form_clears_keyed_line_widgets_after_save(
     assert journal.selectbox(key="je_hdr_type_g1").value == "Regular"
 
 
+def test_journal_totals_reflect_committed_values_immediately(
+    client_id, accounts, monkeypatch
+):
+    """The running totals must include a value on the very run it commits.
+
+    They were computed from je_lines, which the widgets update only later in
+    the script, so the totals trailed the visible boxes by one interaction —
+    a balanced entry kept showing "Not balanced" until the user did something
+    else. Regression for the committed-state read.
+    """
+    _select_client(monkeypatch, client_id)
+    journal = AppTest.from_file(
+        "pages/2_Journal_Entries.py", default_timeout=30
+    ).run()
+    assert not journal.exception
+
+    journal.number_input(key="debit_0_g0").set_value(67.35).run()
+    debit_metric = next(m for m in journal.metric if m.label == "Total Debits")
+    assert debit_metric.value == "$67.35"
+
+    journal.number_input(key="credit_1_g0").set_value(67.35).run()
+    diff_metric = next(m for m in journal.metric if m.label == "Difference")
+    assert diff_metric.value == "$0.00"
+
+
 def test_journal_delete_requires_confirmation(client_id, accounts, monkeypatch):
     _select_client(monkeypatch, client_id)
     entry = post_entry(
