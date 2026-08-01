@@ -108,9 +108,9 @@ st.divider()
 # ---------------------------------------------------- AI category consistency
 st.subheader("Category consistency review")
 if not book_review_service.is_available():
-    st.caption("AI reviews are off — add your Anthropic API key on the Data "
-               "Safety page, then restart ProBooks.")
-    st.page_link("pages/9_Data_Safety.py", label="Set up AI", icon=icons.SECURITY)
+    st.caption("AI reviews are off — add your Anthropic API key on the Firm "
+               "Settings page, then restart ProBooks.")
+    st.page_link("pages/12_Firm_Settings.py", label="Set up AI", icon=icons.FIRM)
 else:
     if st.button("Review categorizations", type="primary"):
         with st.spinner("Reading the period's transactions…"):

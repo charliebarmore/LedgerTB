@@ -105,42 +105,8 @@ if backups:
             st.error(f"Restore failed: {exc}")
 
 st.divider()
-st.subheader("AI categorization")
 st.caption(
-    "Powered by your own Anthropic API key, stored in the system credential "
-    "vault — never in a file. When suggestions run, transaction dates, "
-    "descriptions, amounts, and your account names/numbers are sent to "
-    "Anthropic's API. Suggestions only; nothing posts without review."
+    "AI categorization setup (your Anthropic API key) lives on the Firm "
+    "Settings page with the rest of the firm-level configuration."
 )
-
-from config import ANTHROPIC_API_KEY
-from utils.secure_store import delete_secret, get_secret, set_secret
-
-_saved_key = get_secret("anthropic_api_key")
-if ANTHROPIC_API_KEY:
-    st.success("AI categorization is enabled for this session.")
-elif _saved_key:
-    st.info("An API key is saved. Restart ProBooks to enable AI categorization.")
-else:
-    st.warning("Not configured — add an Anthropic API key below.")
-
-api_key_input = st.text_input(
-    "Anthropic API Key",
-    type="password",
-    placeholder="sk-ant-...",
-    help="Get your API key at https://console.anthropic.com/",
-    key="data_safety_api_key",
-)
-key_cols = st.columns([1, 1, 3])
-with key_cols[0]:
-    if st.button("Save key", type="primary", disabled=not api_key_input):
-        try:
-            set_secret("anthropic_api_key", api_key_input.strip())
-            st.success("Saved to the system credential vault. Restart ProBooks to enable.")
-        except Exception as exc:
-            st.error(f"Could not save the API key securely: {exc}")
-with key_cols[1]:
-    if _saved_key and st.button("Remove key"):
-        delete_secret("anthropic_api_key")
-        st.success("API key removed from the credential vault.")
-        st.rerun()
+st.page_link("pages/12_Firm_Settings.py", label="Firm Settings", icon=icons.FIRM)
