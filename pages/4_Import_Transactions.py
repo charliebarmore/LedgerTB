@@ -1333,6 +1333,83 @@ elif selected_tab == "Review & Categorize":
         all_accounts = Account.get_all(client_id, active_only=True)
         account_options = {a.id: a.display_name() for a in all_accounts}
 
+        # "Add new account" lives inside the dropdown itself: picking it opens
+        # an inline form under that row, and the created account is selected in
+        # place. -1 can never collide with a real account id.
+        ADD_NEW_ACCOUNT = -1
+        ADD_NEW_LABEL = "➕ Add new account…"
+        category_option_ids = list(account_options.keys()) + [ADD_NEW_ACCOUNT]
+
+        def category_label(account_id):
+            return ADD_NEW_LABEL if account_id == ADD_NEW_ACCOUNT else account_options[account_id]
+
+        # Per-target input keys: a shared key would let the browser re-impose a
+        # previous row's typed values when the form re-registers elsewhere.
+        def _fkey(name, target_key):
+            return f"newacct_{name}_{target_key}"
+
+        def _create_quick_account(target_key):
+            number = (st.session_state.get(_fkey("number", target_key)) or "").strip()
+            name = (st.session_state.get(_fkey("name", target_key)) or "").strip()
+            acct_type = st.session_state.get(_fkey("type", target_key)) or "Expense"
+            subtype = (st.session_state.get(_fkey("subtype", target_key)) or "").strip()
+            if not number or not name:
+                st.session_state.quick_add_account_error = "Account number and name are both required."
+                return
+            try:
+                account = Account(
+                    client_id=client_id,
+                    account_number=number,
+                    name=name,
+                    type=acct_type,
+                    subtype=subtype or None,
+                )
+                new_id = account.save()
+            except Exception as exc:
+                if "UNIQUE constraint" in str(exc):
+                    st.session_state.quick_add_account_error = (
+                        f"Account {number} already exists — pick it from the list instead."
+                    )
+                else:
+                    st.session_state.quick_add_account_error = str(exc)
+                return
+            # Callbacks run before widgets render, which is the one legal moment
+            # to overwrite the dropdown's keyed state with the new account.
+            st.session_state[target_key] = new_id
+            st.session_state.quick_add_account_msg = (
+                f"Added {number} · {name} to the chart of accounts."
+            )
+            st.session_state.pop("quick_add_account_error", None)
+
+        def _cancel_quick_add(target_key):
+            st.session_state[target_key] = None
+            st.session_state.pop("quick_add_account_error", None)
+
+        def render_quick_add_form(target_key):
+            with st.container(border=True):
+                st.markdown("**New account** — added to the chart of accounts and selected here.")
+                c1, c2, c3, c4 = st.columns([1, 2, 1, 1])
+                with c1:
+                    st.text_input("Number", key=_fkey("number", target_key), placeholder="6100")
+                with c2:
+                    st.text_input("Name", key=_fkey("name", target_key), placeholder="Office Supplies")
+                with c3:
+                    st.selectbox("Type", options=['Expense', 'Revenue', 'Asset', 'Liability', 'Equity'],
+                                 key=_fkey("type", target_key),
+                                 help="Most transaction categories are Expense or Revenue")
+                with c4:
+                    st.text_input("Subtype (optional)", key=_fkey("subtype", target_key))
+                if st.session_state.get("quick_add_account_error"):
+                    st.error(st.session_state.pop("quick_add_account_error"))
+                b1, b2, _ = st.columns([1, 1, 4])
+                with b1:
+                    st.button("Create account", type="primary",
+                              key=f"newacct_save_{target_key}",
+                              on_click=_create_quick_account, args=(target_key,))
+                with b2:
+                    st.button("Cancel", key=f"newacct_cancel_{target_key}",
+                              on_click=_cancel_quick_add, args=(target_key,))
+
         # Ensure a stable per-transaction id (used to key all per-row widgets so
         # their state follows the transaction across re-sorts) and include flags.
         ensure_row_ids(transactions)
@@ -1515,15 +1592,15 @@ elif selected_tab == "Review & Categorize":
         with col1:
             bulk_account = st.selectbox(
                 "Account to apply",
-                options=list(account_options.keys()),
-                format_func=lambda x: account_options[x],
+                options=category_option_ids,
+                format_func=category_label,
                 key="bulk_account_select",
                 index=None,
                 placeholder="Type an account number or name",
             )
         with col2:
             if st.button("Apply to Selected", type="primary"):
-                if not bulk_account:
+                if not bulk_account or bulk_account == ADD_NEW_ACCOUNT:
                     st.warning("Please select an account first")
                 else:
                     applied_count = 0
@@ -1549,7 +1626,7 @@ elif selected_tab == "Review & Categorize":
                     st.rerun()
         with col3:
             if st.button("Apply to Uncategorized"):
-                if not bulk_account:
+                if not bulk_account or bulk_account == ADD_NEW_ACCOUNT:
                     st.warning("Please select an account first")
                 else:
                     applied_count = 0
@@ -1572,53 +1649,22 @@ elif selected_tab == "Review & Categorize":
                     st.session_state.bulk_result = f"Applied to {applied_count} uncategorized transactions"
                     st.rerun()
 
+        # The bulk dropdown can create an account too.
+        if st.session_state.get("bulk_account_select") == ADD_NEW_ACCOUNT:
+            render_quick_add_form("bulk_account_select")
+
         # Show bulk result message if any
         if st.session_state.get('bulk_result'):
             st.info(st.session_state.bulk_result)
             st.session_state.bulk_result = None
 
-        # Quick add new account for categorization
-        with st.expander("+ Add New Category Account"):
-            with st.form("quick_add_category_account", clear_on_submit=True):
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    cat_acct_number = st.text_input("Account Number", placeholder="e.g., 6100")
-                    cat_acct_name = st.text_input("Account Name", placeholder="e.g., Office Supplies")
-                with col_b:
-                    cat_acct_type = st.selectbox(
-                        "Type",
-                        options=['Expense', 'Revenue', 'Asset', 'Liability', 'Equity'],
-                        help="Most transaction categories are Expense or Revenue"
-                    )
-                    cat_acct_subtype = st.text_input("Subtype (optional)", placeholder="e.g., Operating")
-                cat_acct_desc = st.text_input("Description (optional)", placeholder="Notes to identify this account")
-
-                if st.form_submit_button("Add Account", type="primary"):
-                    if cat_acct_number and cat_acct_name:
-                        try:
-                            new_cat_account = Account(
-                                client_id=client_id,
-                                account_number=cat_acct_number,
-                                name=cat_acct_name,
-                                type=cat_acct_type,
-                                subtype=cat_acct_subtype if cat_acct_subtype else None,
-                                description=cat_acct_desc if cat_acct_desc else None
-                            )
-                            new_cat_account.save()
-                            st.success(f"Added: {cat_acct_number} - {cat_acct_name}")
-                            st.rerun()
-                        except Exception as e:
-                            if "UNIQUE constraint" in str(e):
-                                st.error("Account number already exists.")
-                            else:
-                                st.error(f"Error: {e}")
-                    else:
-                        st.error("Account number and name required.")
+        if st.session_state.get('quick_add_account_msg'):
+            st.success(st.session_state.pop('quick_add_account_msg'))
 
         # Review each transaction - header row
         st.divider()
 
-        header_cols = st.columns([0.5, 0.9, 2.2, 1, 0.6, 1.5, 0.5])
+        header_cols = st.columns([0.5, 0.9, 2.2, 1, 0.6, 2])
         with header_cols[0]:
             st.markdown("**Select**")
         with header_cols[1]:
@@ -1631,53 +1677,6 @@ elif selected_tab == "Review & Categorize":
             st.markdown("**Xfer**")
         with header_cols[5]:
             st.markdown("**Category/Transfer Account**")
-        with header_cols[6]:
-            if st.button("+ New", key="add_acct_btn", help="Add a new account"):
-                st.session_state.show_add_account_form = True
-
-        # Inline add account form (shown when button clicked)
-        if st.session_state.get('show_add_account_form'):
-            st.markdown("---")
-            st.markdown("**Quick Add Account**")
-            with st.form("inline_add_account", clear_on_submit=True):
-                col_a, col_b, col_c, col_d = st.columns([1, 2, 1, 1])
-                with col_a:
-                    inline_acct_number = st.text_input("Number", placeholder="6100")
-                with col_b:
-                    inline_acct_name = st.text_input("Name", placeholder="Office Supplies")
-                with col_c:
-                    inline_acct_type = st.selectbox("Type", options=['Expense', 'Revenue', 'Asset', 'Liability', 'Equity'])
-                with col_d:
-                    inline_acct_subtype = st.text_input("Subtype", placeholder="Optional")
-
-                col_submit, col_cancel, col_spacer = st.columns([1, 1, 3])
-                with col_submit:
-                    if st.form_submit_button("Add", type="primary"):
-                        if inline_acct_number and inline_acct_name:
-                            try:
-                                new_inline_account = Account(
-                                    client_id=client_id,
-                                    account_number=inline_acct_number,
-                                    name=inline_acct_name,
-                                    type=inline_acct_type,
-                                    subtype=inline_acct_subtype if inline_acct_subtype else None
-                                )
-                                new_inline_account.save()
-                                st.session_state.show_add_account_form = False
-                                st.success(f"Added: {inline_acct_number} - {inline_acct_name}")
-                                st.rerun()
-                            except Exception as e:
-                                if "UNIQUE constraint" in str(e):
-                                    st.error("Account number already exists.")
-                                else:
-                                    st.error(f"Error: {e}")
-                        else:
-                            st.error("Number and name required.")
-                with col_cancel:
-                    if st.form_submit_button("Cancel"):
-                        st.session_state.show_add_account_form = False
-                        st.rerun()
-            st.markdown("---")
 
         st.divider()
 
@@ -1824,19 +1823,28 @@ elif selected_tab == "Review & Categorize":
                 else:
                     # For regular transactions, show all accounts
                     # Ensure the current value is valid for account options
-                    if st.session_state[cat_key] not in account_options:
+                    if (st.session_state[cat_key] not in account_options
+                            and st.session_state[cat_key] != ADD_NEW_ACCOUNT):
                         st.session_state[cat_key] = None
                     selected = st.selectbox(
                         "Account",
-                        options=list(account_options.keys()),
-                        format_func=lambda x: account_options[x],
+                        options=category_option_ids,
+                        format_func=category_label,
                         key=cat_key,
                         index=None,
                         placeholder="Type an account number or name",
                         label_visibility="collapsed"
                     )
-                # Row dicts keep 0 for "unset" so posting validation is unchanged.
-                transactions[i]['selected_account_id'] = selected or 0
+                # Row dicts keep 0 for "unset" so posting validation is
+                # unchanged; the add-new sentinel must never leak into a post.
+                transactions[i]['selected_account_id'] = (
+                    selected if selected and selected != ADD_NEW_ACCOUNT else 0
+                )
+
+            # Picking "Add new account…" opens the form right under this row;
+            # creating selects the account here and in the chart of accounts.
+            if selected == ADD_NEW_ACCOUNT and not is_transfer:
+                render_quick_add_form(cat_key)
 
         st.divider()
 
