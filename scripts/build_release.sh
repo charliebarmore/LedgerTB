@@ -21,13 +21,25 @@ python -m compileall -q app.py pages models services database utils \
   config.py constants.py money.py version.py desktop.py run_probooks.py
 
 echo "==> Building standalone app"
-pyinstaller ProBooks.spec --noconfirm
+# The bundle is built ad-hoc and re-signed once below. Passing the identity
+# into PyInstaller signs every collected binary individually — hundreds of
+# codesign+timestamp calls — which failed intermittently (errSecInternalComponent).
+PROBOOKS_CODESIGN_ID= pyinstaller ProBooks.spec --noconfirm
 
 APP="dist/ProBooks.app"
 BIN="$APP/Contents/MacOS/ProBooks"
 
 echo "==> Running frozen runtime self-check"
 PROBOOKS_MODE=selfcheck "$BIN"
+
+if [ -n "${PROBOOKS_CODESIGN_ID:-}" ]; then
+  echo "==> Signing bundle with Developer ID"
+  # No --timestamp for local builds: it needs one Apple round-trip per nested
+  # binary and only matters for notarization (notarize.sh re-signs with it).
+  codesign --force --deep --options runtime \
+    --entitlements scripts/entitlements.plist \
+    -s "$PROBOOKS_CODESIGN_ID" "$APP"
+fi
 
 echo "==> Verifying bundle signature"
 codesign --verify --deep --strict "$APP"
