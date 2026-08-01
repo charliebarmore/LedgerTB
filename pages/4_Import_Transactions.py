@@ -361,6 +361,7 @@ if selected_tab == "Upload CSV":
                 st.session_state.csv_filename = None
                 st.session_state.csv_source_id = None
                 st.session_state.pop('csv_editor_widget', None)
+                st.session_state.pop('csv_coa_override', None)
                 # Rotate the uploader key so the old file can't re-import itself.
                 st.session_state.csv_uploader_nonce = st.session_state.get('csv_uploader_nonce', 0) + 1
 
@@ -384,6 +385,24 @@ if selected_tab == "Upload CSV":
                 st.error(f"Could not read this CSV: {parse_error}")
                 st.info("Fix the rows in **Edit the raw CSV** above, or clear the file and upload a different one.")
                 st.stop()
+
+            # A chart-of-accounts export parses cleanly here, so without this
+            # check it reads as "transactions" with the account number guessed
+            # as the date column. Catch the shape and point at the right page.
+            _headers = {str(c).strip().lower() for c in columns}
+            if {"number", "name", "type"} <= _headers:
+                st.warning(
+                    f"**{st.session_state.get('csv_filename') or 'This file'}** looks like a "
+                    "chart of accounts export (number / name / type columns), not bank or "
+                    "credit card activity. This page imports transactions — accounts are "
+                    "imported on the Chart of Accounts page."
+                )
+                st.page_link("pages/3_Chart_of_Accounts.py",
+                             label="Go to Chart of Accounts → Import CSV",
+                             icon=icons.CHART_OF_ACCOUNTS)
+                if not st.checkbox("These rows really are transactions — continue anyway",
+                                   key="csv_coa_override"):
+                    st.stop()
 
             # The one place the file is shown: every row, scrollable.
             st.subheader(f"{len(parsed_df):,} transactions in {st.session_state.get('csv_filename') or 'this file'}")

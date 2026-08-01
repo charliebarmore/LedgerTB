@@ -135,3 +135,23 @@ def test_multiple_formats_auto_match_their_complete_headers(
         "Automatically matched saved format" in caption.value
         for caption in page.caption
     )
+
+
+def test_chart_of_accounts_csv_is_intercepted(client_id, accounts, monkeypatch):
+    """A COA export must not be mappable as transactions without an explicit override."""
+    coa_csv = (
+        "number,name,type,subtype\n"
+        "5010,Income - AI Advisory & Consulting,Revenue,\n"
+        "5020,Income - Tax Preparation,Revenue,\n"
+    )
+    page = _page(monkeypatch, client_id, accounts["cash"], content=coa_csv)
+
+    assert not page.exception
+    assert any("chart of accounts export" in w.value for w in page.warning)
+    # The whole mapping flow stops before rendering.
+    assert not any(sb.key == "csv_date_column" for sb in page.selectbox)
+
+    # The override lets a genuine edge case proceed.
+    page.checkbox(key="csv_coa_override").check().run()
+    assert not page.exception
+    assert any(sb.key == "csv_date_column" for sb in page.selectbox)
