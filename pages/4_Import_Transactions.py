@@ -1557,12 +1557,12 @@ elif selected_tab == "Review & Categorize":
             else:
                 st.success("All transactions have been categorized!")
         else:
-            # Configuration lives on Data Safety with the rest of the app-level
-            # setup; this workflow page only points there.
+            # Configuration lives on Firm Settings with the rest of the
+            # firm-level setup; this workflow page only points there.
             st.caption("AI categorization is off — add your Anthropic API key "
-                       "on the Data Safety page to enable suggestions here.")
-            st.page_link("pages/9_Data_Safety.py",
-                         label="Set up AI categorization", icon=icons.SECURITY)
+                       "on the Firm Settings page to enable suggestions here.")
+            st.page_link("pages/12_Firm_Settings.py",
+                         label="Set up AI categorization", icon=icons.FIRM)
 
         # Bulk categorization section
         st.divider()
