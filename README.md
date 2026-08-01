@@ -25,7 +25,9 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Database encryption uses SQLCipher, which needs the system library (on macOS: install it with Homebrew before the pip step). If the `sqlcipher3` install fails, remove that line from `requirements.txt` and run anyway: the app falls back to an unencrypted database and shows a warning banner. Fine for evaluating with sample data; add SQLCipher back before keeping real books.
+Verified on a clean macOS install (Python 3.12.7, fresh venv, nothing preinstalled): `pip install -r requirements.txt` pulls a prebuilt `sqlcipher3` wheel and needs no Homebrew step.
+
+If your platform has no wheel and the `sqlcipher3` build fails, you need the SQLCipher system library (macOS: `brew install sqlcipher`, Debian/Ubuntu: `libsqlcipher-dev`) — or drop that line from `requirements.txt` and run anyway. The app falls back to an unencrypted database and says so on every page. Fine for evaluating with sample data; put SQLCipher back before keeping real books.
 
 The app runs fully without any API key. To turn on AI categorization, either set `ANTHROPIC_API_KEY` in a `.env` file or paste a key on the Import page (stored in your system keychain, not in a file).
 
@@ -41,7 +43,7 @@ This tool follows the same rule we teach in the Lab: AI drafts, the professional
 python -m pytest
 ```
 
-234 tests cover the ledger math, posting rules, imports, and reports.
+283 tests cover the ledger math, posting rules, imports, reports, and export hardening. They pass on both pandas 2.2 and pandas 3.0.
 
 ## License
 
