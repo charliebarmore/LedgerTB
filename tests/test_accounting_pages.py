@@ -80,6 +80,39 @@ def test_report_statements_render_with_balance_checks(client_id, accounts, monke
         assert any("gl_pick" in (box.key or "") for box in page.selectbox), view
 
 
+def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatch):
+    """The GL is the whole book by default; the picker only narrows it."""
+    _select_client(monkeypatch, client_id)
+    post_entry(
+        client_id, date(2026, 1, 15),
+        [(accounts["cash"], 500, 0), (accounts["revenue"], 0, 500)],
+    )
+    post_entry(
+        client_id, date(2026, 2, 3),
+        [(accounts["expense"], 120, 0), (accounts["cash"], 0, 120)],
+    )
+
+    page = AppTest.from_file("pages/5_Reports.py", default_timeout=30)
+    page.session_state["active_report"] = "General Ledger"
+    page.run()
+    assert not page.exception
+    filter_box = next(b for b in page.selectbox if b.label == "Account filter")
+    assert filter_box.value is None  # nothing selected = all accounts
+    body = " ".join(str(m.value) for m in page.markdown)
+    for name in ("Cash", "Revenue", "Expense"):
+        assert name in body, f"{name} section missing from the all-accounts GL"
+    assert any(c.value.startswith("3 accounts") for c in page.caption)
+
+    # Drill-down state still narrows to one account.
+    drilled = AppTest.from_file("pages/5_Reports.py", default_timeout=30)
+    drilled.session_state["active_report"] = "General Ledger"
+    drilled.session_state["gl_account_id"] = accounts["cash"]
+    drilled.run()
+    assert not drilled.exception
+    filter_box = next(b for b in drilled.selectbox if b.label == "Account filter")
+    assert filter_box.value == accounts["cash"]
+
+
 def test_year_close_checklist_page_renders(client_id, accounts, monkeypatch):
     _select_client(monkeypatch, client_id)
     worksheet = AppTest.from_file(

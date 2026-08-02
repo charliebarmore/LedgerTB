@@ -4,6 +4,8 @@ from pathlib import Path
 from datetime import date, timedelta
 from io import BytesIO
 
+import pandas as pd
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -319,16 +321,17 @@ elif selected_report == "General Ledger":
 
     with col1:
         if account_options:
-            # Find default index
-            default_idx = 0
-            if default_account and default_account in account_options:
-                default_idx = list(account_options.keys()).index(default_account)
-
+            # The full book is the default; the picker narrows to one account
+            # (and drill-downs from other reports land on theirs).
+            option_ids = list(account_options.keys())
+            default_idx = (option_ids.index(default_account)
+                           if default_account in account_options else None)
             selected_account = st.selectbox(
-                "Select Account",
-                options=list(account_options.keys()),
+                "Account filter",
+                options=option_ids,
                 format_func=lambda x: account_options[x],
-                index=default_idx
+                index=default_idx,
+                placeholder="All accounts",
             )
         else:
             st.warning("No accounts available")
@@ -345,23 +348,39 @@ elif selected_report == "General Ledger":
         st.stop()
 
     if selected_account:
-        entries = ReportGenerator.general_ledger(selected_account, gl_start, gl_end, client_id=client_id)
+        accounts_to_show = [a for a in accounts if a.id == selected_account]
+    else:
+        accounts_to_show = sorted(accounts, key=lambda a: a.account_number)
 
-        if not entries:
-            st.info("No transactions for this account in the selected period.")
-        else:
-            # Calculate period totals (excluding beginning balance)
+    # Every account with period activity or a carried balance gets a section,
+    # so the full view ties to the trial balance. Silent zero accounts don't.
+    shown = []
+    for account in accounts_to_show:
+        entries = ReportGenerator.general_ledger(
+            account.id, gl_start, gl_end, client_id=client_id
+        )
+        has_activity = any(e.entry_id for e in entries)
+        carries_balance = bool(entries) and entries[-1].balance != 0
+        if has_activity or carries_balance:
+            shown.append((account, entries))
+
+    if not shown:
+        st.info("No transactions for this account in the selected period."
+                if selected_account else
+                "No activity or balances in the selected period.")
+    else:
+        if not selected_account:
+            st.caption(f"{len(shown)} accounts with activity or balances · "
+                       f"{gl_start} – {gl_end}")
+
+        open_options = {}
+        for account, entries in shown:
             period_debits = sum(e.debit for e in entries if e.entry_id != 0)
             period_credits = sum(e.credit for e in entries if e.entry_id != 0)
-
-            # Check for beginning balance
-            beginning_balance = 0
-            if entries and entries[0].entry_id == 0:
-                beginning_balance = entries[0].balance
-
-            account = Account.get_by_id(selected_account, client_id=client_id)
             final_balance = entries[-1].balance if entries else 0
 
+            if not selected_account:
+                st.markdown(f"**{account.display_name()}**")
             ledger_table(
                 headers=["Date", "Entry #", "Description", "Reference",
                          "Debit", "Credit", "Balance"],
@@ -380,42 +399,52 @@ elif selected_report == "General Ledger":
                            f"${period_debits:,.2f}", f"${period_credits:,.2f}",
                            f"${final_balance:,.2f}"],
             )
+            open_options.update({
+                e.entry_id: (f"#{e.entry_id} · {e.entry_date} · "
+                             f"{(e.description or '')[:34]}")
+                for e in entries if e.entry_id
+            })
 
-            # One control instead of a button per row.
-            open_options = {e.entry_id: (f"#{e.entry_id} · {e.entry_date} · "
-                                         f"{(e.description or '')[:34]}")
-                            for e in entries if e.entry_id}
-            if open_options:
-                oc1, oc2 = st.columns([3, 1])
-                with oc1:
-                    picked_entry = st.selectbox(
-                        "Open journal entry",
-                        options=list(open_options.keys()),
-                        format_func=lambda entry_id: open_options[entry_id],
-                        key="gl_open_entry_pick",
-                    )
-                with oc2:
-                    st.write("")
-                    if st.button("Open entry →", width="stretch", key="gl_open_entry"):
-                        st.session_state.edit_entry_id = picked_entry
-                        st.switch_page("pages/2_Journal_Entries.py")
+        # One control instead of a button per row.
+        if open_options:
+            oc1, oc2 = st.columns([3, 1])
+            with oc1:
+                picked_entry = st.selectbox(
+                    "Open journal entry",
+                    options=list(open_options.keys()),
+                    format_func=lambda entry_id: open_options[entry_id],
+                    key="gl_open_entry_pick",
+                )
+            with oc2:
+                st.write("")
+                if st.button("Open entry →", width="stretch", key="gl_open_entry"):
+                    st.session_state.edit_entry_id = picked_entry
+                    st.switch_page("pages/2_Journal_Entries.py")
 
-            # Export
-            st.divider()
-            df = ReportGenerator.general_ledger_to_dataframe(entries)
+        # Export
+        st.divider()
+        frames = []
+        for account, entries in shown:
+            frame = ReportGenerator.general_ledger_to_dataframe(entries)
+            frame.insert(0, "Account", account.display_name())
+            frames.append(frame)
+        df = pd.concat(frames, ignore_index=True)
+        row_count = sum(len(entries) for _, entries in shown)
+        export_scope = (shown[0][0].account_number if selected_account
+                        else "all-accounts")
 
-            buffer = BytesIO()
-            sanitize_df(df).to_excel(buffer, index=False, sheet_name="General Ledger")
-            buffer.seek(0)
+        buffer = BytesIO()
+        sanitize_df(df).to_excel(buffer, index=False, sheet_name="General Ledger")
+        buffer.seek(0)
 
-            st.download_button(
-                label="Download Excel",
-                data=buffer,
-                file_name=f"general_ledger_{client.name}_{account.account_number}_{gl_start}_to_{gl_end}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                on_click=AuditLog.log_event,
-                args=(client_id, "EXPORT", "general_ledger_export", {
-                    "format": "xlsx", "account_id": selected_account,
-                    "start_date": gl_start, "end_date": gl_end, "row_count": len(entries),
-                }),
-            )
+        st.download_button(
+            label="Download Excel",
+            data=buffer,
+            file_name=f"general_ledger_{client.name}_{export_scope}_{gl_start}_to_{gl_end}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            on_click=AuditLog.log_event,
+            args=(client_id, "EXPORT", "general_ledger_export", {
+                "format": "xlsx", "account_id": selected_account or "all",
+                "start_date": gl_start, "end_date": gl_end, "row_count": row_count,
+            }),
+        )
