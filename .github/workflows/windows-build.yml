@@ -1,0 +1,82 @@
+name: Windows build spike
+
+# Answers three questions about a Windows port, in one run:
+#   1. Does sqlcipher3 have a usable win_amd64 wheel (encrypted-at-rest)?
+#   2. Does the test suite pass on Windows?
+#   3. Does PyInstaller produce a runnable ProBooks.exe (frozen selfcheck)?
+# Steps continue on error so a single failure still yields the other signals.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies (except sqlcipher3)
+        shell: pwsh
+        run: |
+          python -c "lines = [l for l in open('requirements.txt') if not l.startswith('sqlcipher3')]; open('req-win.txt','w').writelines(lines)"
+          python -m pip install --upgrade pip
+          pip install -r req-win.txt -r requirements-desktop.txt
+
+      - name: "Signal 1: sqlcipher3 wheel availability"
+        id: sqlcipher
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          pip install --only-binary :all: "sqlcipher3>=0.6.2"
+          python -c "from database import connection; assert connection.ENCRYPTION_AVAILABLE, 'driver imported but encryption unavailable'; print('SQLCIPHER OK - encrypted at rest works on Windows')"
+
+      - name: "Signal 1b: fallback probe (only if wheel missing)"
+        if: steps.sqlcipher.outcome == 'failure'
+        shell: pwsh
+        run: |
+          python -c "from database import connection; print('FALLBACK MODE - ENCRYPTION_AVAILABLE:', connection.ENCRYPTION_AVAILABLE)"
+
+      - name: "Signal 2: test suite"
+        id: tests
+        continue-on-error: true
+        shell: pwsh
+        run: python -m pytest -q -m "not performance"
+
+      - name: "Signal 3: PyInstaller build"
+        id: build
+        continue-on-error: true
+        shell: pwsh
+        run: pyinstaller ProBooks.spec --noconfirm
+
+      - name: "Signal 3b: frozen selfcheck"
+        id: selfcheck
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:PROBOOKS_MODE = "selfcheck"
+          & dist/ProBooks/ProBooks.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows bundle
+        if: steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProBooks-windows
+          path: dist/ProBooks/
+          retention-days: 7
+
+      - name: Scorecard
+        shell: pwsh
+        run: |
+          Write-Host "sqlcipher wheel: ${{ steps.sqlcipher.outcome }}"
+          Write-Host "test suite:      ${{ steps.tests.outcome }}"
+          Write-Host "pyinstaller:     ${{ steps.build.outcome }}"
+          Write-Host "selfcheck:       ${{ steps.selfcheck.outcome }}"
+          if ("${{ steps.build.outcome }}" -ne "success") { exit 1 }
