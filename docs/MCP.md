@@ -11,9 +11,15 @@ journal-entry search and detail, and the deterministic integrity sweep.
   Safety page while unlocked. That stores the *derived database key* —
   never your passphrase — in the operating system's credential vault
   (macOS Keychain / Windows Credential Manager). **Disable** deletes it.
-- **Read-only by construction.** Every database connection the server
-  opens is pinned with `PRAGMA query_only = ON`. A write attempt fails at
-  the database, regardless of what any tool or prompt tries.
+- **The ledger is unreachable by construction.** Every database
+  connection the server opens carries a SQLite authorizer that permits
+  reads everywhere and writes to exactly one table: the draft inbox. A
+  ledger write fails at the engine, regardless of what any tool or
+  prompt tries.
+- **Drafts, not entries.** The assistant may *propose* a journal entry
+  (`propose_entry`). It lands in **Journal Entries → Drafts** for review;
+  approving posts a real, audited entry under the approver's name, and
+  rejecting discards it. The sidebar badges pending drafts.
 - **Local only.** The server speaks over stdio to the assistant that
   launched it. Nothing listens on a network port.
 - Enabling and disabling are recorded in the audit trail.
@@ -47,6 +53,7 @@ journal-entry search and detail, and the deterministic integrity sweep.
 ## What to expect
 
 Amounts are US dollars. Start with `list_clients` to get the
-`client_id`. The assistant can read and reason about the books; it
-cannot post, edit, or delete anything — if you want it to draft a
-journal entry, it can only describe one for you to enter yourself.
+`client_id`. The assistant can read and reason about the books, and can file draft
+entries for your review — but it cannot post, edit, or delete anything
+itself. Try: *"Propose the accrual for the July retainer and explain
+your accounts."* Then approve or reject it in Journal Entries → Drafts.

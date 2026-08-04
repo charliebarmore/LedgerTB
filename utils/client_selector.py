@@ -178,7 +178,15 @@ def render_client_selector() -> Optional[int]:
         # Primary navigation - Dashboard first (client landing), then CPA workflow
         st.sidebar.page_link("pages/7_Dashboard.py", label="Dashboard", icon=icons.DASHBOARD)
         st.sidebar.page_link("pages/1_Trial_Balance_Worksheet.py", label="Trial Balance Worksheet", icon=icons.TRIAL_BALANCE)
-        st.sidebar.page_link("pages/2_Journal_Entries.py", label="Journal Entries", icon=icons.JOURNAL_ENTRIES)
+        je_label = "Journal Entries"
+        try:
+            from models.draft_entry import DraftEntry as _DraftEntry
+            _drafts = _DraftEntry.pending_count(selected_id)
+            if _drafts:
+                je_label = f"Journal Entries ({_drafts} draft{'s' if _drafts != 1 else ''})"
+        except Exception:
+            pass  # pre-migration database: no drafts table yet
+        st.sidebar.page_link("pages/2_Journal_Entries.py", label=je_label, icon=icons.JOURNAL_ENTRIES)
         st.sidebar.page_link("pages/3_Chart_of_Accounts.py", label="Chart of Accounts", icon=icons.CHART_OF_ACCOUNTS)
 
         # Import with pending badge

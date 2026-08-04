@@ -235,3 +235,72 @@ def integrity_sweep(client_id: int, start: str, end: str) -> list:
         }
         for f in findings
     ]
+
+
+def propose_entry(client_id: int, entry_date: str, description: str,
+                  lines: list, rationale: str = "",
+                  entry_type: str = "Regular") -> dict:
+    """File a DRAFT journal entry for human review. Never touches the ledger:
+    a person approves or rejects it in ProBooks. lines: dicts with
+    account_number and debit or credit in dollars (optional memo)."""
+    from models.draft_entry import DraftEntry, DraftLine
+    from money import to_cents
+
+    _require_client(client_id)
+    _parse_date(entry_date, "entry_date")
+    draft = DraftEntry(
+        client_id=client_id,
+        proposed_by="Assistant (MCP)",
+        entry_date=entry_date,
+        entry_type=entry_type,
+        description=description,
+        rationale=rationale,
+        lines=[DraftLine(
+            account_number=str(l.get("account_number", "")),
+            debit_cents=to_cents(float(l.get("debit", 0) or 0)),
+            credit_cents=to_cents(float(l.get("credit", 0) or 0)),
+            memo=str(l.get("memo", "") or ""),
+        ) for l in lines],
+    )
+    draft_id = draft.save()
+    return {
+        "draft_id": draft_id,
+        "status": "pending",
+        "note": ("Filed for human review — it posts only if approved in "
+                 "ProBooks (Journal Entries → Drafts)."),
+    }
+
+
+def list_drafts(client_id: int, status: str = "pending") -> list:
+    """Draft entries and their review status ('pending', or any status via
+    'all')."""
+    from database.connection import get_cursor
+
+    _require_client(client_id)
+    query = "SELECT * FROM draft_entries WHERE client_id = ?"
+    params = [client_id]
+    if status != "all":
+        query += " AND status = ?"
+        params.append(status)
+    with get_cursor() as cursor:
+        cursor.execute(query + " ORDER BY id", params)
+        rows = cursor.fetchall()
+    import json as _json
+    return [
+        {
+            "draft_id": r["id"],
+            "status": r["status"],
+            "entry_date": r["entry_date"],
+            "description": r["description"],
+            "rationale": r["rationale"] or "",
+            "posted_entry_id": r["posted_entry_id"],
+            "lines": [
+                {"account_number": l["account_number"],
+                 "debit": round(l["debit_cents"] / 100, 2),
+                 "credit": round(l["credit_cents"] / 100, 2),
+                 "memo": l.get("memo", "")}
+                for l in _json.loads(r["lines_json"])
+            ],
+        }
+        for r in rows
+    ]

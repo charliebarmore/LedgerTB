@@ -28,8 +28,11 @@ custody of anyone's data. Built and maintained with Claude Code.
 - **The database stays encrypted.** New code paths must work through
   `database.connection` (which keys every connection); never open the file
   directly. The release pipeline refuses to ship if encryption is unavailable.
-- **MCP stays read-only** — enforced by `PRAGMA query_only` on every
-  connection when `dbconn.READ_ONLY` is set, not by tool design alone.
+- **MCP never touches the ledger** — its connections run under an
+  authorizer (`dbconn.DRAFT_INBOX_ONLY`) allowing reads everywhere and
+  writes only to `draft_entries`; drafts post solely via human approval
+  in the app. Read-only book sessions use `dbconn.READ_ONLY`
+  (`PRAGMA query_only`). Both are engine-enforced, not tool-designed.
 - **Schema changes are new numbered migrations**; never edit an existing one.
 
 ## Commands
