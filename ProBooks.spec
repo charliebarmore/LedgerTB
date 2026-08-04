@@ -13,6 +13,7 @@ analysis sees them).
 """
 
 import os
+import sys
 
 # Spec files execute in PyInstaller's build namespace, which does not guarantee
 # that the project root is importable. Read the tiny metadata module directly.
@@ -102,6 +103,10 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
+# strip needs binutils (absent on Windows runners); console stays on for the
+# Windows spike so the selfcheck output is visible — flip once the port lands.
+IS_MAC = sys.platform == "darwin"
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -110,9 +115,9 @@ exe = EXE(
     name="ProBooks",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,
+    strip=IS_MAC,
     upx=False,
-    console=False,          # windowed (no terminal)
+    console=not IS_MAC,     # macOS: windowed; Windows spike: console
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -124,12 +129,15 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    strip=True,
+    strip=IS_MAC,
     upx=False,
     name="ProBooks",
 )
 
-app = BUNDLE(
+if not IS_MAC:
+    app = None
+else:
+    app = BUNDLE(
     coll,
     name="ProBooks.app",
     icon="ProBooks.app/Contents/Resources/ProBooks.icns",

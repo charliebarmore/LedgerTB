@@ -197,9 +197,9 @@ def main() -> int:
 
         import webview
         webview.create_window(WINDOW_TITLE, url, width=1360, height=900, min_size=(1024, 720))
-        # Force the native macOS backend (Cocoa/WebKit) so the build can safely
-        # exclude the Qt toolkits from the bundle.
-        webview.start(gui="cocoa")
+        # Pin the native backend per platform (macOS WebKit, Windows WebView2)
+        # so the build can safely exclude the Qt toolkits from the bundle.
+        webview.start(gui="cocoa" if sys.platform == "darwin" else "edgechromium")
         return 0
     finally:
         _stop(proc)
