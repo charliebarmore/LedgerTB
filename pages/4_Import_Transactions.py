@@ -1322,8 +1322,58 @@ elif selected_tab == "Review & Categorize":
 
         st.stop()
 
+    # Assistant-staged rows (MCP propose_import) wait in the database until
+    # loaded here; they then run through the exact same categorize/post flow
+    # as a CSV upload — same duplicate handling, same human posting.
+    _in_session = {t.get("staged_id") for t in st.session_state.transactions_to_review}
+    _staged = [t for t in ImportedTransaction.get_by_status(client_id, "Pending")
+               if t.id not in _in_session]
+    if _staged:
+        _sc1, _sc2 = st.columns([4, 1])
+        with _sc1:
+            noun = "transaction" if len(_staged) == 1 else "transactions"
+            st.info(f"{len(_staged)} {noun} staged by your assistant await "
+                    "review.", icon="📥")
+        with _sc2:
+            if st.button("Load staged", key="load_staged_imports", width="stretch"):
+                staged_rows = [{
+                    "staged_id": t.id,
+                    "batch_id": t.import_batch,
+                    "date": t.transaction_date,
+                    "description": t.description,
+                    "amount": t.amount,
+                    "client_id": client_id,
+                    "bank_account_id": t.bank_account_id,
+                    "source_id": t.source_id,
+                    "source_filename": t.source_filename,
+                    "source_row_number": t.source_row_number,
+                    "row_fingerprint": t.row_fingerprint,
+                    "idempotency_key": t.idempotency_key,
+                } for t in _staged]
+                # Exclude the rows' own records or each would match itself.
+                duplicate_count = classify_import_duplicates(
+                    staged_rows, client_id,
+                    exclude_ids=frozenset(t.id for t in _staged),
+                )
+                ensure_row_ids(staged_rows)
+                for row in staged_rows:
+                    row["include"] = not row.get("is_duplicate", False)
+                st.session_state.transactions_to_review = (
+                    st.session_state.transactions_to_review + staged_rows)
+                st.session_state.import_complete = False
+                st.session_state.import_complete_msg = None
+                if duplicate_count:
+                    st.session_state.post_result = {
+                        "level": "warning",
+                        "text": f"{duplicate_count} potential duplicate(s) "
+                                "were auto-deselected.",
+                    }
+                st.rerun()
+
     if not st.session_state.transactions_to_review:
-        st.info("No transactions to review. Upload a CSV file first.")
+        st.info("No transactions to review. Upload a CSV file first."
+                if not _staged else
+                "Load the staged transactions above to review them.")
     else:
         transactions = st.session_state.transactions_to_review
 
