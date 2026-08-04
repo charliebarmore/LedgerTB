@@ -180,6 +180,29 @@ def _selfcheck() -> int:
     return 0
 
 
+def _window_geometry(preferred_w=1360, preferred_h=900, min_w=900, min_h=600):
+    """Pick a window size that fits the display it opens on.
+
+    A hardcoded 1360x900 overflows a 1280x800 logical desktop (a 1920x1200
+    panel at 150% scaling -- a common laptop config), putting the close and
+    maximize buttons off-screen. Clamp to the screen, and clamp min_size to
+    the resulting size: a minimum larger than the window forces it back up.
+    """
+    import webview
+
+    try:
+        screen = webview.screens[0]
+        avail_w, avail_h = int(screen.width), int(screen.height)
+    except Exception:
+        # Screen probing failed -- keep the old size but a workable minimum.
+        return preferred_w, preferred_h, (min_w, min_h)
+
+    # Leave room for the taskbar/menu bar and window chrome.
+    width = max(800, min(preferred_w, avail_w - 40))
+    height = max(600, min(preferred_h, avail_h - 80))
+    return width, height, (min(min_w, width), min(min_h, height))
+
+
 def main() -> int:
     if os.environ.get("PROBOOKS_MODE") == "selfcheck":
         return _selfcheck()
@@ -215,7 +238,8 @@ def main() -> int:
             return 1
 
         import webview
-        webview.create_window(WINDOW_TITLE, url, width=1360, height=900, min_size=(1024, 720))
+        win_w, win_h, win_min = _window_geometry()
+        webview.create_window(WINDOW_TITLE, url, width=win_w, height=win_h, min_size=win_min)
         # Pin the native backend per platform (macOS WebKit, Windows WebView2)
         # so the build can safely exclude the Qt toolkits from the bundle.
         webview.start(gui="cocoa" if sys.platform == "darwin" else "edgechromium")
