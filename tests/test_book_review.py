@@ -74,7 +74,7 @@ def test_policy_notes_round_trip(client_id):
 
 
 def test_category_review_maps_ai_findings(client_id, accounts, monkeypatch):
-    entry, _ = _post_import(client_id, accounts, "DNH*GODADDY", -26.18,
+    entry, _ = _post_import(client_id, accounts, "DNH*EXAMPLEDOMAINS", -26.18,
                             accounts["expense"])
 
     service = BookReviewService()

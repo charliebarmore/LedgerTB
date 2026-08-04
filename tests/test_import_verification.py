@@ -100,8 +100,8 @@ def test_row_imported_but_not_in_file_is_flagged():
 
 def test_repeated_identical_charges_match_one_for_one():
     """Three identical charges must match three rows, not collapse to one."""
-    source = [_source("CWR DIGITAL LLC", -79.00) for _ in range(3)]
-    imported = [_imported("CWR DIGITAL LLC", -79.00) for _ in range(3)]
+    source = [_source("ACME HOSTING LLC", -79.00) for _ in range(3)]
+    imported = [_imported("ACME HOSTING LLC", -79.00) for _ in range(3)]
 
     report = verify_against_source(imported, source)
 
@@ -110,8 +110,8 @@ def test_repeated_identical_charges_match_one_for_one():
 
 
 def test_missing_one_of_several_identical_charges_is_caught():
-    source = [_source("CWR DIGITAL LLC", -79.00) for _ in range(3)]
-    imported = [_imported("CWR DIGITAL LLC", -79.00) for _ in range(2)]
+    source = [_source("ACME HOSTING LLC", -79.00) for _ in range(3)]
+    imported = [_imported("ACME HOSTING LLC", -79.00) for _ in range(2)]
 
     report = verify_against_source(imported, source)
 
