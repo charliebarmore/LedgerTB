@@ -133,6 +133,7 @@ def _selfcheck() -> int:
             "reportlab", "reportlab.platypus", "reportlab.lib.pagesizes",
             "reportlab.lib.styles", "reportlab.pdfgen.canvas",
             "anthropic", "pydantic", "pydantic_core", "dotenv", "platformdirs",
+            "mcp", "mcp.server", "mcp.server.stdio",
             "config", "constants", "money", "models.journal_entry", "models.reconciliation",
             "services.categorization", "services.document_import", "fitz", "PIL",
             "keyring", "version"]
@@ -220,6 +221,12 @@ def main() -> int:
         return _selfcheck()
     if os.environ.get("PROBOOKS_MODE") == "server":
         return _run_server()
+    if os.environ.get("PROBOOKS_MODE") == "mcp":
+        # Read-only MCP server over stdio (spawned by Claude Desktop/Code).
+        os.chdir(BUNDLE)
+        sys.path.insert(0, str(BUNDLE))
+        from mcp_server import main as mcp_main
+        return mcp_main()
 
     port = _find_free_port()
     url = f"http://127.0.0.1:{port}"

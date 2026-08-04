@@ -105,6 +105,65 @@ if backups:
             st.error(f"Restore failed: {exc}")
 
 st.divider()
+st.subheader("Assistant access (MCP)")
+st.caption(
+    "Lets an AI assistant on THIS computer (Claude Desktop, Claude Code) read "
+    "these books through a local MCP server — trial balance, statements, "
+    "ledgers, entry search, integrity checks. Strictly read-only: every "
+    "connection it opens is pinned query-only at the database level, and "
+    "nothing listens on a network. Enabling stores the derived database key "
+    "(never your passphrase) in the system credential vault so the server can "
+    "unlock without you; disabling deletes it."
+)
+
+import json
+
+from utils.secure_store import delete_secret as _mcp_delete
+from utils.secure_store import get_secret as _mcp_get
+from utils.secure_store import set_secret as _mcp_set
+
+MCP_KEY_SECRET = "mcp_db_key"
+_mcp_enabled = bool(_mcp_get(MCP_KEY_SECRET))
+
+if _mcp_enabled:
+    st.success("Assistant access is enabled.")
+else:
+    st.info("Assistant access is off. Assistants cannot read these books.")
+
+mcp_cols = st.columns([1, 1, 3])
+with mcp_cols[0]:
+    if not _mcp_enabled and st.button("Enable assistant access", type="primary"):
+        session_key = dbconn.get_active_key()
+        if not session_key:
+            st.error("Unlock the database first.")
+        else:
+            try:
+                _mcp_set(MCP_KEY_SECRET, session_key)
+                audit_safety_event("EXPORT", "mcp_access_enabled",
+                                   {"scope": "read_only"})
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Could not store the key securely: {exc}")
+with mcp_cols[1]:
+    if _mcp_enabled and st.button("Disable assistant access"):
+        _mcp_delete(MCP_KEY_SECRET)
+        audit_safety_event("EXPORT", "mcp_access_disabled", {})
+        st.rerun()
+
+if _mcp_enabled:
+    if getattr(sys, "frozen", False):
+        _mcp_config = {"command": sys.executable, "args": [],
+                       "env": {"PROBOOKS_MODE": "mcp"}}
+    else:
+        _mcp_config = {"command": sys.executable,
+                       "args": [str(Path(__file__).resolve().parent.parent / "mcp_server.py")]}
+    st.caption(
+        "Add this to your MCP client's configuration (Claude Desktop: "
+        "Settings → Developer → Edit Config, inside `mcpServers`):"
+    )
+    st.code(json.dumps({"probooks": _mcp_config}, indent=2), language="json")
+
+st.divider()
 st.caption(
     "AI categorization setup (your Anthropic API key) lives on the Firm "
     "Settings page with the rest of the firm-level configuration."

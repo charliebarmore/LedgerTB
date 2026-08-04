@@ -39,6 +39,11 @@ class DatabaseLocked(RuntimeError):
 _active_key = None
 _key_lock = threading.Lock()
 
+# When True, every new connection is pinned read-only (PRAGMA query_only).
+# Set by the MCP server before its first query: assistant access is read-only
+# by construction, not by convention.
+READ_ONLY = False
+
 
 def set_active_key(raw_key_hex: str) -> None:
     """Set the derived raw key (hex) used to key every subsequent connection.
@@ -59,6 +64,13 @@ def clear_active_key() -> None:
 
 def has_active_key() -> bool:
     return _active_key is not None
+
+
+def get_active_key():
+    """The active raw key (hex), or None. Used by the opt-in MCP enablement to
+    copy the session's key into the OS credential vault — the passphrase itself
+    is never stored anywhere."""
+    return _active_key
 
 
 def get_connection():
@@ -88,6 +100,8 @@ def get_connection():
         pass
     conn.row_factory = _driver.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    if READ_ONLY:
+        conn.execute("PRAGMA query_only = ON")
     return conn
 
 
