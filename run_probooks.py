@@ -75,6 +75,11 @@ def _run_server() -> int:
         "--server.runOnSave=false",
         "--browser.gatherUsageStats=false",
         "--global.developmentMode=false",
+        # Also set in .streamlit/config.toml; passed here too so the product
+        # chrome stays hidden even if that folder goes missing from a bundle
+        # (it did once: upload-artifact excludes hidden files by default).
+        "--client.toolbarMode=minimal",
+        "--client.showSidebarNavigation=false",
     ]
     from streamlit.web import cli as stcli
     return stcli.main()
@@ -188,6 +193,20 @@ def main() -> int:
     kwargs = {"env": env}
     if os.name == "posix":
         kwargs["start_new_session"] = True
+    server_log = None
+    if os.name == "nt":
+        # In a windowed (no-console) build the child would inherit invalid
+        # stdio handles and die on its first write, so give it a log file and
+        # keep any transient console from flashing.
+        from platformdirs import user_data_dir
+
+        log_dir = Path(user_data_dir("ProBooks", appauthor=False))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        server_log = open(log_dir / "server.log", "a", buffering=1, encoding="utf-8")
+        kwargs["stdout"] = server_log
+        kwargs["stderr"] = subprocess.STDOUT
+        kwargs["stdin"] = subprocess.DEVNULL
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     proc = subprocess.Popen(_child_command(port), **kwargs)
 
     try:
@@ -203,6 +222,8 @@ def main() -> int:
         return 0
     finally:
         _stop(proc)
+        if server_log is not None:
+            server_log.close()
 
 
 if __name__ == "__main__":

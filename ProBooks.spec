@@ -103,8 +103,7 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-# strip needs binutils (absent on Windows runners); console stays on for the
-# Windows spike so the selfcheck output is visible — flip once the port lands.
+# strip needs binutils (absent on Windows runners).
 IS_MAC = sys.platform == "darwin"
 
 exe = EXE(
@@ -117,7 +116,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=IS_MAC,
     upx=False,
-    console=not IS_MAC,     # macOS: windowed; Windows spike: console
+    console=False,          # windowed on every platform
+    icon=None if IS_MAC else "ProBooks.ico",   # BUNDLE carries the .icns
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
