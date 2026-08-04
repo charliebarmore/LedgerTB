@@ -33,12 +33,6 @@ from utils import book_lock, books, secure_store
 MIN_PASSPHRASE_LEN = 8
 
 
-def _is_windows() -> bool:
-    import sys as _sys
-
-    return _sys.platform == "win32"
-
-
 def saved_key_name(book) -> str:
     """Vault entry name for a remembered book key (per book path)."""
     import hashlib
@@ -52,7 +46,7 @@ def forget_saved_key(book) -> None:
 
 
 def try_saved_key() -> bool:
-    """Unlock from a remembered key ("Remember on this Mac"). A key that no
+    """Unlock from a remembered key ("Remember on this computer"). A key that no
     longer opens the book (changed passphrase) is dropped from the vault."""
     book = dbconn.DATABASE_PATH
     if database_state(book) != "encrypted":
@@ -214,7 +208,7 @@ def _render_book_chooser():
             "on a shared drive, and an in-use lock keeps two people from "
             "writing to one book at once. Each book has a passphrase — using "
             "the same one for all your books is fine (one office passphrase), "
-            "and \"Remember on this Mac\" skips the prompt entirely."
+            "and \"Remember on this computer\" skips the prompt entirely."
         )
 
 
@@ -238,7 +232,7 @@ def _unlock_form():
     with st.form("db_unlock"):
         passphrase = st.text_input("Passphrase", type="password")
         remember = st.checkbox(
-            "Remember on this Mac" if not _is_windows() else "Remember on this PC",
+            "Remember on this computer",
             help="Stores this book's unlock key in your system credential "
                  "vault, so opening the app skips the passphrase. Anyone who "
                  "can sign in to your computer account can then open the book. "
@@ -261,7 +255,7 @@ def _setup_form():
         passphrase = st.text_input("New passphrase", type="password")
         confirm = st.text_input("Confirm passphrase", type="password")
         remember = st.checkbox(
-            "Remember on this Mac" if not _is_windows() else "Remember on this PC",
+            "Remember on this computer",
             help="Stores this book's unlock key in your system credential "
                  "vault, so opening the app skips the passphrase. Undo any "
                  "time on Data Safety.",
