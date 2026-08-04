@@ -27,7 +27,7 @@ def _import_page(monkeypatch, client_id):
 def _staged_rows(accounts):
     rows = [{
         "date": "2026-01-12",
-        "description": "CWR DIGITAL LLC",
+        "description": "ACME HOSTING LLC",
         "amount": -79.00,
         "bank_account_id": accounts["cash"],
     }]

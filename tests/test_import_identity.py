@@ -189,12 +189,12 @@ def test_three_identical_charges_can_all_be_imported(client_id, accounts):
     """The case that prompted this: the AMEX statement has three identical
     CWR Digital charges on one day, all real."""
     post_transaction(
-        client_id, _row(2, description="CWR DIGITAL LLC", amount=-79.00),
+        client_id, _row(2, description="ACME HOSTING LLC", amount=-79.00),
         accounts["expense"], accounts["cash"], batch_id="AMEX",
     )
     for source_row in (3, 4):
         post_transaction(
-            client_id, _row(source_row, description="CWR DIGITAL LLC", amount=-79.00),
+            client_id, _row(source_row, description="ACME HOSTING LLC", amount=-79.00),
             accounts["expense"], accounts["cash"], batch_id="AMEX",
             duplicate_override=True,
         )
