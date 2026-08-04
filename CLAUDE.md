@@ -29,10 +29,17 @@ custody of anyone's data. Built and maintained with Claude Code.
   `database.connection` (which keys every connection); never open the file
   directly. The release pipeline refuses to ship if encryption is unavailable.
 - **MCP never touches the ledger** — its connections run under an
-  authorizer (`dbconn.DRAFT_INBOX_ONLY`) allowing reads everywhere and
-  writes only to `draft_entries`; drafts post solely via human approval
-  in the app. Read-only book sessions use `dbconn.READ_ONLY`
+  authorizer (`dbconn.DRAFT_INBOX_ONLY`): reads everywhere; INSERT only
+  on the assistant inboxes (`draft_entries`, `imported_transactions`)
+  and their `audit_log` records; UPDATE only on `draft_entries`. Drafts
+  post via human approval; staged imports flow through the normal
+  Review & Categorize. Read-only book sessions use `dbconn.READ_ONLY`
   (`PRAGMA query_only`). Both are engine-enforced, not tool-designed.
+- **Staged imports keep full import identity.** Assistant-staged rows
+  carry fingerprints/idempotency keys like any CSV row; `posting.py`
+  ADOPTS a Pending, entry-less idempotency match (same record goes
+  Pending → Posted) and its duplicate check counts only rows that
+  actually posted. Preserve both properties when touching posting.
 - **Schema changes are new numbered migrations**; never edit an existing one.
 
 ## Commands
