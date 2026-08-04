@@ -469,7 +469,7 @@ def build_close_package_pdf(
         story.append(_pdf_table(
             ["Date", "Entry #", "Type", "Description", "Acct #", "Account",
              "Debit", "Credit", "Memo"],
-            [[t["entry_date"], str(t["entry_id"]), t["entry_type"],
+            [[t["entry_date"], str(t["entry_id"]), _wrap(t["entry_type"]),
               _wrap(t["description"]), t["account_number"],
               _wrap(t["account_name"]), _money(t["debit"]),
               _money(t["credit"]), _wrap(t["memo"])]
@@ -487,7 +487,7 @@ def build_close_package_pdf(
         story.append(_pdf_table(
             ["Date", "Entry #", "AJE Ref", "Description", "Acct #", "Account",
              "Debit", "Credit", "Memo"],
-            [[t["entry_date"], str(t["entry_id"]), t["source_reference"],
+            [[t["entry_date"], str(t["entry_id"]), _wrap(t["source_reference"]),
               _wrap(t["description"]), t["account_number"],
               _wrap(t["account_name"]), _money(t["debit"]),
               _money(t["credit"]), _wrap(t["memo"])]

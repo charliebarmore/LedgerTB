@@ -58,6 +58,20 @@ with _book_cols[1]:
         dbconn.clear_active_key()
         st.rerun()
 
+from utils import unlock as _unlock
+from utils.secure_store import get_secret as _gs
+
+if _gs(_unlock.saved_key_name(dbconn.DATABASE_PATH)):
+    _rem_cols = st.columns([3, 1])
+    with _rem_cols[0]:
+        st.caption("This book's passphrase is **remembered on this machine** "
+                   "(system credential vault) — the app opens it without asking.")
+    with _rem_cols[1]:
+        if st.button("Forget passphrase"):
+            _unlock.forget_saved_key(dbconn.DATABASE_PATH)
+            audit_safety_event("EXPORT", "book_key_forgotten", {})
+            st.rerun()
+
 if is_production_ready():
     st.success("Production safeguards are ready.")
 else:

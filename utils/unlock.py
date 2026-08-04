@@ -28,9 +28,50 @@ from database.crypto import (
     encrypt_plaintext_db,
     verify_passphrase,
 )
-from utils import book_lock, books
+from utils import book_lock, books, secure_store
 
 MIN_PASSPHRASE_LEN = 8
+
+
+def _is_windows() -> bool:
+    import sys as _sys
+
+    return _sys.platform == "win32"
+
+
+def saved_key_name(book) -> str:
+    """Vault entry name for a remembered book key (per book path)."""
+    import hashlib
+
+    digest = hashlib.sha256(str(book).encode()).hexdigest()[:16]
+    return f"book_key_{digest}"
+
+
+def forget_saved_key(book) -> None:
+    secure_store.delete_secret(saved_key_name(book))
+
+
+def try_saved_key() -> bool:
+    """Unlock from a remembered key ("Remember on this Mac"). A key that no
+    longer opens the book (changed passphrase) is dropped from the vault."""
+    book = dbconn.DATABASE_PATH
+    if database_state(book) != "encrypted":
+        return False
+    key = secure_store.get_secret(saved_key_name(book))
+    if not key:
+        return False
+    dbconn.set_active_key(key)
+    try:
+        conn = dbconn.get_connection()
+        try:
+            conn.execute("SELECT count(*) FROM sqlite_master")
+        finally:
+            conn.close()
+    except Exception:
+        dbconn.clear_active_key()
+        forget_saved_key(book)
+        return False
+    return True
 
 # Best-effort lock release on clean shutdown. release() only removes a lock
 # this process wrote, so this can never clobber another machine's session; a
@@ -71,6 +112,15 @@ def require_unlock():
         return
     # Locked: point at the chosen book before deciding which form to show.
     dbconn.DATABASE_PATH = books.active_book()
+    # A remembered key skips the prompt — but never skips the in-use lock.
+    if not st.session_state.get("_book_lock_holder") and try_saved_key():
+        result = book_lock.acquire(dbconn.DATABASE_PATH)
+        if result["acquired"]:
+            books.set_active_book(dbconn.DATABASE_PATH)
+            return
+        st.session_state["_pending_book_key"] = dbconn.get_active_key()
+        st.session_state["_book_lock_holder"] = result["holder"]
+        dbconn.clear_active_key()
     _render_gate(database_state(dbconn.DATABASE_PATH))
     st.stop()
 
@@ -85,9 +135,14 @@ def _valid_new_passphrase(passphrase: str, confirm: str) -> bool:
     return True
 
 
-def _finish_unlock(raw_key_hex: str):
+def _finish_unlock(raw_key_hex: str, remember: bool = False):
     """Take the book's in-use lock and activate the key — or, when someone
     else holds the lock, park the key and let the user choose."""
+    if remember:
+        try:
+            secure_store.set_secret(saved_key_name(dbconn.DATABASE_PATH), raw_key_hex)
+        except Exception:
+            pass  # remembering is a convenience; never block the unlock on it
     result = book_lock.acquire(dbconn.DATABASE_PATH)
     if result["acquired"]:
         dbconn.set_active_key(raw_key_hex)
@@ -156,8 +211,10 @@ def _render_book_chooser():
             st.rerun()
         st.caption(
             "A book is one encrypted ProBooks database. Book files can live "
-            "on a shared drive; each book has its own passphrase, and an "
-            "in-use lock keeps two people from writing to one book at once."
+            "on a shared drive, and an in-use lock keeps two people from "
+            "writing to one book at once. Each book has a passphrase — using "
+            "the same one for all your books is fine (one office passphrase), "
+            "and \"Remember on this Mac\" skips the prompt entirely."
         )
 
 
@@ -180,9 +237,16 @@ def _unlock_form():
     st.caption("Enter your passphrase to unlock the database.")
     with st.form("db_unlock"):
         passphrase = st.text_input("Passphrase", type="password")
+        remember = st.checkbox(
+            "Remember on this Mac" if not _is_windows() else "Remember on this PC",
+            help="Stores this book's unlock key in your system credential "
+                 "vault, so opening the app skips the passphrase. Anyone who "
+                 "can sign in to your computer account can then open the book. "
+                 "Undo any time on Data Safety.",
+        )
         if st.form_submit_button("Unlock", type="primary"):
             if verify_passphrase(dbconn.DATABASE_PATH, passphrase):
-                _finish_unlock(derive_key(passphrase))
+                _finish_unlock(derive_key(passphrase), remember=remember)
             else:
                 st.error("Incorrect passphrase.")
 
@@ -196,11 +260,17 @@ def _setup_form():
     with st.form("db_setup"):
         passphrase = st.text_input("New passphrase", type="password")
         confirm = st.text_input("Confirm passphrase", type="password")
+        remember = st.checkbox(
+            "Remember on this Mac" if not _is_windows() else "Remember on this PC",
+            help="Stores this book's unlock key in your system credential "
+                 "vault, so opening the app skips the passphrase. Undo any "
+                 "time on Data Safety.",
+        )
         if st.form_submit_button("Create encrypted database", type="primary"):
             if _valid_new_passphrase(passphrase, confirm):
                 # First keyed connection (init_database, next run) creates the
                 # database already encrypted under this passphrase.
-                _finish_unlock(derive_key(passphrase))
+                _finish_unlock(derive_key(passphrase), remember=remember)
 
 
 def _migrate_form():

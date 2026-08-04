@@ -10,7 +10,12 @@ travels by path, and whoever needs a book opens it.
 
 - The **lock screen** has a *Book file* section: recent books, or open /
   create any path (e.g. `\\server\Books\SmithCo.probooks`). Each book has
-  its **own passphrase** — the passphrase is the login.
+  a passphrase — the passphrase is the login. **Using one office
+  passphrase for all your firm's books is fine**; different passphrases
+  per book are an option (say, to wall off one sensitive client), not a
+  requirement. And **"Remember on this Mac/PC"** stores a book's unlock
+  key in your computer's credential vault so the app opens it without
+  asking — per machine, undoable on Data Safety.
 - **Data Safety** shows which book is open and offers *Switch book…*
 - One book can hold many clients, or you can create one book per client
   for ProSystem-style granularity — two people can then work different
