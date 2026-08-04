@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
 from utils.client_selector import render_client_selector, get_selected_client
+from utils.ui import apply_default_on_change
 from utils.unlock import require_unlock
 from utils import icons
 from models.client import Client
@@ -149,6 +150,15 @@ with col2:
     st.session_state.selected_period_id = selected_period_id
 
 selected_period = FiscalPeriod.get_by_id(selected_period_id)
+
+# Keyed date inputs ignore value= once they hold state, so picking a new
+# Period would silently leave the old dates (and numbers) in place. Re-apply
+# the period's dates only when the period actually changes — a hand-edited
+# range survives everything else.
+apply_default_on_change("period_start", depends_on=selected_period_id,
+                        default_value=selected_period.start_date)
+apply_default_on_change("period_end", depends_on=selected_period_id,
+                        default_value=selected_period.end_date)
 
 with col3:
     period_start = st.date_input(
