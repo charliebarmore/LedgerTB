@@ -80,6 +80,33 @@ def test_report_statements_render_with_balance_checks(client_id, accounts, monke
         assert any("gl_pick" in (box.key or "") for box in page.selectbox), view
 
 
+def test_period_picker_drives_the_worksheet_dates(client_id, accounts, monkeypatch):
+    """Picking a Period must move From/To (keyed date inputs ignore value=)."""
+    _select_client(monkeypatch, client_id)
+    page = AppTest.from_file("pages/1_Trial_Balance_Worksheet.py", default_timeout=30)
+    page.run()
+    assert not page.exception
+
+    from models.fiscal_period import FiscalPeriod
+    periods = FiscalPeriod.get_all(client_id)
+    year = next(p for p in periods if p.period_type == "Year")
+    may = next(p for p in periods if "May" in p.period_name)
+    assert page.session_state["period_start"] == year.start_date
+
+    page.selectbox(key="period_selector").set_value(may.id).run()
+    assert not page.exception
+    assert page.session_state["period_start"] == may.start_date
+    assert page.session_state["period_end"] == may.end_date
+
+    # A hand-edited date survives unrelated reruns…
+    page.date_input(key="period_start").set_value(may.start_date.replace(day=15)).run()
+    assert page.session_state["period_start"] == may.start_date.replace(day=15)
+    # …but picking another period resets the range again.
+    q3 = next(p for p in periods if "Q3" in p.period_name)
+    page.selectbox(key="period_selector").set_value(q3.id).run()
+    assert page.session_state["period_start"] == q3.start_date
+
+
 def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatch):
     """The GL is the whole book by default; the picker only narrows it."""
     _select_client(monkeypatch, client_id)
