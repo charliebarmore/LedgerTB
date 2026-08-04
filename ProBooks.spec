@@ -49,6 +49,7 @@ EXCLUDES = [
 # --- app source, bundled as data (loaded from disk at runtime) ---
 app_datas = [
     ("app.py", "."),
+    ("mcp_server.py", "."),
     ("config.py", "."),
     ("constants.py", "."),
     ("money.py", "."),
@@ -80,10 +81,15 @@ for pkg in (
 
 hiddenimports = st_hiddenimports + [
     "pandas", "numpy", "openpyxl", "anthropic", "dotenv", "platformdirs", "altair",
-    "keyring", "keyring.backends.macOS",
+    # Both credential-vault backends: the frozen app must reach the OS vault
+    # on each platform (API key + MCP enablement live there).
+    "keyring", "keyring.backends.macOS", "keyring.backends.Windows",
     "fitz", "PIL", "Quartz", "objc",
     "sqlcipher3", "sqlcipher3.dbapi2",  # encrypted database driver (native ext)
-] + collect_submodules("openpyxl") + collect_submodules("reportlab")
+] + collect_submodules("openpyxl") + collect_submodules("reportlab") \
+  + collect_submodules("mcp")
+    # mcp: the server entry (mcp_server.py) is a data file, invisible to the
+    # analyzer — same reason openpyxl/reportlab are collected wholesale.
     # Bundle ALL openpyxl and reportlab submodules. Pages/services are bundled as
     # data files, so PyInstaller can't see which submodules they import; collect
     # them all to avoid ModuleNotFound (the openpyxl.utils.dataframe lesson).
