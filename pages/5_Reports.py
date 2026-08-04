@@ -16,6 +16,7 @@ from models.reports import ReportGenerator
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
+from utils.dates import long_date
 from utils.ui import financial_statement, ledger_table, view_switcher
 
 
@@ -102,7 +103,7 @@ if selected_report == "Trial Balance":
         total_debits = sum(r.debit for r in rows)
         total_credits = sum(r.credit for r in rows)
 
-        st.markdown(f"**As of {as_of_date.strftime('%B %-d, %Y')}**")
+        st.markdown(f"**As of {long_date(as_of_date)}**")
         statement_rows = [
             ("item",
              f"{row.account_number} - {row.account_name}",
@@ -168,7 +169,7 @@ elif selected_report == "Income Statement":
     account_id_lookup = {a.account_number: a.id for a in accounts}
 
     st.markdown(
-        f"**{is_start.strftime('%B %-d, %Y')} to {is_end.strftime('%B %-d, %Y')}**"
+        f"**{long_date(is_start)} to {long_date(is_end)}**"
     )
 
     statement_rows = [("section", "Revenue", [])]
@@ -235,7 +236,7 @@ elif selected_report == "Balance Sheet":
     accounts = Account.get_all(client_id, active_only=False)
     account_id_lookup = {a.account_number: a.id for a in accounts}
 
-    st.markdown(f"**As of {bs_date.strftime('%B %-d, %Y')}**")
+    st.markdown(f"**As of {long_date(bs_date)}**")
 
     def _section(title, entries, subtotal_label, subtotal_value):
         rows = [("section", title, [])]
