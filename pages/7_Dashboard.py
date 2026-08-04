@@ -15,6 +15,7 @@ from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
+from utils.dates import long_date, slash_date
 from utils.fiscal_dates import fiscal_year_bounds
 from utils.ui import financial_statement
 
@@ -244,9 +245,9 @@ st.divider()
 st.subheader("Account Balances Summary")
 _summary_fy_start, _ = fiscal_year_bounds(date.today(), client.fiscal_year_end_month)
 st.caption(
-    f"As of {date.today().strftime('%B %-d, %Y')} · revenue and expenses are "
-    f"fiscal year-to-date ({_summary_fy_start.strftime('%-m/%-d/%Y')} – "
-    f"{date.today().strftime('%-m/%-d/%Y')})"
+    f"As of {long_date(date.today())} · revenue and expenses are "
+    f"fiscal year-to-date ({slash_date(_summary_fy_start)} – "
+    f"{slash_date(date.today())})"
 )
 
 # Get balances by type. Balances are signed by each account's normal balance

@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from models.audit_log import AuditLog
+from utils.dates import short_date
 from models.journal_entry import JournalEntry
 from models.transaction import ImportedTransaction
 
@@ -188,7 +189,7 @@ def describe_when(when: Optional[datetime], now: Optional[datetime] = None) -> s
     seconds = (now - when).total_seconds()
 
     if seconds < 0:          # clock skew; don't claim the future
-        return when.strftime("%b %-d, %Y")
+        return short_date(when)
     if seconds < 90:
         return "just now"
     if seconds < 3600:
@@ -200,7 +201,7 @@ def describe_when(when: Optional[datetime], now: Optional[datetime] = None) -> s
         return "yesterday"
     if seconds < 604800:
         return f"{int(seconds // 86400)} days ago"
-    return when.strftime("%b %-d, %Y")
+    return short_date(when)
 
 
 def get_recent_activity(client_id: int, limit: int = 6) -> List[ActivityEvent]:

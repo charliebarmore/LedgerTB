@@ -32,6 +32,7 @@ from database.connection import get_cursor
 from models.reports import TrialBalanceWorksheetRow
 from money import to_dollars
 from services.branding import FirmBranding, get_branding
+from utils.dates import long_date, long_datetime
 
 _HEADER_FONT = Font(bold=True)
 _MONEY_FMT = "#,##0.00"
@@ -354,7 +355,7 @@ def build_close_package_pdf(
     transactions = get_period_transactions(client_id, period_start, period_end)
     ajes = [t for t in transactions if t["entry_type"] == "Adjusting"]
     cash = get_cash_activity(client_id, period_start, period_end)
-    period_label = f"{period_start.strftime('%B %-d, %Y')} to {period_end.strftime('%B %-d, %Y')}"
+    period_label = f"{long_date(period_start)} to {long_date(period_end)}"
 
     branding = get_branding()
     accent = colors.HexColor(branding.accent_hex) if branding.accent_hex else colors.black
@@ -402,7 +403,7 @@ def build_close_package_pdf(
         Paragraph(client_name, heading_1),
         Paragraph("Close Package", _PDF_META),
         Paragraph(period_label, _PDF_META),
-        Paragraph(f"Generated {datetime.now().strftime('%B %-d, %Y at %-I:%M %p')}", _PDF_META),
+        Paragraph(f"Generated {long_datetime(datetime.now())}", _PDF_META),
         Spacer(1, 18),
         Paragraph("Summary", heading_2),
         _pdf_table(
