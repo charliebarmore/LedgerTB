@@ -76,12 +76,16 @@ def stop_streamlit(proc: subprocess.Popen) -> None:
 
 
 def _window_geometry(preferred_w=1360, preferred_h=900, min_w=900, min_h=600):
-    """Pick a window size that fits the display it opens on.
+    """Window kwargs that fit -- and sit fully inside -- the display.
 
-    A hardcoded 1360x900 overflows a 1280x800 logical desktop (a 1920x1200
-    panel at 150% scaling -- a common laptop config), putting the close and
-    maximize buttons off-screen. Clamp to the screen, and clamp min_size to
-    the resulting size: a minimum larger than the window forces it back up.
+    Two separate problems. A hardcoded 1360x900 overflows a 1280x800 logical
+    desktop (a 1920x1200 panel at 150% scaling, a common laptop config). And
+    pywebview's default placement puts the window at an offset (168,168 on
+    Windows) that pushes it off-screen even once it is small enough to fit.
+
+    So: clamp the size to the screen, clamp min_size to the result (a minimum
+    larger than the window forces the window back up), and set x/y explicitly
+    instead of trusting the default placement.
     """
     import webview
 
@@ -90,12 +94,20 @@ def _window_geometry(preferred_w=1360, preferred_h=900, min_w=900, min_h=600):
         avail_w, avail_h = int(screen.width), int(screen.height)
     except Exception:
         # Screen probing failed -- keep the old size but a workable minimum.
-        return preferred_w, preferred_h, (min_w, min_h)
+        return {"width": preferred_w, "height": preferred_h,
+                "min_size": (min_w, min_h)}
 
     # Leave room for the taskbar/menu bar and window chrome.
     width = max(800, min(preferred_w, avail_w - 40))
     height = max(600, min(preferred_h, avail_h - 80))
-    return width, height, (min(min_w, width), min(min_h, height))
+    # Centred horizontally, biased toward the top: screen.height is full
+    # bounds, not the usable work area, so a true vertical centre can still
+    # tuck the bottom edge under the taskbar.
+    x = max(0, (avail_w - width) // 2)
+    y = max(0, (avail_h - height) // 3)
+    return {"width": width, "height": height,
+            "min_size": (min(min_w, width), min(min_h, height)),
+            "x": x, "y": y}
 
 
 def main() -> int:
@@ -114,11 +126,7 @@ def main() -> int:
     # present -- lets the server-start logic be smoke-tested headlessly.
     import webview
 
-    win_w, win_h, win_min = _window_geometry()
-    webview.create_window(
-        WINDOW_TITLE, url,
-        width=win_w, height=win_h, min_size=win_min,
-    )
+    webview.create_window(WINDOW_TITLE, url, **_window_geometry())
     webview.start()  # blocks until the window is closed
 
     stop_streamlit(proc)
