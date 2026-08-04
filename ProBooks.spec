@@ -87,9 +87,11 @@ hiddenimports = st_hiddenimports + [
     "fitz", "PIL", "Quartz", "objc",
     "sqlcipher3", "sqlcipher3.dbapi2",  # encrypted database driver (native ext)
 ] + collect_submodules("openpyxl") + collect_submodules("reportlab") \
-  + collect_submodules("mcp")
+  + collect_submodules("mcp", filter=lambda name: "mcp.cli" not in name)
     # mcp: the server entry (mcp_server.py) is a data file, invisible to the
     # analyzer — same reason openpyxl/reportlab are collected wholesale.
+    # mcp.cli is excluded: it imports typer (the optional mcp[cli] extra),
+    # which clean environments don't have and the server never uses.
     # Bundle ALL openpyxl and reportlab submodules. Pages/services are bundled as
     # data files, so PyInstaller can't see which submodules they import; collect
     # them all to avoid ModuleNotFound (the openpyxl.utils.dataframe lesson).
