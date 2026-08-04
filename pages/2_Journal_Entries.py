@@ -8,10 +8,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.account import Account
 from models.client import Client
+from models.draft_entry import DraftEntry
 from models.journal_entry import JournalEntry, JournalEntryLine
 from models.transaction import ImportedTransaction
 from services.import_corrections import correct_imported_category
 from database import init_database
+from database import connection as dbconn
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
@@ -317,8 +319,22 @@ if "journal_active_tab" not in st.session_state:
     st.session_state.journal_active_tab = "New Entry"
 
 active_view = view_switcher(
-    ["New Entry", "View Entries", "Reverse Entry"], key="journal_active_tab"
+    ["New Entry", "View Entries", "Reverse Entry", "Drafts"],
+    key="journal_active_tab"
 )
+
+# Point at pending assistant proposals from anywhere on the page.
+_pending_drafts = DraftEntry.pending_count(client_id)
+if _pending_drafts and active_view != "Drafts":
+    _bc1, _bc2 = st.columns([4, 1])
+    with _bc1:
+        noun = "draft entry" if _pending_drafts == 1 else "draft entries"
+        st.info(f"{_pending_drafts} {noun} proposed by your assistant "
+                "await review.", icon="📥")
+    with _bc2:
+        if st.button("Review drafts", key="goto_drafts", width="stretch"):
+            st.session_state.journal_active_tab = "Drafts"
+            st.rerun()
 
 if active_view == "New Entry":
     st.subheader("Create Journal Entry" if not st.session_state.editing_entry_id else "Edit Journal Entry")
@@ -775,3 +791,58 @@ elif active_view == "Reverse Entry":
                 st.session_state.confirm_reversal = False
             except ValueError as exc:
                 st.error(str(exc))
+
+
+if active_view == "Drafts":
+    st.subheader("Draft entries")
+    st.caption(
+        "Proposals filed by your assistant (MCP). Nothing here is in the "
+        "books: approving posts a real journal entry under your name, "
+        "rejecting discards the draft, and the audit trail records both."
+    )
+    _draft_msg = st.session_state.pop("draft_result", None)
+    if _draft_msg:
+        st.success(_draft_msg)
+
+    _pending = DraftEntry.get_pending(client_id)
+    if not _pending:
+        st.info("No drafts waiting for review.")
+    else:
+        _names = {a.account_number: a.name
+                  for a in Account.get_all(client_id, active_only=False)}
+        for d in _pending:
+            with st.container(border=True):
+                st.markdown(f"**{d.entry_date} · {d.description}**")
+                st.caption(f"Draft #{d.id} · {d.entry_type} · proposed by "
+                           f"{d.proposed_by}"
+                           + (f" · {d.proposed_at}" if d.proposed_at else ""))
+                if d.rationale:
+                    st.markdown(f"*Why:* {d.rationale}")
+                st.table([
+                    {"Account": f"{l.account_number} - "
+                                f"{_names.get(str(l.account_number), '?')}",
+                     "Debit": f"{l.debit_cents / 100:,.2f}" if l.debit_cents else "",
+                     "Credit": f"{l.credit_cents / 100:,.2f}" if l.credit_cents else "",
+                     "Memo": l.memo or ""}
+                    for l in d.lines
+                ])
+                _a1, _a2, _sp = st.columns([1, 1, 3])
+                with _a1:
+                    if st.button("Approve & post", type="primary",
+                                 key=f"draft_approve_{d.id}",
+                                 disabled=dbconn.READ_ONLY):
+                        try:
+                            _entry_id = d.approve()
+                        except Exception as exc:
+                            st.error(f"Could not post the draft: {exc}")
+                        else:
+                            st.session_state.draft_result = (
+                                f"Draft #{d.id} posted as journal entry "
+                                f"#{_entry_id}.")
+                            st.rerun()
+                with _a2:
+                    if st.button("Reject", key=f"draft_reject_{d.id}",
+                                 disabled=dbconn.READ_ONLY):
+                        d.reject()
+                        st.session_state.draft_result = f"Draft #{d.id} rejected."
+                        st.rerun()

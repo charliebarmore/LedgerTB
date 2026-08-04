@@ -32,9 +32,10 @@ MCP_KEY_SECRET = "mcp_db_key"
 server = MCPServer(
     "probooks",
     instructions=(
-        "Read-only access to ProBooks bookkeeping data. Start with "
-        "list_clients to find the client_id; amounts are US dollars. "
-        "This server cannot modify the books."
+        "Access to ProBooks bookkeeping data. Start with list_clients to "
+        "find the client_id; amounts are US dollars. This server cannot "
+        "modify the books — it can read everything and file DRAFT entries "
+        "(propose_entry), which only a human can approve, in the app."
     ),
 )
 
@@ -49,7 +50,9 @@ def _unlock_from_vault() -> bool:
     # means no in-use lock is needed (or taken).
     from utils import books
     dbconn.DATABASE_PATH = books.active_book()
-    dbconn.READ_ONLY = True
+    # The ledger is unreachable by construction: an authorizer on every
+    # connection allows reads everywhere and writes only to draft_entries.
+    dbconn.DRAFT_INBOX_ONLY = True
     dbconn.set_active_key(key)
     return True
 
@@ -113,6 +116,25 @@ def find_entries(client_id: int, search: str = "", start: str = "",
 def entry_detail(client_id: int, entry_id: int) -> dict:
     """A single journal entry with all its debit/credit lines and memos."""
     return mcp_tools.entry_detail(client_id, entry_id)
+
+
+@server.tool()
+def propose_entry(client_id: int, entry_date: str, description: str,
+                  lines: list, rationale: str = "",
+                  entry_type: str = "Regular") -> dict:
+    """File a DRAFT journal entry for human review in ProBooks. It does NOT
+    touch the ledger — a person approves or rejects it in the app. lines:
+    [{"account_number": "7300", "debit": 24.00}, {"account_number": "2000",
+    "credit": 24.00}] (dollars; optional "memo"). Explain WHY in rationale."""
+    return mcp_tools.propose_entry(client_id, entry_date, description,
+                                   lines, rationale, entry_type)
+
+
+@server.tool()
+def list_drafts(client_id: int, status: str = "pending") -> list:
+    """Draft entries this server has filed and their review status
+    ("pending", "approved", "rejected", or "all")."""
+    return mcp_tools.list_drafts(client_id, status)
 
 
 @server.tool()

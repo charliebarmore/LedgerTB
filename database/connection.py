@@ -40,9 +40,34 @@ _active_key = None
 _key_lock = threading.Lock()
 
 # When True, every new connection is pinned read-only (PRAGMA query_only).
-# Set by the MCP server before its first query: assistant access is read-only
-# by construction, not by convention.
+# Used for read-only book sessions (firm-mode lock fallback): nothing writes.
 READ_ONLY = False
+
+# When True, every new connection gets a SQLite authorizer that permits reads
+# everywhere but writes ONLY to draft_entries. This is the MCP server's mode:
+# an assistant can file a draft for human review, and the engine itself —
+# not tool design — makes the ledger unreachable.
+DRAFT_INBOX_ONLY = False
+
+_AUTH_OK = getattr(_driver, "SQLITE_OK", 0)
+_AUTH_DENY = getattr(_driver, "SQLITE_DENY", 1)
+_AUTH_ALLOWED_ACTIONS = {
+    getattr(_driver, name, default)
+    for name, default in (
+        ("SQLITE_SELECT", 21), ("SQLITE_READ", 20), ("SQLITE_FUNCTION", 31),
+        ("SQLITE_TRANSACTION", 22), ("SQLITE_SAVEPOINT", 32),
+    )
+}
+_AUTH_INSERT = getattr(_driver, "SQLITE_INSERT", 18)
+_AUTH_UPDATE = getattr(_driver, "SQLITE_UPDATE", 23)
+
+
+def _draft_inbox_authorizer(action, arg1, arg2, dbname, source):
+    if action in _AUTH_ALLOWED_ACTIONS:
+        return _AUTH_OK
+    if action in (_AUTH_INSERT, _AUTH_UPDATE) and arg1 == "draft_entries":
+        return _AUTH_OK
+    return _AUTH_DENY
 
 
 def set_active_key(raw_key_hex: str) -> None:
@@ -102,6 +127,9 @@ def get_connection():
     conn.execute("PRAGMA foreign_keys = ON")
     if READ_ONLY:
         conn.execute("PRAGMA query_only = ON")
+    elif DRAFT_INBOX_ONLY:
+        # Set last so the connection-setup pragmas above are unaffected.
+        conn.set_authorizer(_draft_inbox_authorizer)
     return conn
 
 
