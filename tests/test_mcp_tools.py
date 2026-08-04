@@ -91,9 +91,14 @@ def test_read_only_pin_blocks_writes_but_not_reads(client_id, accounts, monkeypa
 
 def test_vault_unlock_round_trip(client_id, monkeypatch):
     import mcp_server
+    from utils import books
     from utils.secure_store import set_secret
 
     monkeypatch.setattr(dbconn, "READ_ONLY", dbconn.READ_ONLY)  # restore later
+    # Firm mode resolves the active book from the user registry; pin it to the
+    # test database.
+    test_db = dbconn.DATABASE_PATH
+    monkeypatch.setattr(books, "active_book", lambda: test_db)
     session_key = dbconn.get_active_key()
     assert session_key, "db fixture should have keyed the session"
 

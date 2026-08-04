@@ -45,6 +45,10 @@ def _unlock_from_vault() -> bool:
     key = get_secret(MCP_KEY_SECRET)
     if not key:
         return False
+    # Firm mode: read whichever book the app most recently opened. Read-only
+    # means no in-use lock is needed (or taken).
+    from utils import books
+    dbconn.DATABASE_PATH = books.active_book()
     dbconn.READ_ONLY = True
     dbconn.set_active_key(key)
     return True

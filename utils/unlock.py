@@ -1,4 +1,4 @@
-"""Passphrase gate for the encrypted database.
+"""Passphrase gate for the encrypted database, and the book-file chooser.
 
 ProBooks encrypts its SQLite database with SQLCipher. The key is derived from a
 passphrase entered at launch and held only in this process -- never written to
@@ -9,11 +9,18 @@ page renders only the gate and stops.
 The gate is satisfied by the *process* holding an active key, not by session
 state, so one unlock covers the whole launch (and the pytest ``db`` fixture,
 which sets a key directly, transparently passes the gate).
+
+Firm mode: the gate is also where a different BOOK FILE is chosen (a firm can
+keep book files on a shared drive, ProSystem-style). Opening a book takes an
+in-use lock beside the file; if someone else holds it, the opener chooses
+read-only or takeover. See utils/books.py and utils/book_lock.py.
 """
+
+import atexit
 
 import streamlit as st
 
-from config import DATABASE_PATH, APP_NAME
+from config import APP_NAME
 from database import connection as dbconn
 from database.crypto import (
     database_state,
@@ -21,8 +28,14 @@ from database.crypto import (
     encrypt_plaintext_db,
     verify_passphrase,
 )
+from utils import book_lock, books
 
 MIN_PASSPHRASE_LEN = 8
+
+# Best-effort lock release on clean shutdown. release() only removes a lock
+# this process wrote, so this can never clobber another machine's session; a
+# hard kill leaves a stale lock that the next same-user open reclaims.
+atexit.register(lambda: book_lock.release(dbconn.DATABASE_PATH))
 
 
 def require_unlock():
@@ -34,7 +47,7 @@ def require_unlock():
     behind a persistent warning.
     """
     if not dbconn.ENCRYPTION_AVAILABLE:
-        if database_state(DATABASE_PATH) == "encrypted":
+        if database_state(dbconn.DATABASE_PATH) == "encrypted":
             st.markdown(f"## 🔒 {APP_NAME}")
             st.error(
                 "This database is encrypted, but the SQLCipher driver "
@@ -50,8 +63,15 @@ def require_unlock():
         )
         return
     if dbconn.has_active_key():
+        if dbconn.READ_ONLY:
+            holder = book_lock.read_lock(dbconn.DATABASE_PATH)
+            who = f" — in use by {book_lock.describe(holder)}" if holder else ""
+            st.warning(f"Read-only: this book is open for viewing only{who}.",
+                       icon="🔍")
         return
-    _render_gate(database_state(DATABASE_PATH))
+    # Locked: point at the chosen book before deciding which form to show.
+    dbconn.DATABASE_PATH = books.active_book()
+    _render_gate(database_state(dbconn.DATABASE_PATH))
     st.stop()
 
 
@@ -65,15 +85,95 @@ def _valid_new_passphrase(passphrase: str, confirm: str) -> bool:
     return True
 
 
+def _finish_unlock(raw_key_hex: str):
+    """Take the book's in-use lock and activate the key — or, when someone
+    else holds the lock, park the key and let the user choose."""
+    result = book_lock.acquire(dbconn.DATABASE_PATH)
+    if result["acquired"]:
+        dbconn.set_active_key(raw_key_hex)
+        books.set_active_book(dbconn.DATABASE_PATH)
+        st.rerun()
+    else:
+        st.session_state["_pending_book_key"] = raw_key_hex
+        st.session_state["_book_lock_holder"] = result["holder"]
+        st.rerun()
+
+
+def _render_lock_choice():
+    holder = st.session_state["_book_lock_holder"]
+    st.warning(f"This book is in use by **{book_lock.describe(holder)}**.")
+    st.caption(
+        "Open read-only to look without touching anything. Take over only if "
+        "you are sure no one is actually working in it (for example, after a "
+        "crash left the lock behind) — two writers can corrupt a shared book."
+    )
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        if st.button("Open read-only", type="primary"):
+            dbconn.READ_ONLY = True
+            dbconn.set_active_key(st.session_state.pop("_pending_book_key"))
+            st.session_state.pop("_book_lock_holder", None)
+            books.set_active_book(dbconn.DATABASE_PATH)
+            st.rerun()
+    with c2:
+        if st.button("Take over the book"):
+            book_lock.takeover(dbconn.DATABASE_PATH)
+            dbconn.set_active_key(st.session_state.pop("_pending_book_key"))
+            st.session_state.pop("_book_lock_holder", None)
+            books.set_active_book(dbconn.DATABASE_PATH)
+            st.rerun()
+    with c3:
+        if st.button("Cancel"):
+            st.session_state.pop("_pending_book_key", None)
+            st.session_state.pop("_book_lock_holder", None)
+            st.rerun()
+
+
+def _render_book_chooser():
+    """Open a different book file (shared-drive workflow)."""
+    with st.expander("Book file", expanded=False):
+        st.caption(f"Current: `{dbconn.DATABASE_PATH}`")
+        recents = [p for p in books.recent_books()
+                   if str(p) != str(dbconn.DATABASE_PATH)]
+        if recents:
+            pick = st.selectbox(
+                "Recent books",
+                options=[str(p) for p in recents],
+                index=None,
+                placeholder="Choose a recent book",
+                key="book_recent_pick",
+            )
+            if pick and st.button("Open selected", key="book_open_recent"):
+                books.set_active_book(pick)
+                st.rerun()
+        other = st.text_input(
+            "Open or create another book by path",
+            placeholder=r"e.g. /Volumes/Shared/Books/SmithCo.probooks",
+            key="book_other_path",
+        )
+        if other and st.button("Open this path", key="book_open_other"):
+            books.set_active_book(other.strip())
+            st.rerun()
+        st.caption(
+            "A book is one encrypted ProBooks database. Book files can live "
+            "on a shared drive; each book has its own passphrase, and an "
+            "in-use lock keeps two people from writing to one book at once."
+        )
+
+
 def _render_gate(state: str):
     # Keep the lock screen clean: no client nav, just the passphrase prompt.
     st.markdown(f"## 🔒 {APP_NAME}")
+    if st.session_state.get("_book_lock_holder"):
+        _render_lock_choice()
+        return
     if state == "encrypted":
         _unlock_form()
     elif state == "plaintext":
         _migrate_form()
     else:  # "absent"
         _setup_form()
+    _render_book_chooser()
 
 
 def _unlock_form():
@@ -81,9 +181,8 @@ def _unlock_form():
     with st.form("db_unlock"):
         passphrase = st.text_input("Passphrase", type="password")
         if st.form_submit_button("Unlock", type="primary"):
-            if verify_passphrase(DATABASE_PATH, passphrase):
-                dbconn.set_active_key(derive_key(passphrase))
-                st.rerun()
+            if verify_passphrase(dbconn.DATABASE_PATH, passphrase):
+                _finish_unlock(derive_key(passphrase))
             else:
                 st.error("Incorrect passphrase.")
 
@@ -101,8 +200,7 @@ def _setup_form():
             if _valid_new_passphrase(passphrase, confirm):
                 # First keyed connection (init_database, next run) creates the
                 # database already encrypted under this passphrase.
-                dbconn.set_active_key(derive_key(passphrase))
-                st.rerun()
+                _finish_unlock(derive_key(passphrase))
 
 
 def _migrate_form():
@@ -116,7 +214,6 @@ def _migrate_form():
         confirm = st.text_input("Confirm passphrase", type="password")
         if st.form_submit_button("Encrypt existing database", type="primary"):
             if _valid_new_passphrase(passphrase, confirm):
-                backup = encrypt_plaintext_db(DATABASE_PATH, passphrase)
-                dbconn.set_active_key(derive_key(passphrase))
+                backup = encrypt_plaintext_db(dbconn.DATABASE_PATH, passphrase)
                 st.session_state["_migration_backup_name"] = backup.name
-                st.rerun()
+                _finish_unlock(derive_key(passphrase))
