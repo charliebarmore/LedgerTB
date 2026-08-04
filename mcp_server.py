@@ -25,7 +25,7 @@ from mcp.server import MCPServer
 
 from database import connection as dbconn
 from services import mcp_tools
-from utils.secure_store import get_secret
+from utils import secure_store
 
 MCP_KEY_SECRET = "mcp_db_key"
 
@@ -42,7 +42,7 @@ server = MCPServer(
 def _unlock_from_vault() -> bool:
     """Key the database from the vault entry written by 'Enable assistant
     access'. Returns False when access has not been enabled."""
-    key = get_secret(MCP_KEY_SECRET)
+    key = secure_store.get_secret(MCP_KEY_SECRET)
     if not key:
         return False
     # Firm mode: read whichever book the app most recently opened. Read-only

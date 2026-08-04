@@ -96,3 +96,30 @@ def test_switching_books_isolates_data(client_id, accounts, tmp_path):
     names = [c.name for c in Client.get_all()]
     assert "Book B Client" not in names
     assert any(c.id == client_id for c in Client.get_all())
+
+
+def test_remembered_key_round_trip_and_stale_cleanup(client_id, monkeypatch):
+    """'Remember on this Mac': a saved key unlocks without a prompt; a key
+    that no longer opens the book is dropped from the vault."""
+    from utils import unlock
+    from utils.secure_store import get_secret, set_secret
+
+    name = unlock.saved_key_name(dbconn.DATABASE_PATH)
+    real_key = dbconn.get_active_key()
+    assert real_key
+
+    set_secret(name, real_key)
+    dbconn.clear_active_key()
+    assert unlock.try_saved_key() is True
+    assert dbconn.has_active_key()
+
+    # Wrong key (passphrase changed): refused AND forgotten.
+    set_secret(name, "00" * 32)
+    dbconn.clear_active_key()
+    assert unlock.try_saved_key() is False
+    assert not dbconn.has_active_key()
+    assert get_secret(name) is None
+
+    # Nothing saved: quietly declines.
+    assert unlock.try_saved_key() is False
+    dbconn.set_active_key(real_key)  # restore for teardown
