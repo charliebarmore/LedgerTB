@@ -59,10 +59,12 @@ jobs:
         if: steps.build.outcome == 'success'
         continue-on-error: true
         shell: pwsh
+        # The exe is a GUI-subsystem binary: "&" would not wait for it and its
+        # stdout is detached, so run via Start-Process and trust the exit code.
         run: |
           $env:PROBOOKS_MODE = "selfcheck"
-          & dist/ProBooks/ProBooks.exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $p = Start-Process -FilePath dist/ProBooks/ProBooks.exe -Wait -PassThru
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
 
       - name: Upload Windows bundle
         if: steps.build.outcome == 'success'
@@ -71,6 +73,9 @@ jobs:
           name: ProBooks-windows
           path: dist/ProBooks/
           retention-days: 7
+          # .streamlit/ is dot-prefixed; without this the artifact silently
+          # ships without the theme/product-chrome config (found the hard way).
+          include-hidden-files: true
 
       - name: Scorecard
         shell: pwsh

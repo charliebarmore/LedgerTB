@@ -1,8 +1,9 @@
-"""Generate ProBooks.icns (the macOS Dock/app icon).
+"""Generate ProBooks.icns (macOS) and ProBooks.ico (Windows) app icons.
 
 Draws a navy rounded-square mark with a white "PB" wordmark matching the app
-theme (#1f3a5f), then builds a multi-resolution .icns via the macOS iconutil.
-Reproducible: re-run `python scripts/make_icon.py` to regenerate.
+theme (#1f3a5f), then builds a multi-resolution .icns via the macOS iconutil
+and a multi-resolution .ico via Pillow (repo root, referenced by the spec's
+Windows EXE). Reproducible: re-run `python scripts/make_icon.py`.
 """
 
 import subprocess
@@ -15,6 +16,7 @@ NAVY = (31, 58, 95)        # #1f3a5f — app primaryColor
 WHITE = (255, 255, 255)
 ROOT = Path(__file__).resolve().parent.parent
 ICNS_OUT = ROOT / "ProBooks.app" / "Contents" / "Resources" / "ProBooks.icns"
+ICO_OUT = ROOT / "ProBooks.ico"
 
 _FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
@@ -61,7 +63,10 @@ def main() -> None:
             base.resize((size * 2, size * 2), Image.LANCZOS).save(iconset / f"icon_{size}x{size}@2x.png")
         subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(ICNS_OUT)], check=True)
 
+    base.save(ICO_OUT, sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+
     print(f"Wrote {ICNS_OUT}")
+    print(f"Wrote {ICO_OUT}")
 
 
 if __name__ == "__main__":

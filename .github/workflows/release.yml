@@ -1,0 +1,75 @@
+name: Release
+
+# Tag-triggered release build. Unlike the spike workflow, nothing here
+# continues on error: a release either passes every gate or is not published.
+#   git tag v0.1.0 && git push origin v0.1.0
+# Publishes a DRAFT release for review before it goes live.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # required to create the Release
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -c "lines = [l for l in open('requirements.txt') if not l.startswith('sqlcipher3')]; open('req-win.txt','w').writelines(lines)"
+          python -m pip install --upgrade pip
+          pip install -r req-win.txt -r requirements-desktop.txt
+          pip install --only-binary :all: "sqlcipher3>=0.6.2"
+
+      - name: Refuse to ship without encryption
+        shell: pwsh
+        run: python -c "from database import connection; assert connection.ENCRYPTION_AVAILABLE, 'sqlcipher missing - refusing to ship an unencrypted build'"
+
+      - name: Tests
+        shell: pwsh
+        run: python -m pytest -q -m "not performance"
+
+      - name: Build
+        shell: pwsh
+        run: pyinstaller ProBooks.spec --noconfirm
+
+      - name: Frozen selfcheck
+        shell: pwsh
+        run: |
+          $env:PROBOOKS_MODE = "selfcheck"
+          $p = Start-Process -FilePath dist/ProBooks/ProBooks.exe -Wait -PassThru
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+
+      - name: Bundle sanity
+        shell: pwsh
+        # The config folder is dot-prefixed and has been lost in transit
+        # before; a release without it ships the wrong UI.
+        run: |
+          if (-not (Test-Path "dist/ProBooks/_internal/.streamlit/config.toml")) {
+            Write-Error "bundle is missing .streamlit/config.toml"
+            exit 1
+          }
+
+      # Swap for an Inno Setup installer when that lands.
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path dist/ProBooks/* -DestinationPath ProBooks-${{ github.ref_name }}-windows-x64.zip
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ProBooks-${{ github.ref_name }}-windows-x64.zip
+          draft: true # review before it goes live
+          generate_release_notes: true
