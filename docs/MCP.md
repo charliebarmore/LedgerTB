@@ -20,6 +20,13 @@ journal-entry search and detail, and the deterministic integrity sweep.
   (`propose_entry`). It lands in **Journal Entries → Drafts** for review;
   approving posts a real, audited entry under the approver's name, and
   rejecting discards it. The sidebar badges pending drafts.
+- **Imports, normalized by the assistant.** Drop ANY statement — a weird
+  CSV, a PDF, a pasted table — into the assistant and ask it to stage the
+  transactions (`propose_import`). No column mapping, no format rules:
+  the assistant normalizes, ProBooks stages with full duplicate
+  protection, and you categorize and post in **Import Transactions →
+  Review & Categorize** exactly as with a CSV upload. Re-proposing the
+  same statement stages nothing twice.
 - **Local only.** The server speaks over stdio to the assistant that
   launched it. Nothing listens on a network port.
 - Enabling and disabling are recorded in the audit trail.
@@ -53,7 +60,9 @@ journal-entry search and detail, and the deterministic integrity sweep.
 ## What to expect
 
 Amounts are US dollars. Start with `list_clients` to get the
-`client_id`. The assistant can read and reason about the books, and can file draft
-entries for your review — but it cannot post, edit, or delete anything
-itself. Try: *"Propose the accrual for the July retainer and explain
-your accounts."* Then approve or reject it in Journal Entries → Drafts.
+`client_id`. The assistant can read and reason about the books, file draft entries,
+and stage imports for your review — but it cannot post, edit, or delete
+anything itself. Try: *"Here's my July bank statement PDF — stage the
+transactions into account 1001"* or *"Propose the accrual for the July
+retainer and explain your accounts."* Everything waits for you in the
+app.

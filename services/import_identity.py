@@ -72,12 +72,17 @@ def _mark_duplicate(transaction: dict, kind: str, info: dict) -> None:
     transaction["include"] = False
 
 
-def classify_import_duplicates(transactions: Iterable[dict], client_id: int) -> int:
+def classify_import_duplicates(transactions: Iterable[dict], client_id: int,
+                               exclude_ids=frozenset()) -> int:
     """Mark duplicates within an upload and against durable imported history.
 
     Existing pre-migration rows are fingerprinted in place so historical imports
     participate in future checks. Only derived metadata is backfilled; no
     statement contents or user-entered accounting fields are changed.
+
+    ``exclude_ids``: imported_transactions ids to ignore in the history — used
+    when re-classifying rows that are themselves already staged in that table
+    (assistant imports), which would otherwise each match their own record.
     """
     transactions = list(transactions)
     for transaction in transactions:
@@ -97,7 +102,7 @@ def classify_import_duplicates(transactions: Iterable[dict], client_id: int) -> 
             """,
             (client_id,),
         )
-        existing = cursor.fetchall()
+        existing = [r for r in cursor.fetchall() if r["id"] not in exclude_ids]
         by_fingerprint = defaultdict(list)
         by_idempotency = {}
         for row in existing:

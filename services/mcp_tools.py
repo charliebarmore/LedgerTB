@@ -304,3 +304,124 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
         }
         for r in rows
     ]
+
+
+def propose_import(client_id: int, bank_account_number: str, rows: list,
+                   source_label: str = "Assistant import") -> dict:
+    """Stage normalized bank/card rows for human review in ProBooks' import
+    flow. Rows never post from here: a person categorizes and posts them in
+    the app, with the same duplicate protection as a CSV import."""
+    import json as _json
+
+    from models.transaction import ImportedTransaction
+    from services.import_identity import (
+        classify_import_duplicates,
+        hash_source,
+    )
+    from database.connection import get_cursor
+
+    _require_client(client_id)
+    account = _resolve_account(client_id, bank_account_number)
+    if account.type not in ("Asset", "Liability"):
+        raise ValueError(
+            "bank_account_number must be a cash or credit-card account "
+            f"(got {account.type}). Sign convention: positive = money in / "
+            "deposit, negative = money out / charge paid."
+        )
+    if not rows:
+        raise ValueError("No rows to stage.")
+    if len(rows) > 500:
+        raise ValueError("Stage at most 500 rows per proposal.")
+
+    staged_dicts = []
+    for i, r in enumerate(rows, start=1):
+        row_date = _parse_date(str(r.get("date", "")), f"rows[{i}].date")
+        description = str(r.get("description", "")).strip()
+        if not description:
+            raise ValueError(f"rows[{i}] needs a description.")
+        try:
+            amount = round(float(r.get("amount")), 2)
+        except (TypeError, ValueError):
+            raise ValueError(f"rows[{i}].amount must be a number.")
+        if amount == 0:
+            raise ValueError(f"rows[{i}].amount cannot be zero.")
+        staged_dicts.append({
+            "date": row_date,
+            "description": description,
+            "amount": amount,
+            "client_id": client_id,
+            "bank_account_id": account.id,
+            "source_row_number": i,
+        })
+
+    content = _json.dumps(
+        [[d["date"].isoformat(), d["description"], d["amount"]]
+         for d in staged_dicts] + [account.account_number],
+        separators=(",", ":"),
+    ).encode("utf-8")
+    source_id = hash_source(content)
+    batch_id = f"mcp-{source_id[:8]}"
+    for d in staged_dicts:
+        d["source_id"] = source_id
+        d["source_filename"] = source_label
+
+    duplicate_count = classify_import_duplicates(staged_dicts, client_id)
+
+    # Never double-stage: rows whose identity already exists (staged earlier
+    # or already posted) are skipped, so re-proposing is harmless.
+    keys = [d["idempotency_key"] for d in staged_dicts]
+    with get_cursor() as cursor:
+        cursor.execute(
+            "SELECT idempotency_key FROM imported_transactions "
+            f"WHERE client_id = ? AND idempotency_key IN ({','.join('?' * len(keys))})",
+            [client_id] + keys,
+        )
+        already = {r["idempotency_key"] for r in cursor.fetchall()}
+    fresh = [d for d in staged_dicts if d["idempotency_key"] not in already]
+
+    if fresh:
+        ImportedTransaction.bulk_insert([
+            ImportedTransaction(
+                client_id=client_id,
+                import_batch=batch_id,
+                transaction_date=d["date"],
+                description=d["description"][:200],
+                amount=d["amount"],
+                bank_account_id=account.id,
+                status="Pending",
+                source_id=source_id,
+                source_filename=source_label,
+                source_row_number=d["source_row_number"],
+                row_fingerprint=d["row_fingerprint"],
+                idempotency_key=d["idempotency_key"],
+            )
+            for d in fresh
+        ])
+    return {
+        "batch_id": batch_id,
+        "staged": len(fresh),
+        "skipped_already_known": len(staged_dicts) - len(fresh),
+        "flagged_as_possible_duplicates": duplicate_count,
+        "note": ("Staged for human review — ProBooks -> Import Transactions "
+                 "-> Review & Categorize. Nothing posts until a person "
+                 "categorizes and posts it there."),
+    }
+
+
+def list_staged_imports(client_id: int) -> list:
+    """Assistant-staged transactions still awaiting review (status Pending)."""
+    from models.transaction import ImportedTransaction
+
+    _require_client(client_id)
+    return [
+        {
+            "id": t.id,
+            "batch_id": t.import_batch,
+            "date": t.transaction_date.isoformat()
+            if hasattr(t.transaction_date, "isoformat") else str(t.transaction_date),
+            "description": t.description,
+            "amount": t.amount,
+            "source": t.source_filename or "",
+        }
+        for t in ImportedTransaction.get_by_status(client_id, "Pending")
+    ]

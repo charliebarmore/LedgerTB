@@ -34,8 +34,9 @@ server = MCPServer(
     instructions=(
         "Access to ProBooks bookkeeping data. Start with list_clients to "
         "find the client_id; amounts are US dollars. This server cannot "
-        "modify the books — it can read everything and file DRAFT entries "
-        "(propose_entry), which only a human can approve, in the app."
+        "modify the books — it can read everything, file DRAFT entries "
+        "(propose_entry), and stage bank transactions for the import flow "
+        "(propose_import); a human reviews and posts everything in the app."
     ),
 )
 
@@ -135,6 +136,25 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
     """Draft entries this server has filed and their review status
     ("pending", "approved", "rejected", or "all")."""
     return mcp_tools.list_drafts(client_id, status)
+
+
+@server.tool()
+def propose_import(client_id: int, bank_account_number: str, rows: list,
+                   source_label: str = "Assistant import") -> dict:
+    """Stage bank/card transactions for human review in ProBooks' import
+    flow — use this after normalizing ANY statement format (CSV, PDF, OFX,
+    a pasted table). rows: [{"date": "2026-07-03", "description": "...",
+    "amount": -12.50}] — positive = money in, negative = money out, from the
+    bank account's perspective. Duplicate-checked; nothing posts until a
+    person categorizes and posts it in the app."""
+    return mcp_tools.propose_import(client_id, bank_account_number, rows,
+                                    source_label)
+
+
+@server.tool()
+def list_staged_imports(client_id: int) -> list:
+    """Staged transactions still awaiting human review in the import flow."""
+    return mcp_tools.list_staged_imports(client_id)
 
 
 @server.tool()

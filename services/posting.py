@@ -138,6 +138,12 @@ def post_transaction(
             (client_id, transaction["idempotency_key"]),
         )
         existing = cursor.fetchone()
+        staged_row_id = None
+        if existing and existing["journal_entry_id"] is None and existing["status"] == "Pending":
+            # An assistant-staged row awaiting review: this post IS its
+            # completion, not a retry — adopt the record instead of refusing.
+            staged_row_id = existing["id"]
+            existing = None
         if existing:
             existing_entry = JournalEntry.get_by_id(existing["journal_entry_id"], client_id=client_id)
             if existing_entry is None:
@@ -163,6 +169,7 @@ def post_transaction(
             """
             SELECT id, journal_entry_id FROM imported_transactions
             WHERE client_id = ? AND row_fingerprint = ?
+              AND journal_entry_id IS NOT NULL
             ORDER BY id LIMIT 1
             """,
             (client_id, transaction["row_fingerprint"]),
@@ -177,6 +184,7 @@ def post_transaction(
         entry.save(conn=conn)
 
         imported_txn = ImportedTransaction(
+            id=staged_row_id,
             client_id=client_id,
             import_batch=batch_id,
             transaction_date=transaction["date"],

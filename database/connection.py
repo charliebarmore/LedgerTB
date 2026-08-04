@@ -62,10 +62,17 @@ _AUTH_INSERT = getattr(_driver, "SQLITE_INSERT", 18)
 _AUTH_UPDATE = getattr(_driver, "SQLITE_UPDATE", 23)
 
 
+# What an assistant connection may write: its proposal inboxes, and the
+# append-only audit rows that record the proposals. Never the ledger.
+_ASSISTANT_INSERT_TABLES = {"draft_entries", "imported_transactions", "audit_log"}
+
+
 def _draft_inbox_authorizer(action, arg1, arg2, dbname, source):
     if action in _AUTH_ALLOWED_ACTIONS:
         return _AUTH_OK
-    if action in (_AUTH_INSERT, _AUTH_UPDATE) and arg1 == "draft_entries":
+    if action == _AUTH_INSERT and arg1 in _ASSISTANT_INSERT_TABLES:
+        return _AUTH_OK
+    if action == _AUTH_UPDATE and arg1 == "draft_entries":
         return _AUTH_OK
     return _AUTH_DENY
 
