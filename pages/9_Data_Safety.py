@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import APP_VERSION, DATABASE_PATH
+from config import APP_VERSION
 from database import init_database
 from database import connection as dbconn
 from models.audit_log import AuditLog
@@ -37,7 +37,26 @@ def audit_safety_event(action, event_name, details):
         st.warning(f"Operation succeeded, but its audit event could not be recorded: {exc}")
 
 st.title("Data Safety")
-st.caption(f"ProBooks {APP_VERSION} · Database: {DATABASE_PATH}")
+st.caption(f"ProBooks {APP_VERSION} · Book: {dbconn.DATABASE_PATH}")
+
+# ---- Book file (firm mode) -------------------------------------------------
+from utils import book_lock as _bl
+
+_book_cols = st.columns([3, 1])
+with _book_cols[0]:
+    _holder = _bl.read_lock(dbconn.DATABASE_PATH)
+    if dbconn.READ_ONLY:
+        st.caption("Open **read-only**"
+                   + (f" — in use by {_bl.describe(_holder)}" if _holder else ""))
+    elif _holder:
+        st.caption(f"In use by **{_bl.describe(_holder)}** (that's this session)")
+with _book_cols[1]:
+    if st.button("Switch book…", help="Close this book and choose another "
+                 "(shared-drive books included)"):
+        _bl.release(dbconn.DATABASE_PATH)
+        dbconn.READ_ONLY = False
+        dbconn.clear_active_key()
+        st.rerun()
 
 if is_production_ready():
     st.success("Production safeguards are ready.")
