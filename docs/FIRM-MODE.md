@@ -13,7 +13,7 @@ travels by path, and whoever needs a book opens it.
   a passphrase — the passphrase is the login. **Using one office
   passphrase for all your firm's books is fine**; different passphrases
   per book are an option (say, to wall off one sensitive client), not a
-  requirement. And **"Remember on this Mac/PC"** stores a book's unlock
+  requirement. And **"Remember on this computer"** stores a book's unlock
   key in your computer's credential vault so the app opens it without
   asking — per machine, undoable on Data Safety.
 - **Data Safety** shows which book is open and offers *Switch book…*
