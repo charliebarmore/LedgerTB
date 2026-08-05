@@ -110,6 +110,23 @@ def _window_geometry(preferred_w=1360, preferred_h=900, min_w=900, min_h=600):
             "x": x, "y": y}
 
 
+def _place_window(window, wx, wy):
+    """Un-minimise and position the window once the GUI loop is running.
+
+    Passing x/y straight to create_window makes the Windows (WinForms /
+    EdgeChromium) backend start the window minimised -- it parks off-screen
+    at roughly (-10667, -10667) with IsIconic set, so the app appears to
+    launch and then never show. Sizing at create time is fine; only the
+    placement has to wait until the window actually exists.
+    """
+    try:
+        window.restore()
+        if wx is not None and wy is not None:
+            window.move(wx, wy)
+    except Exception:
+        pass
+
+
 def main() -> int:
     port = _find_free_port()
     url = f"http://127.0.0.1:{port}"
@@ -126,8 +143,10 @@ def main() -> int:
     # present -- lets the server-start logic be smoke-tested headlessly.
     import webview
 
-    webview.create_window(WINDOW_TITLE, url, **_window_geometry())
-    webview.start()  # blocks until the window is closed
+    geom = _window_geometry()
+    win_x, win_y = geom.pop("x", None), geom.pop("y", None)
+    window = webview.create_window(WINDOW_TITLE, url, **geom)
+    webview.start(_place_window, (window, win_x, win_y))  # blocks until the window is closed
 
     stop_streamlit(proc)
     return 0
