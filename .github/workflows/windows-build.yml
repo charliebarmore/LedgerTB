@@ -79,9 +79,16 @@ jobs:
 
       - name: Scorecard
         shell: pwsh
+        # continue-on-error above exists to gather ALL signals in one run —
+        # but the JOB must still go red if any signal failed. A green run
+        # with a failure buried in an annotation is how 34 test failures
+        # shipped unnoticed.
         run: |
           Write-Host "sqlcipher wheel: ${{ steps.sqlcipher.outcome }}"
           Write-Host "test suite:      ${{ steps.tests.outcome }}"
           Write-Host "pyinstaller:     ${{ steps.build.outcome }}"
           Write-Host "selfcheck:       ${{ steps.selfcheck.outcome }}"
-          if ("${{ steps.build.outcome }}" -ne "success") { exit 1 }
+          $bad = @("${{ steps.sqlcipher.outcome }}", "${{ steps.tests.outcome }}",
+                   "${{ steps.build.outcome }}", "${{ steps.selfcheck.outcome }}") |
+                 Where-Object { $_ -eq "failure" }
+          if ($bad) { Write-Error "one or more signals failed"; exit 1 }

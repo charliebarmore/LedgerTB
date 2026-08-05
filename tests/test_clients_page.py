@@ -16,7 +16,9 @@ def _run_clients_page(monkeypatch, view="Add Client"):
     monkeypatch.setattr(cs, "apply_sidebar_style", lambda *a, **k: None)
 
     from streamlit.testing.v1 import AppTest
-    at = AppTest.from_file("pages/0_Clients.py", default_timeout=30)
+
+    from tests.conftest import page_path
+    at = AppTest.from_file(page_path("pages/0_Clients.py"), default_timeout=30)
     # The page defaults to the View Clients list; only the selected view
     # renders (unlike the old st.tabs, which rendered both). The switcher
     # follows the plain session var (see utils/ui.view_switcher).

@@ -7,7 +7,7 @@ from models.account import Account
 from models.journal_entry import JournalEntry
 from models.transaction import ImportedTransaction
 from services.posting import post_transaction
-from tests.conftest import post_entry
+from tests.conftest import page_path, post_entry
 
 
 def _select_client(monkeypatch, client_id):
@@ -35,19 +35,19 @@ def test_paginated_accounting_pages_render(client_id, accounts, monkeypatch):
             [(accounts["cash"], amount, 0), (accounts["revenue"], 0, amount)],
         )
 
-    transactions = AppTest.from_file("pages/6_Transactions.py", default_timeout=30).run()
+    transactions = AppTest.from_file(page_path("pages/6_Transactions.py"), default_timeout=30).run()
     assert not transactions.exception
     assert any(metric.label == "Filtered Transactions" for metric in transactions.metric)
     assert any(button.label == "Next" and not button.disabled for button in transactions.button)
 
-    journals = AppTest.from_file("pages/2_Journal_Entries.py", default_timeout=30)
+    journals = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=30)
     journals.session_state["journal_active_tab"] = "View Entries"
     journals.run()
     assert not journals.exception
     assert any(metric.label == "Filtered Entries" for metric in journals.metric)
     assert any(button.label == "Next" and not button.disabled for button in journals.button)
 
-    audit = AppTest.from_file("pages/8_Audit_Trail.py", default_timeout=30).run()
+    audit = AppTest.from_file(page_path("pages/8_Audit_Trail.py"), default_timeout=30).run()
     assert not audit.exception
     assert any(metric.label == "Total Changes" for metric in audit.metric)
     assert any(button.label == "Next" and not button.disabled for button in audit.button)
@@ -70,7 +70,7 @@ def test_report_statements_render_with_balance_checks(client_id, accounts, monke
         ("Income Statement", None),
         ("Balance Sheet", "Balance sheet is balanced."),
     ]:
-        page = AppTest.from_file("pages/5_Reports.py", default_timeout=30)
+        page = AppTest.from_file(page_path("pages/5_Reports.py"), default_timeout=30)
         page.session_state["active_report"] = view
         page.run()
         assert not page.exception, view
@@ -83,7 +83,7 @@ def test_report_statements_render_with_balance_checks(client_id, accounts, monke
 def test_period_picker_drives_the_worksheet_dates(client_id, accounts, monkeypatch):
     """Picking a Period must move From/To (keyed date inputs ignore value=)."""
     _select_client(monkeypatch, client_id)
-    page = AppTest.from_file("pages/1_Trial_Balance_Worksheet.py", default_timeout=30)
+    page = AppTest.from_file(page_path("pages/1_Trial_Balance_Worksheet.py"), default_timeout=30)
     page.run()
     assert not page.exception
 
@@ -119,7 +119,7 @@ def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatc
         [(accounts["expense"], 120, 0), (accounts["cash"], 0, 120)],
     )
 
-    page = AppTest.from_file("pages/5_Reports.py", default_timeout=30)
+    page = AppTest.from_file(page_path("pages/5_Reports.py"), default_timeout=30)
     page.session_state["active_report"] = "General Ledger"
     page.run()
     assert not page.exception
@@ -131,7 +131,7 @@ def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatc
     assert any(c.value.startswith("3 accounts") for c in page.caption)
 
     # Drill-down state still narrows to one account.
-    drilled = AppTest.from_file("pages/5_Reports.py", default_timeout=30)
+    drilled = AppTest.from_file(page_path("pages/5_Reports.py"), default_timeout=30)
     drilled.session_state["active_report"] = "General Ledger"
     drilled.session_state["gl_account_id"] = accounts["cash"]
     drilled.run()
@@ -142,8 +142,7 @@ def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatc
 
 def test_year_close_checklist_page_renders(client_id, accounts, monkeypatch):
     _select_client(monkeypatch, client_id)
-    worksheet = AppTest.from_file(
-        "pages/1_Trial_Balance_Worksheet.py", default_timeout=30
+    worksheet = AppTest.from_file(page_path("pages/1_Trial_Balance_Worksheet.py"), default_timeout=30
     ).run()
     assert not worksheet.exception
     assert any(
@@ -155,8 +154,7 @@ def test_journal_form_clears_keyed_line_widgets_after_save(
     client_id, accounts, monkeypatch
 ):
     _select_client(monkeypatch, client_id)
-    journal = AppTest.from_file(
-        "pages/2_Journal_Entries.py", default_timeout=30
+    journal = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=30
     ).run()
     assert not journal.exception
 
@@ -192,8 +190,7 @@ def test_journal_totals_reflect_committed_values_immediately(
     else. Regression for the committed-state read.
     """
     _select_client(monkeypatch, client_id)
-    journal = AppTest.from_file(
-        "pages/2_Journal_Entries.py", default_timeout=30
+    journal = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=30
     ).run()
     assert not journal.exception
 
@@ -209,8 +206,7 @@ def test_journal_totals_reflect_committed_values_immediately(
 def test_hand_keyed_adjusting_entry_gets_aje_reference(client_id, accounts, monkeypatch):
     """AJEs keyed on this page must get the next AJE-00x, like worksheet AJEs."""
     _select_client(monkeypatch, client_id)
-    journal = AppTest.from_file(
-        "pages/2_Journal_Entries.py", default_timeout=30
+    journal = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=30
     ).run()
     journal.selectbox(key="je_hdr_type_g0").set_value("Adjusting").run()
     journal.selectbox(key="account_0_g0").set_value(accounts["expense"]).run()
@@ -233,8 +229,7 @@ def test_edit_button_lands_on_the_form(client_id, accounts, monkeypatch):
         client_id, date(2026, 3, 21),
         [(accounts["cash"], 60, 0), (accounts["revenue"], 0, 60)],
     )
-    journal = AppTest.from_file(
-        "pages/2_Journal_Entries.py", default_timeout=30
+    journal = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=30
     )
     journal.session_state["journal_active_tab"] = "View Entries"
     journal.run()
@@ -264,8 +259,7 @@ def test_editing_an_aje_preserves_its_reference(client_id, accounts, monkeypatch
     entry.save()
 
     _select_client(monkeypatch, client_id)
-    journal = AppTest.from_file(
-        "pages/2_Journal_Entries.py", default_timeout=30
+    journal = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=30
     )
     journal.session_state["edit_entry_id"] = entry.id
     journal.run()
@@ -297,7 +291,7 @@ def test_dashboard_balances_show_totals_and_equation(client_id, accounts, monkey
     )
 
     _select_client(monkeypatch, client_id)
-    dashboard = AppTest.from_file("pages/7_Dashboard.py", default_timeout=30).run()
+    dashboard = AppTest.from_file(page_path("pages/7_Dashboard.py"), default_timeout=30).run()
     assert not dashboard.exception
 
     # The balances summary renders as financial statements via st.html.
@@ -326,8 +320,7 @@ def test_journal_delete_requires_confirmation(client_id, accounts, monkeypatch):
         date(2026, 1, 15),
         [(accounts["cash"], 40, 0), (accounts["revenue"], 0, 40)],
     )
-    journal = AppTest.from_file(
-        "pages/2_Journal_Entries.py", default_timeout=30
+    journal = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=30
     )
     journal.session_state["journal_active_tab"] = "View Entries"
     journal.run()
@@ -366,8 +359,7 @@ def test_imported_journal_uses_guided_category_correction(
         batch_id="guided-correction",
         learn=False,
     )
-    journal = AppTest.from_file(
-        "pages/2_Journal_Entries.py", default_timeout=30
+    journal = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=30
     )
     journal.session_state["journal_active_tab"] = "View Entries"
     journal.run()

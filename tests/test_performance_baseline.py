@@ -10,6 +10,8 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+from tests.conftest import page_path
+
 from database.connection import get_connection
 from models.audit_log import AuditLog
 from models.journal_entry import JournalEntry
@@ -71,13 +73,11 @@ def test_10k_journal_entries_query_and_render_baseline(client_id, accounts, monk
     ))
 
     _select_client(monkeypatch, client_id)
-    journal_page = AppTest.from_file(
-        "pages/2_Journal_Entries.py", default_timeout=MAX_PAGE_SECONDS,
+    journal_page = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=MAX_PAGE_SECONDS,
     )
     journal_page.session_state["journal_active_tab"] = "View Entries"
     journals, journal_render_seconds = _timed(journal_page.run)
-    audit_page, audit_render_seconds = _timed(lambda: AppTest.from_file(
-        "pages/8_Audit_Trail.py", default_timeout=MAX_PAGE_SECONDS,
+    audit_page, audit_render_seconds = _timed(lambda: AppTest.from_file(page_path("pages/8_Audit_Trail.py"), default_timeout=MAX_PAGE_SECONDS,
     ).run())
 
     assert stats.entry_count == 10_000

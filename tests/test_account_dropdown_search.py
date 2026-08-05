@@ -8,6 +8,8 @@ blank; nothing in the option list may be a placeholder pretending to be an
 account.
 """
 from streamlit.testing.v1 import AppTest
+
+from tests.conftest import page_path
 import streamlit as st
 
 from utils.import_review import ensure_row_ids
@@ -21,7 +23,7 @@ def _import_page(monkeypatch, client_id):
     monkeypatch.setattr(selector, "render_client_selector", lambda: client_id)
     monkeypatch.setattr(selector, "apply_sidebar_style", lambda *a, **k: None)
     monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
-    return AppTest.from_file("pages/4_Import_Transactions.py", default_timeout=60)
+    return AppTest.from_file(page_path("pages/4_Import_Transactions.py"), default_timeout=60)
 
 
 def _staged_rows(accounts):
@@ -71,7 +73,7 @@ def test_journal_entry_lines_have_no_placeholder_option(
     monkeypatch.setattr(selector, "render_client_selector", lambda: client_id)
     monkeypatch.setattr(selector, "apply_sidebar_style", lambda *a, **k: None)
     monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
-    journal = AppTest.from_file("pages/2_Journal_Entries.py", default_timeout=30).run()
+    journal = AppTest.from_file(page_path("pages/2_Journal_Entries.py"), default_timeout=30).run()
 
     assert not journal.exception
     line_box = journal.selectbox(key="account_0_g0")
