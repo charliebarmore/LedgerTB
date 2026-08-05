@@ -25,13 +25,21 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install dependencies (pinned)
         shell: pwsh
+        # Install exact versions, not ranges. Build 31013372986 drew starlette
+        # 1.4.0 from an open range and shipped an app that returned HTTP 500 on
+        # every page. A release must be rebuildable to the same bytes.
         run: |
-          python -c "lines = [l for l in open('requirements.txt') if not l.startswith('sqlcipher3')]; open('req-win.txt','w').writelines(lines)"
           python -m pip install --upgrade pip
-          pip install -r req-win.txt -r requirements-desktop.txt
-          pip install --only-binary :all: "sqlcipher3>=0.6.2"
+          pip install -r requirements-windows.lock
+
+      - name: Verify the pinned set is actually installed
+        shell: pwsh
+        # A silent resolver downgrade would put us back where we started.
+        run: |
+          pip check
+          python -c "import starlette, streamlit; print('starlette', starlette.__version__, '| streamlit', streamlit.__version__)"
 
       - name: Refuse to ship without encryption
         shell: pwsh
@@ -52,6 +60,13 @@ jobs:
           $p = Start-Process -FilePath dist/ProBooks/ProBooks.exe -Wait -PassThru
           if ($p.ExitCode -ne 0) { exit $p.ExitCode }
 
+      - name: Smoke test — the built app must serve a page
+        shell: pwsh
+        # selfcheck proves the parts are in the box; this proves the machine
+        # runs. The starlette 1.4.0 breakage passed selfcheck and 500'd on
+        # every request.
+        run: pwsh scripts/smoke_serve.ps1 -ExePath dist/ProBooks/ProBooks.exe
+
       - name: Bundle sanity
         shell: pwsh
         # The config folder is dot-prefixed and has been lost in transit
@@ -62,21 +77,64 @@ jobs:
             exit 1
           }
 
-      # Swap for an Inno Setup installer when that lands.
-      - name: Package
+      - name: Read app version
+        id: ver
         shell: pwsh
-        # Two names for the same bytes: the versioned zip for the archive, and
-        # a stable name so releases/latest/download/ProBooks-windows-x64.zip
+        run: |
+          $v = python -c "from version import APP_VERSION; print(APP_VERSION)"
+          Write-Host "app version: $v"
+          "value=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        # The installer is the supported download. A zip extracted by Explorer
+        # carries mark-of-the-web on every file, which stops .NET loading the
+        # bundled Python.Runtime.dll and kills the app before its window opens.
+        run: |
+          # chocolatey and winget put ISCC in different places, so find it
+          # rather than hardcode one path.
+          $roots = @("${env:ProgramFiles(x86)}", "$env:ProgramFiles", "$env:LOCALAPPDATA\Programs")
+          $iscc = $roots | Where-Object { $_ } | ForEach-Object {
+              Get-ChildItem -Path $_ -Filter ISCC.exe -Recurse -Depth 2 -ErrorAction SilentlyContinue
+          } | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { Write-Error "ISCC.exe not found after installing Inno Setup"; exit 1 }
+          Write-Host "using $iscc"
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.value }}" scripts\probooks.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem installer
+
+      - name: Name the installer assets
+        shell: pwsh
+        # Two names for the same bytes: the versioned file for the archive, and
+        # a stable name so releases/latest/download/ProBooks-windows-x64-setup.exe
         # is an evergreen link that always serves the newest release.
         run: |
-          Compress-Archive -Path dist/ProBooks/* -DestinationPath ProBooks-${{ github.ref_name }}-windows-x64.zip
-          Copy-Item ProBooks-${{ github.ref_name }}-windows-x64.zip ProBooks-windows-x64.zip
+          $src = "installer\ProBooks-${{ steps.ver.outputs.value }}-windows-x64-setup.exe"
+          if (-not (Test-Path $src)) { Write-Error "installer not found at $src"; exit 1 }
+          Copy-Item $src "ProBooks-${{ steps.ver.outputs.value }}-windows-x64-setup.exe"
+          Copy-Item $src "ProBooks-windows-x64-setup.exe"
+
+      - name: Package the zip (secondary)
+        shell: pwsh
+        # Kept for anyone deploying without an installer. NOTE: files extracted
+        # from this zip by Explorer carry mark-of-the-web and the app will not
+        # start until they are unblocked — see the README. The installer is the
+        # supported path.
+        run: |
+          Compress-Archive -Path dist/ProBooks/* -DestinationPath ProBooks-${{ steps.ver.outputs.value }}-windows-x64.zip
+          Copy-Item ProBooks-${{ steps.ver.outputs.value }}-windows-x64.zip ProBooks-windows-x64.zip
 
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            ProBooks-${{ github.ref_name }}-windows-x64.zip
+            ProBooks-${{ steps.ver.outputs.value }}-windows-x64-setup.exe
+            ProBooks-windows-x64-setup.exe
+            ProBooks-${{ steps.ver.outputs.value }}-windows-x64.zip
             ProBooks-windows-x64.zip
           draft: true # review before it goes live
           generate_release_notes: true

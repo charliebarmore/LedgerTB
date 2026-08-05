@@ -9,19 +9,49 @@ works on real Windows.
 
 1. On the Windows PC, sign in to GitHub in a browser → the ProBooks repo →
    **Actions** → latest **Windows build spike** run → **Artifacts** →
-   download `ProBooks-windows`.
-2. **Extract with File Explorer's "Extract All…"** (not a scripting tool) —
-   that propagates mark-of-the-web so SmartScreen behaves the way it will
-   for a real member. Extract the whole zip; don't run the exe from inside
-   it.
+   download `ProBooks-windows-installer`.
+2. **Download through the browser**, not a scripting tool — that applies
+   mark-of-the-web, so SmartScreen behaves the way it will for a real
+   member. A file fetched with `gh run download` carries no such mark and
+   tells you nothing about what a member sees.
+3. Run the installer. It installs per-user under
+   `%LOCALAPPDATA%\Programs\ProBooks`, needs no administrator password, and
+   adds a Start Menu entry.
+
+> The `ProBooks-windows` artifact is the raw folder, not the installer. It is
+> useful for inspecting a bundle, but **extracting it with Explorer marks every
+> file as internet-downloaded and the app will refuse to start** — see the
+> mark-of-the-web section below. Test the installer; that is what members get.
 
 ## Expected friction (not bugs)
 
-- **SmartScreen** may say "Windows protected your PC" — click
-  **More info → Run anyway**. The build is unsigned for now. *Note what
-  the dialog actually says — we've never observed it in the wild.*
+- **SmartScreen** says "Windows protected your PC" — click **More info**, then
+  the run-anyway button. The build is unsigned for now. *Observed on Windows 11
+  Pro 26200 on 2026-08-05: the second button read **"open anyway"**, not "Run
+  anyway" as this doc previously predicted. The wording varies by Windows
+  version and launch path; don't send anyone hunting for an exact label.*
 - If the app window never appears, install the **Microsoft Edge WebView2
   runtime** (preinstalled on most Win 10/11; free from Microsoft).
+
+## Mark-of-the-web — the reason we ship an installer
+
+Windows tags every file extracted from a downloaded zip as internet-sourced
+(`Zone.Identifier`, `ZoneId=3`). The .NET Framework then refuses to load the
+bundled `Python.Runtime.dll`, pywebview's Windows backend cannot start, and the
+app dies before its window appears. Found on a clean Windows 11 machine on
+2026-08-05, *after* SmartScreen had already been clicked through — 2,848 of
+2,848 extracted files were tagged.
+
+The installer writes its own files, so nothing is tagged and the app just runs
+(verified: 0 of 2,808 installed files carry the tag). If you are testing a zip
+anyway, ProBooks now detects this and says what to do instead of showing a
+traceback. To clear it by hand:
+
+```powershell
+Get-ChildItem "<extracted folder>" -Recurse -File | Unblock-File
+```
+
+Or right-click the **zip** → Properties → tick **Unblock** → OK, *then* extract.
 
 ## Actual bugs if you see them
 
@@ -37,7 +67,10 @@ works on real Windows.
 Data lives under your Windows user profile — a fresh, empty ProBooks,
 nowhere near real books.
 
-1. **Launch** `ProBooks.exe` → app window opens, navy theme, no console.
+0. **Install** — run the installer, click through SmartScreen. No
+   administrator password should ever be requested. Confirm a **ProBooks**
+   entry appears in the Start Menu and in Settings → Apps.
+1. **Launch** from the Start Menu → app window opens, navy theme, no console.
 2. **Passphrase setup** appears → set a throwaway passphrase and tick
    **"Remember on this computer"** (exercises Windows Credential
    Manager — a backend CI cannot verify).
@@ -70,6 +103,12 @@ nowhere near real books.
 11. **(Optional) Firm mode** — lock screen (after Forget) → Book file →
     create a second book at some path; confirm the in-use lock file
     appears next to it while open.
+12. **Uninstall proof** — Settings → Apps → ProBooks → Uninstall. It should
+    remove cleanly *and leave your books alone*: the database lives in
+    `%LOCALAPPDATA%\LedgerLabs\ProBooks`, outside the install folder, so it
+    must still be there afterwards. Reinstalling should open the same books.
+    An uninstall that deletes a client's books is the worst bug this app
+    could have.
 
 ## Report back
 

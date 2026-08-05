@@ -117,6 +117,77 @@ def _stop(proc: subprocess.Popen) -> None:
             pass
 
 
+# --- Windows: mark-of-the-web ------------------------------------------------
+# Files extracted from a downloaded zip are tagged Internet-zone, and the .NET
+# Framework refuses to load a managed assembly carrying that tag. That stops the
+# bundled Python.Runtime.dll loading, which stops pywebview's Windows backend,
+# which means no window ever appears. The raw failure is a traceback naming
+# clr_loader and a DLL path -- nothing an accountant can act on. Detect it and
+# say what to do. The installer never hits this; a zip does.
+
+_BLOCKED_MESSAGE = (
+    "Windows has blocked part of ProBooks because it was downloaded from the "
+    "internet, so the app cannot start.\n\n"
+    "The simplest fix is to install ProBooks rather than run it from an "
+    "extracted folder. The installer does not have this problem.\n\n"
+    "To use this folder anyway:\n"
+    "    1. Delete the folder you extracted.\n"
+    "    2. Right-click the ProBooks .zip file you downloaded.\n"
+    "    3. Choose Properties, tick Unblock, then click OK.\n"
+    "    4. Extract it again and open ProBooks.\n\n"
+    "Your books are not affected."
+)
+
+
+def _show_windows_message(text: str, title: str = "ProBooks") -> None:
+    """Show a native message box. A windowed build has no console, so anything
+    printed here would go nowhere the user can see."""
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, text, title, 0x10)  # MB_ICONERROR
+    except Exception:
+        print(text, file=sys.stderr)
+
+
+def _is_blocked(path: Path) -> bool:
+    """True if the file carries mark-of-the-web from a zone .NET will not load
+    from: 3 (internet) or 4 (untrusted site).
+
+    Zone 1 is the local intranet -- a firm's shared drive, which is exactly
+    where firm mode puts book files -- and must not be mistaken for a download.
+    """
+    try:
+        with open(f"{path}:Zone.Identifier", "r", encoding="utf-8", errors="ignore") as fh:
+            text = fh.read()
+    except OSError:
+        return False
+    for line in text.splitlines():
+        if line.strip().lower().startswith("zoneid="):
+            try:
+                return int(line.split("=", 1)[1].strip()) >= 3
+            except ValueError:
+                return False
+    return False
+
+
+def _webview_blocked_by_windows() -> bool:
+    """Is the .NET assembly pywebview depends on tagged as downloaded?"""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return False
+    dll = (Path(sys.executable).parent / "_internal" / "pythonnet"
+           / "runtime" / "Python.Runtime.dll")
+    return dll.exists() and _is_blocked(dll)
+
+
+def _looks_like_clr_failure(exc: BaseException) -> bool:
+    """Does this exception smell like the blocked-assembly failure? Used as a
+    backstop when the file check missed it (a different bundle layout, or the
+    stream stripped from the DLL but not its dependencies)."""
+    text = f"{type(exc).__name__}: {exc}"
+    return any(s in text for s in ("Python.Runtime", "clr_loader", "Python.Runtime.Loader"))
+
+
 def _selfcheck() -> int:
     """Import the app's key runtime deps and report — verifies the (trimmed)
     bundle didn't drop anything the app needs. Run: PROBOOKS_MODE=selfcheck <bin>"""
@@ -273,16 +344,29 @@ def main() -> int:
             print("ProBooks server did not become ready.", file=sys.stderr)
             return 1
 
-        import webview
-        geom = _window_geometry()
-        win_x, win_y = geom.pop("x", None), geom.pop("y", None)
-        window = webview.create_window(WINDOW_TITLE, url, **geom)
-        # Pin the native backend per platform (macOS WebKit, Windows WebView2)
-        # so the build can safely exclude the Qt toolkits from the bundle.
-        webview.start(
-            _place_window, (window, win_x, win_y),
-            gui="cocoa" if sys.platform == "darwin" else "edgechromium",
-        )
+        # Checked before touching pywebview: on Windows the backend loads a
+        # .NET assembly, and a blocked one fails deep inside clr_loader with a
+        # message no user can act on.
+        if _webview_blocked_by_windows():
+            _show_windows_message(_BLOCKED_MESSAGE)
+            return 1
+
+        try:
+            import webview
+            geom = _window_geometry()
+            win_x, win_y = geom.pop("x", None), geom.pop("y", None)
+            window = webview.create_window(WINDOW_TITLE, url, **geom)
+            # Pin the native backend per platform (macOS WebKit, Windows
+            # WebView2) so the build can safely exclude the Qt toolkits.
+            webview.start(
+                _place_window, (window, win_x, win_y),
+                gui="cocoa" if sys.platform == "darwin" else "edgechromium",
+            )
+        except Exception as exc:
+            if os.name == "nt" and _looks_like_clr_failure(exc):
+                _show_windows_message(_BLOCKED_MESSAGE)
+                return 1
+            raise
         return 0
     finally:
         _stop(proc)

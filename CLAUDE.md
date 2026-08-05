@@ -87,6 +87,31 @@ custody of anyone's data. Built and maintained with Claude Code.
   signing during the build fails intermittently (`errSecInternalComponent`).
 - Keychain ACLs key on the code signature: unsigned/ad-hoc builds lose vault
   items on every reinstall. Keep the Developer ID signature stable.
+- **Windows zips are not a distribution channel.** Explorer marks every
+  extracted file internet-sourced, .NET then refuses to load the bundled
+  `Python.Runtime.dll`, and pywebview dies before the window opens. Ship the
+  Inno Setup installer (`scripts/probooks.iss`); it writes files itself and
+  nothing gets tagged. Code signing does **not** fix this — different
+  mechanism from SmartScreen.
+- **CI cannot see mark-of-the-web**: the runner never downloads its own
+  artifact. Only a browser download plus Explorer extraction reproduces it.
+  Equally, `gh run download` strips it — a scripted download proves nothing
+  about what a member sees.
+- **Pin the Windows deps** (`requirements-windows.lock`). Open ranges shipped a
+  build that 500'd on every request: starlette 1.4.0 made a keyword argument
+  required that Streamlit 1.61.0 did not pass (Streamlit 1.61.1 later capped it
+  at `starlette<1.4.0`). Same commit, different day, different app.
+- **selfcheck proves imports, not behavior.** That starlette break passed
+  selfcheck. `scripts/smoke_serve.ps1` starts the built exe and fetches real
+  routes **with `Accept-Encoding: gzip`** — the bug was in the gzip responder,
+  and it did not fire on every route (`GET /` returned 200 while
+  `/_stcore/health` returned 500). Ask for compression on more than one route.
+- **ASCII only in `.ps1` files.** Windows PowerShell 5.1 reads a BOM-less file
+  as ANSI, so a UTF-8 em dash decodes into bytes including a stray `"` that
+  swallows the rest of the script. CI runs pwsh 7 and would never notice.
+- Inno Setup lands in different places from chocolatey vs winget — discover
+  `ISCC.exe`, don't hardcode its path. And keep install paths short; a deep
+  target blows the 260-char limit mid-copy and Inno aborts with exit code 5.
 
 ## Writing style for user-facing text
 

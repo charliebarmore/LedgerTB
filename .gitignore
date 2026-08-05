@@ -41,3 +41,12 @@ data/
 /build/
 /dist/
 *.pyc
+
+# Inno Setup output (the Windows installer is a build artifact)
+/installer/
+
+# Scratch requirements file the Windows CI steps used to write
+req-win.txt
+
+# Local virtualenv used to regenerate requirements-windows.lock
+.lockenv/
