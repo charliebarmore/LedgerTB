@@ -425,3 +425,47 @@ def list_staged_imports(client_id: int) -> list:
         }
         for t in ImportedTransaction.get_by_status(client_id, "Pending")
     ]
+
+
+def post_entry(client_id: int, entry_date: str, description: str,
+               lines: list, entry_type: str = "Regular") -> dict:
+    """POST a balanced journal entry directly (assistant access level "post"
+    only — append-only: an assistant can add entries but can never edit or
+    delete anything). lines: dicts with account_number and debit or credit in
+    dollars (optional memo)."""
+    from datetime import date as _date
+
+    from models.journal_entry import JournalEntry, JournalEntryLine
+
+    _require_client(client_id)
+    when = _parse_date(entry_date, "entry_date")
+    if entry_type not in ("Regular", "Adjusting"):
+        raise ValueError("entry_type must be Regular or Adjusting.")
+    by_number = {a.account_number: a.id
+                 for a in Account.get_all(client_id, active_only=False)}
+    entry_lines = []
+    for i, l in enumerate(lines, start=1):
+        number = str(l.get("account_number", ""))
+        if number not in by_number:
+            raise ValueError(f"lines[{i}]: no account numbered {number}.")
+        entry_lines.append(JournalEntryLine(
+            account_id=by_number[number],
+            debit=round(float(l.get("debit", 0) or 0), 2),
+            credit=round(float(l.get("credit", 0) or 0), 2),
+            memo=str(l.get("memo", "") or "") or None,
+        ))
+    entry = JournalEntry(
+        client_id=client_id,
+        entry_date=when if isinstance(when, _date) else _date.fromisoformat(entry_date),
+        description=description,
+        entry_type=entry_type,
+        source_reference="Posted by assistant (MCP)",
+        lines=entry_lines,
+    )
+    entry_id = entry.save()  # model validation: unbalanced entries never post
+    return {
+        "entry_id": entry_id,
+        "note": ("Posted to the ledger (append-only). To undo, a person "
+                 "reverses it in the app — assistant connections can never "
+                 "edit or delete entries."),
+    }

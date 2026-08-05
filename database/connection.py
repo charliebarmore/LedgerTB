@@ -43,11 +43,17 @@ _key_lock = threading.Lock()
 # Used for read-only book sessions (firm-mode lock fallback): nothing writes.
 READ_ONLY = False
 
-# When True, every new connection gets a SQLite authorizer that permits reads
-# everywhere but writes ONLY to draft_entries. This is the MCP server's mode:
-# an assistant can file a draft for human review, and the engine itself —
-# not tool design — makes the ledger unreachable.
-DRAFT_INBOX_ONLY = False
+# Assistant access level (the MCP server's mode). When set, every new
+# connection gets a SQLite authorizer scoped to the level — the engine itself,
+# not tool design, enforces the ceiling the user chose on Data Safety:
+#   "read"    — SELECT only
+#   "propose" — + INSERT into the proposal inboxes (drafts, staged imports)
+#   "post"    — + INSERT into the ledger tables: APPEND-ONLY. At no level,
+#               ever, can an assistant connection UPDATE or DELETE ledger
+#               history; corrections happen the accounting way, with new
+#               visible entries.
+ASSISTANT_ACCESS_LEVEL = None
+ASSISTANT_ACCESS_LEVELS = ("read", "propose", "post")
 
 _AUTH_OK = getattr(_driver, "SQLITE_OK", 0)
 _AUTH_DENY = getattr(_driver, "SQLITE_DENY", 1)
@@ -62,17 +68,25 @@ _AUTH_INSERT = getattr(_driver, "SQLITE_INSERT", 18)
 _AUTH_UPDATE = getattr(_driver, "SQLITE_UPDATE", 23)
 
 
-# What an assistant connection may write: its proposal inboxes, and the
-# append-only audit rows that record the proposals. Never the ledger.
-_ASSISTANT_INSERT_TABLES = {"draft_entries", "imported_transactions", "audit_log"}
+# INSERT surface per level (cumulative). audit_log rides along from "propose"
+# up so every assistant write is recorded. UPDATE is draft_entries only, at
+# propose and above; nothing is ever DELETE-able at any level.
+_ASSISTANT_INSERT_TABLES = {
+    "read": frozenset(),
+    "propose": frozenset({"draft_entries", "imported_transactions", "audit_log"}),
+    "post": frozenset({"draft_entries", "imported_transactions", "audit_log",
+                       "journal_entries", "journal_entry_lines"}),
+}
 
 
-def _draft_inbox_authorizer(action, arg1, arg2, dbname, source):
+def _assistant_authorizer(action, arg1, arg2, dbname, source):
+    level = ASSISTANT_ACCESS_LEVEL or "read"
     if action in _AUTH_ALLOWED_ACTIONS:
         return _AUTH_OK
-    if action == _AUTH_INSERT and arg1 in _ASSISTANT_INSERT_TABLES:
+    if action == _AUTH_INSERT and arg1 in _ASSISTANT_INSERT_TABLES[level]:
         return _AUTH_OK
-    if action == _AUTH_UPDATE and arg1 == "draft_entries":
+    if (action == _AUTH_UPDATE and arg1 == "draft_entries"
+            and level in ("propose", "post")):
         return _AUTH_OK
     return _AUTH_DENY
 
@@ -134,9 +148,9 @@ def get_connection():
     conn.execute("PRAGMA foreign_keys = ON")
     if READ_ONLY:
         conn.execute("PRAGMA query_only = ON")
-    elif DRAFT_INBOX_ONLY:
+    elif ASSISTANT_ACCESS_LEVEL:
         # Set last so the connection-setup pragmas above are unaffected.
-        conn.set_authorizer(_draft_inbox_authorizer)
+        conn.set_authorizer(_assistant_authorizer)
     return conn
 
 
