@@ -17,7 +17,24 @@ A **Ledger Labs LLC** product — the software studio of [Charlie Barmore, CPA](
 - **Audit trail**: every change is logged, with the OS account name as the actor. Bookkeeping without an audit trail is just a spreadsheet with opinions.
 - **Data safety**: the database is encrypted at rest behind a launch passphrase (SQLCipher), verified backups are built in, and a production-readiness checklist gates real use. If SQLCipher isn't installed, the app still runs, unencrypted, and says so on every page.
 
-## Quickstart
+## Download
+
+Grab the latest from the [Releases page](../../releases/latest) — no account needed.
+
+**Windows** — download `ProBooks-windows-x64.zip`, right-click → **Extract
+All…**, open the extracted folder, run `ProBooks.exe`. The first launch shows
+a SmartScreen warning ("Windows protected your PC") because the build is not
+yet code-signed: click **More info → Run anyway**. That's a one-time step.
+
+**macOS** — download the Mac zip, unzip, drag **ProBooks.app** to
+Applications, open it. macOS asks once to confirm an app downloaded from the
+internet.
+
+Both are self-contained — no Python, no installers, no dependencies. Your
+books live in an encrypted database under your user profile, never inside
+the app folder, so replacing the app with a newer version keeps your data.
+
+## Quickstart (from source)
 
 Requires Python 3.12 (what it's tested on).
 
