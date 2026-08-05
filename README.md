@@ -2,7 +2,7 @@
 
 Double-entry bookkeeping you can read, run, and change. A desktop app built by a practicing CPA to keep real books: multiple clients, journal entries with debit-credit validation, bank imports, AI-assisted categorization, standard reports, and a close workflow that ends in a branded PDF package.
 
-Built with Claude Code by [Charlie Barmore, CPA](https://cbarmorecpa.com). Shared with the [AI Lab for Accountants](https://ailabforaccountants.com) community as a working example of what one accountant can build.
+A **Ledger Labs LLC** product — the software studio of [Charlie Barmore, CPA](https://cbarmorecpa.com), who built this with Claude Code. Shared with the [AI Lab for Accountants](https://ailabforaccountants.com) community as a working example of what one accountant can build.
 
 ## What it does
 
