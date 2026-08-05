@@ -31,7 +31,7 @@ def _cash_number(client_id, accounts):
 def test_propose_import_stages_with_identity_and_is_idempotent(
     client_id, accounts, monkeypatch
 ):
-    monkeypatch.setattr(dbconn, "DRAFT_INBOX_ONLY", True)  # the MCP mode
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "propose")  # the MCP mode
     cash_no = _cash_number(client_id, accounts)
 
     result = mcp_tools.propose_import(client_id, cash_no, ROWS, "July stmt")

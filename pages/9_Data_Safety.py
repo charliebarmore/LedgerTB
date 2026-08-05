@@ -156,32 +156,73 @@ from utils.secure_store import get_secret as _mcp_get
 from utils.secure_store import set_secret as _mcp_set
 
 MCP_KEY_SECRET = "mcp_db_key"
+MCP_LEVEL_SECRET = "mcp_access_level"
+_MCP_LEVELS = {
+    "read": "Read only — query the books, change nothing",
+    "propose": "Read + propose — file drafts and stage imports; you post everything (recommended)",
+    "post": "Read + propose + post — may also post balanced entries, append-only",
+}
 _mcp_enabled = bool(_mcp_get(MCP_KEY_SECRET))
+_mcp_level = _mcp_get(MCP_LEVEL_SECRET) or "propose"
+if _mcp_level not in _MCP_LEVELS:
+    _mcp_level = "propose"
 
 if _mcp_enabled:
-    st.success("Assistant access is enabled.")
+    st.success(f"Assistant access is enabled — level: "
+               f"**{_mcp_level}** ({_MCP_LEVELS[_mcp_level].split(' — ')[1]}).")
 else:
     st.info("Assistant access is off. Assistants cannot read these books.")
 
+_picked_level = st.radio(
+    "Access level",
+    options=list(_MCP_LEVELS),
+    format_func=lambda lv: _MCP_LEVELS[lv],
+    index=list(_MCP_LEVELS).index(_mcp_level),
+    key="mcp_level_pick",
+)
+_post_ok = True
+if _picked_level == "post":
+    st.warning(
+        "At this level the assistant can post journal entries on its own — "
+        "**append-only**: even here it can never edit or delete anything, and "
+        "every entry it posts is audited and marked \"Posted by assistant "
+        "(MCP)\". Corrections are new, visible entries.", icon="✒️",
+    )
+    _post_ok = st.checkbox(
+        "I understand the assistant will be able to post entries",
+        key="mcp_post_consent",
+    )
+
 mcp_cols = st.columns([1, 1, 3])
 with mcp_cols[0]:
-    if not _mcp_enabled and st.button("Enable assistant access", type="primary"):
+    if not _mcp_enabled and st.button("Enable assistant access", type="primary",
+                                      disabled=not _post_ok):
         session_key = dbconn.get_active_key()
         if not session_key:
             st.error("Unlock the database first.")
         else:
             try:
                 _mcp_set(MCP_KEY_SECRET, session_key)
+                _mcp_set(MCP_LEVEL_SECRET, _picked_level)
                 audit_safety_event("EXPORT", "mcp_access_enabled",
-                                   {"scope": "read_only"})
+                                   {"level": _picked_level})
                 st.rerun()
             except Exception as exc:
                 st.error(f"Could not store the key securely: {exc}")
+    if (_mcp_enabled and _picked_level != _mcp_level
+            and st.button("Change level", type="primary", disabled=not _post_ok)):
+        _mcp_set(MCP_LEVEL_SECRET, _picked_level)
+        audit_safety_event("EXPORT", "mcp_access_level_changed",
+                           {"from": _mcp_level, "to": _picked_level})
+        st.rerun()
 with mcp_cols[1]:
     if _mcp_enabled and st.button("Disable assistant access"):
         _mcp_delete(MCP_KEY_SECRET)
+        _mcp_delete(MCP_LEVEL_SECRET)
         audit_safety_event("EXPORT", "mcp_access_disabled", {})
         st.rerun()
+if _mcp_enabled and _picked_level != _mcp_level:
+    st.caption("Level changes apply to the assistant's next session.")
 
 if _mcp_enabled:
     if getattr(sys, "frozen", False):

@@ -95,7 +95,7 @@ def test_vault_unlock_round_trip(client_id, monkeypatch):
     from utils.secure_store import set_secret
 
     monkeypatch.setattr(dbconn, "READ_ONLY", dbconn.READ_ONLY)  # restore later
-    monkeypatch.setattr(dbconn, "DRAFT_INBOX_ONLY", dbconn.DRAFT_INBOX_ONLY)
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", dbconn.ASSISTANT_ACCESS_LEVEL)
     # Firm mode resolves the active book from the user registry; pin it to the
     # test database.
     test_db = dbconn.DATABASE_PATH
@@ -110,5 +110,5 @@ def test_vault_unlock_round_trip(client_id, monkeypatch):
     dbconn.clear_active_key()
     assert mcp_server._unlock_from_vault() is True
     assert dbconn.has_active_key()
-    assert dbconn.DRAFT_INBOX_ONLY is True
+    assert dbconn.ASSISTANT_ACCESS_LEVEL == "propose"
     assert mcp_tools.list_clients() is not None

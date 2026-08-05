@@ -28,15 +28,39 @@ from services import mcp_tools
 from utils import secure_store
 
 MCP_KEY_SECRET = "mcp_db_key"
+MCP_LEVEL_SECRET = "mcp_access_level"
+
+
+def _access_level() -> str:
+    """The level chosen on Data Safety; stored in the OS vault beside the key
+    so the assistant's own connections can never change it. Setups enabled
+    before levels existed behave as "propose" (their original behavior)."""
+    from database.connection import ASSISTANT_ACCESS_LEVELS
+
+    level = secure_store.get_secret(MCP_LEVEL_SECRET) or "propose"
+    return level if level in ASSISTANT_ACCESS_LEVELS else "propose"
+
+
+def _require_level(minimum: str):
+    order = ("read", "propose", "post")
+    current = _access_level()
+    if order.index(current) < order.index(minimum):
+        raise ValueError(
+            f"This tool needs assistant access level '{minimum}'; the current "
+            f"level is '{current}'. Change it in ProBooks -> Data Safety -> "
+            "Assistant access."
+        )
 
 server = MCPServer(
     "probooks",
     instructions=(
         "Access to ProBooks bookkeeping data. Start with list_clients to "
-        "find the client_id; amounts are US dollars. This server cannot "
-        "modify the books — it can read everything, file DRAFT entries "
-        "(propose_entry), and stage bank transactions for the import flow "
-        "(propose_import); a human reviews and posts everything in the app."
+        "find the client_id; amounts are US dollars. What you may do is set "
+        "by the user's chosen access level (Data Safety): read only; "
+        "propose (file draft entries and stage imports for human review); "
+        "or post (additionally post balanced entries, APPEND-ONLY — nothing "
+        "can ever be edited or deleted from here). Tools tell you if the "
+        "level is insufficient."
     ),
 )
 
@@ -47,13 +71,14 @@ def _unlock_from_vault() -> bool:
     key = secure_store.get_secret(MCP_KEY_SECRET)
     if not key:
         return False
-    # Firm mode: read whichever book the app most recently opened. Read-only
-    # means no in-use lock is needed (or taken).
+    # Firm mode: read whichever book the app most recently opened. No in-use
+    # lock is needed (or taken): even at the highest level, writes are
+    # append-only inserts that cannot conflict with an open editing session.
     from utils import books
     dbconn.DATABASE_PATH = books.active_book()
-    # The ledger is unreachable by construction: an authorizer on every
-    # connection allows reads everywhere and writes only to draft_entries.
-    dbconn.DRAFT_INBOX_ONLY = True
+    # The engine enforces the ceiling the user chose: the authorizer scopes
+    # every connection to the access level from the vault.
+    dbconn.ASSISTANT_ACCESS_LEVEL = _access_level()
     dbconn.set_active_key(key)
     return True
 
@@ -146,7 +171,9 @@ def propose_import(client_id: int, bank_account_number: str, rows: list,
     a pasted table). rows: [{"date": "2026-07-03", "description": "...",
     "amount": -12.50}] — positive = money in, negative = money out, from the
     bank account's perspective. Duplicate-checked; nothing posts until a
-    person categorizes and posts it in the app."""
+    person categorizes and posts it in the app. Needs access level "propose"
+    or higher."""
+    _require_level("propose")
     return mcp_tools.propose_import(client_id, bank_account_number, rows,
                                     source_label)
 
@@ -155,6 +182,19 @@ def propose_import(client_id: int, bank_account_number: str, rows: list,
 def list_staged_imports(client_id: int) -> list:
     """Staged transactions still awaiting human review in the import flow."""
     return mcp_tools.list_staged_imports(client_id)
+
+
+@server.tool()
+def post_entry(client_id: int, entry_date: str, description: str,
+               lines: list, entry_type: str = "Regular") -> dict:
+    """POST a balanced journal entry directly to the ledger. Only works at
+    assistant access level "post" (chosen by the user on Data Safety) and is
+    APPEND-ONLY: entries can be added, never edited or deleted — corrections
+    are new visible entries. Prefer propose_entry unless the user asked you
+    to post. lines like propose_entry (dollars)."""
+    _require_level("post")
+    return mcp_tools.post_entry(client_id, entry_date, description,
+                                lines, entry_type)
 
 
 @server.tool()

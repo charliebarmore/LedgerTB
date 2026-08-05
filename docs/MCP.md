@@ -5,6 +5,24 @@ assistant on the same computer (Claude Desktop, Claude Code) query the
 books: trial balance, income statement, balance sheet, general ledger,
 journal-entry search and detail, and the deterministic integrity sweep.
 
+## Access levels — you choose how much your assistant can do
+
+On Data Safety you pick one of three levels; the choice is stored in the
+OS credential vault beside the unlock key, where the assistant's own
+connections cannot reach it — the dial is physically outside its world.
+
+| Level | The assistant can… |
+|---|---|
+| **Read only** | query everything, change nothing |
+| **Read + propose** *(default)* | file draft entries and stage imports; you post everything |
+| **Read + propose + post** | additionally post balanced journal entries — **append-only** |
+
+Even at the highest level the engine refuses every edit and delete: an
+assistant works in ink, never with an eraser. Entries it posts carry
+"Posted by assistant (MCP)" and the full audit trail; corrections are
+new, visible entries. Changing the level takes effect on the
+assistant's next session and is audit-logged.
+
 ## Security model
 
 - **Opt-in.** Off until you click **Enable assistant access** on the Data
@@ -60,9 +78,10 @@ journal-entry search and detail, and the deterministic integrity sweep.
 ## What to expect
 
 Amounts are US dollars. Start with `list_clients` to get the
-`client_id`. The assistant can read and reason about the books, file draft entries,
-and stage imports for your review — but it cannot post, edit, or delete
-anything itself. Try: *"Here's my July bank statement PDF — stage the
+`client_id`. What the assistant can do depends on the level you chose. At the
+default level it reads, files drafts, and stages imports — you post
+everything. At the "post" level it can also post balanced entries
+directly (append-only, audited). Try: *"Here's my July bank statement PDF — stage the
 transactions into account 1001"* or *"Propose the accrual for the July
 retainer and explain your accounts."* Everything waits for you in the
 app.

@@ -83,7 +83,7 @@ def test_draft_inbox_mode_files_drafts_but_cannot_reach_the_ledger(
     client_id, accounts, monkeypatch
 ):
     cash_no, rev_no = _numbers(client_id, accounts)
-    monkeypatch.setattr(dbconn, "DRAFT_INBOX_ONLY", True)
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "propose")
 
     # Reads work; proposing works (this is the MCP server's exact mode).
     assert mcp_tools.trial_balance(client_id)["balanced"] is True
@@ -104,7 +104,7 @@ def test_draft_inbox_mode_files_drafts_but_cannot_reach_the_ledger(
     assert len(drafts) == 1 and drafts[0]["lines"][0]["debit"] == 24.0
 
     # Back in the app (normal mode), a human approves it.
-    monkeypatch.setattr(dbconn, "DRAFT_INBOX_ONLY", False)
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", None)
     draft = DraftEntry.get_by_id(drafts[0]["draft_id"], client_id)
     entry_id = draft.approve()
     assert JournalEntry.get_by_id(entry_id, client_id=client_id) is not None
