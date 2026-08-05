@@ -216,6 +216,23 @@ def _window_geometry(preferred_w=1360, preferred_h=900, min_w=900, min_h=600):
             "x": x, "y": y}
 
 
+def _place_window(window, wx, wy):
+    """Un-minimise and position the window once the GUI loop is running.
+
+    Passing x/y straight to create_window makes the Windows (WinForms /
+    EdgeChromium) backend start the window minimised -- it parks off-screen
+    at roughly (-10667, -10667) with IsIconic set, so the app appears to
+    launch and then never show. Sizing at create time is fine; only the
+    placement has to wait until the window actually exists.
+    """
+    try:
+        window.restore()
+        if wx is not None and wy is not None:
+            window.move(wx, wy)
+    except Exception:
+        pass
+
+
 def main() -> int:
     if os.environ.get("PROBOOKS_MODE") == "selfcheck":
         return _selfcheck()
@@ -257,10 +274,15 @@ def main() -> int:
             return 1
 
         import webview
-        webview.create_window(WINDOW_TITLE, url, **_window_geometry())
+        geom = _window_geometry()
+        win_x, win_y = geom.pop("x", None), geom.pop("y", None)
+        window = webview.create_window(WINDOW_TITLE, url, **geom)
         # Pin the native backend per platform (macOS WebKit, Windows WebView2)
         # so the build can safely exclude the Qt toolkits from the bundle.
-        webview.start(gui="cocoa" if sys.platform == "darwin" else "edgechromium")
+        webview.start(
+            _place_window, (window, win_x, win_y),
+            gui="cocoa" if sys.platform == "darwin" else "edgechromium",
+        )
         return 0
     finally:
         _stop(proc)
