@@ -469,3 +469,64 @@ def post_entry(client_id: int, entry_date: str, description: str,
                  "reverses it in the app — assistant connections can never "
                  "edit or delete entries."),
     }
+
+
+def export_close_package(client_id: int, period_start: str, period_end: str,
+                         out_dir: str) -> dict:
+    """Write the close package (branded PDF + Excel workbook) to disk so a
+    workpaper tool (e.g. LedgerPDF) can ingest it. Filesystem writes are
+    consent-gated: out_dir must sit inside a folder the user named in the
+    PROBOOKS_MCP_EXPORT_ROOTS environment variable (os.pathsep-separated);
+    unset means all exports are refused."""
+    import os
+    import re
+    from pathlib import Path
+
+    from models.audit_log import AuditLog
+    from models.client import Client
+    from models.reports import ReportGenerator
+    from services.close_package import build_close_package, build_close_package_pdf
+
+    client = _require_client(client_id)
+    start = _parse_date(period_start, "period_start")
+    end = _parse_date(period_end, "period_end")
+    if start is None or end is None or start > end:
+        raise ValueError("period_start and period_end must be ISO dates in order.")
+
+    roots_raw = os.environ.get("PROBOOKS_MCP_EXPORT_ROOTS", "")
+    roots = [Path(p).resolve() for p in roots_raw.split(os.pathsep) if p.strip()]
+    if not roots:
+        raise ValueError(
+            "File export is off: set PROBOOKS_MCP_EXPORT_ROOTS to the "
+            "folder(s) the assistant may write into, then restart the server."
+        )
+    target = Path(out_dir).resolve()
+    if not any(target == root or root in target.parents for root in roots):
+        raise ValueError(
+            f"{out_dir} is outside PROBOOKS_MCP_EXPORT_ROOTS; exports are "
+            "only written inside the folders the user approved."
+        )
+    target.mkdir(parents=True, exist_ok=True)
+
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, start, end)
+    safe_client = re.sub(r"[^A-Za-z0-9 ._-]", "_", client.name).strip() or "client"
+    stem = f"{safe_client} close package {start.isoformat()} to {end.isoformat()}"
+    pdf_path = target / f"{stem}.pdf"
+    xlsx_path = target / f"{stem}.xlsx"
+    pdf_path.write_bytes(
+        build_close_package_pdf(client_id, client.name, start, end, tb_rows).read())
+    xlsx_path.write_bytes(
+        build_close_package(client_id, client.name, start, end, tb_rows).read())
+
+    AuditLog.log_event(client_id, "EXPORT", "close_package_mcp", {
+        "start_date": start, "end_date": end,
+        "pdf": pdf_path.name, "xlsx": xlsx_path.name, "directory": str(target),
+    })
+    return {
+        "pdf": str(pdf_path),
+        "xlsx": str(xlsx_path),
+        "accounts": len(tb_rows),
+        "note": ("Both files written. The Excel totals are computed values "
+                 "(no uncalculated formulas), so a workpaper tool reads them "
+                 "exactly."),
+    }

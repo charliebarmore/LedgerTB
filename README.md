@@ -82,6 +82,7 @@ python -m pytest
 
 - `DESKTOP.md` — desktop builds, packaging, notarization
 - `docs/MCP.md` — assistant access setup and security model
+- `docs/LEDGERPDF-PAIRING.md` — books-to-binder workflow with LedgerPDF
 - `docs/FIRM-MODE.md` — shared-drive book files and the in-use lock
 - `docs/WINDOWS-TESTING.md` — the Windows smoke-test checklist
 - `PERFORMANCE.md` — performance baselines

@@ -198,6 +198,19 @@ def post_entry(client_id: int, entry_date: str, description: str,
 
 
 @server.tool()
+def export_close_package(client_id: int, period_start: str, period_end: str,
+                         out_dir: str) -> dict:
+    """Write the period's close package — a branded PDF and an Excel workbook
+    (Summary, Trial Balance, Transactions, Adjusting Entries, Receipts &
+    Disbursements) — into out_dir, so a workpaper tool such as LedgerPDF can
+    ingest it. Works at every access level, but ONLY into folders the user
+    listed in PROBOOKS_MCP_EXPORT_ROOTS; anywhere else is refused. The export
+    is audit-logged."""
+    return mcp_tools.export_close_package(client_id, period_start, period_end,
+                                          out_dir)
+
+
+@server.tool()
 def integrity_sweep(client_id: int, start: str, end: str) -> list:
     """Deterministic bookkeeping checks for a period: unbalanced or one-line
     entries, unposted imports, broken import links, future/pre-period dates,

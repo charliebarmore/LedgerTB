@@ -75,6 +75,13 @@ assistant's next session and is audit-logged.
 3. Restart the assistant. Ask it something real: *"Run the integrity
    sweep on client 1 for Q2 and explain anything it finds."*
 
+## Pairing with LedgerPDF
+
+`export_close_package` writes the close package (PDF + Excel) into a
+folder you approve via `PROBOOKS_MCP_EXPORT_ROOTS`, so a workpaper tool
+can ingest it — see `LEDGERPDF-PAIRING.md` for the full books-to-binder
+workflow with both MCP servers in one session.
+
 ## What to expect
 
 Amounts are US dollars. Start with `list_clients` to get the
