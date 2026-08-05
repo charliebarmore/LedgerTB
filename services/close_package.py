@@ -214,9 +214,22 @@ def build_close_package(
     )
     totals = ws.max_row + 1
     ws.cell(row=totals, column=1, value="TOTALS").font = _HEADER_FONT
-    for col_idx in range(4, 12):
-        letter = openpyxl.utils.get_column_letter(col_idx)
-        cell = ws.cell(row=totals, column=col_idx, value=f"=SUM({letter}2:{letter}{totals-1})")
+    # Computed values, not =SUM() formulas: openpyxl writes no cached results,
+    # so a formula cell reads as literal "=SUM(...)" text to anything that
+    # opens the workbook without a calc engine (LedgerPDF renders exactly what
+    # the file says) until a human opens and re-saves it in Excel.
+    _tb_totals = [
+        round(sum(r.beginning_dr for r in tb_rows), 2),
+        round(sum(r.beginning_cr for r in tb_rows), 2),
+        round(sum(r.period_debits for r in tb_rows), 2),
+        round(sum(r.period_credits for r in tb_rows), 2),
+        round(sum(r.aje_debits for r in tb_rows), 2),
+        round(sum(r.aje_credits for r in tb_rows), 2),
+        round(sum(r.adjusted_dr for r in tb_rows), 2),
+        round(sum(r.adjusted_cr for r in tb_rows), 2),
+    ]
+    for col_idx, value in zip(range(4, 12), _tb_totals):
+        cell = ws.cell(row=totals, column=col_idx, value=value)
         cell.font = _HEADER_FONT
         cell.number_format = _MONEY_FMT
 
@@ -271,9 +284,14 @@ def build_close_package(
     if cash:
         totals = ws.max_row + 1
         ws.cell(row=totals, column=2, value="TOTALS").font = _HEADER_FONT
-        for col_idx in range(3, 7):
-            letter = openpyxl.utils.get_column_letter(col_idx)
-            cell = ws.cell(row=totals, column=col_idx, value=f"=SUM({letter}2:{letter}{totals-1})")
+        _cash_totals = [
+            round(sum(r.beginning for r in cash), 2),
+            round(sum(r.receipts for r in cash), 2),
+            round(sum(r.disbursements for r in cash), 2),
+            round(sum(r.ending for r in cash), 2),
+        ]
+        for col_idx, value in zip(range(3, 7), _cash_totals):
+            cell = ws.cell(row=totals, column=col_idx, value=value)
             cell.font = _HEADER_FONT
             cell.number_format = _MONEY_FMT
 

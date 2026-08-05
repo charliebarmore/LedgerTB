@@ -72,7 +72,9 @@ _AUTH_UPDATE = getattr(_driver, "SQLITE_UPDATE", 23)
 # up so every assistant write is recorded. UPDATE is draft_entries only, at
 # propose and above; nothing is ever DELETE-able at any level.
 _ASSISTANT_INSERT_TABLES = {
-    "read": frozenset(),
+    # audit_log at every level: even a read-level assistant's actions that
+    # matter (file exports) get recorded, and the log is append-only anyway.
+    "read": frozenset({"audit_log"}),
     "propose": frozenset({"draft_entries", "imported_transactions", "audit_log"}),
     "post": frozenset({"draft_entries", "imported_transactions", "audit_log",
                        "journal_entries", "journal_entry_lines"}),
