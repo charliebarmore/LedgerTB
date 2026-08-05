@@ -14,7 +14,7 @@ from services.book_review import (
     set_review_policy,
 )
 from services.posting import post_transaction
-from tests.conftest import post_entry
+from tests.conftest import page_path, post_entry
 
 Q1 = (date(2026, 1, 1), date(2026, 3, 31))
 
@@ -142,7 +142,7 @@ def test_book_review_page_renders_with_integrity_results(client_id, accounts, mo
     post_entry(client_id, date(2026, 1, 15),
                [(accounts["cash"], 100, 0), (accounts["revenue"], 0, 100)])
 
-    page = AppTest.from_file("pages/11_Book_Review.py", default_timeout=30).run()
+    page = AppTest.from_file(page_path("pages/11_Book_Review.py"), default_timeout=30).run()
     assert not page.exception
     headings = [str(h.value) for h in page.subheader]
     assert "Integrity sweep" in headings

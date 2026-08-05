@@ -1,11 +1,13 @@
 from streamlit.testing.v1 import AppTest
 
+from tests.conftest import page_path
+
 
 def test_statement_upload_screen_renders(client_id, accounts, monkeypatch):
     import utils.client_selector as selector
     monkeypatch.setattr(selector, "render_client_selector", lambda: client_id)
 
-    at = AppTest.from_file("pages/4_Import_Transactions.py", default_timeout=30).run()
+    at = AppTest.from_file(page_path("pages/4_Import_Transactions.py"), default_timeout=30).run()
     assert not at.exception
 
     at.radio[0].set_value("Upload Statement").run()

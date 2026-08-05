@@ -86,6 +86,20 @@ def accounts(client_id):
     }
 
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def page_path(name: str) -> str:
+    """Absolute path to an app page for AppTest.from_file.
+
+    Streamlit changed relative-path resolution (now against the CALLING test
+    file, not the cwd), so "pages/X.py" silently became tests/pages/X.py on
+    newer versions — 34 failures on CI while older local installs passed.
+    Absolute paths behave identically on every version and platform.
+    """
+    return str(REPO_ROOT / name)
+
+
 def post_entry(client_id, entry_date, lines, entry_type="Regular", source_reference=None):
     """lines: list of (account_id, debit, credit) tuples."""
     entry = JournalEntry(

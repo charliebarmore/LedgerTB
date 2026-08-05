@@ -8,6 +8,8 @@ stopped before rendering the newly staged rows. They looked like they had
 vanished.
 """
 from streamlit.testing.v1 import AppTest
+
+from tests.conftest import page_path
 import streamlit as st
 
 from utils.import_review import ensure_row_ids
@@ -19,7 +21,7 @@ def _page(monkeypatch, client_id):
     monkeypatch.setattr(selector, "render_client_selector", lambda: client_id)
     monkeypatch.setattr(selector, "apply_sidebar_style", lambda *a, **k: None)
     monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
-    return AppTest.from_file("pages/4_Import_Transactions.py", default_timeout=60)
+    return AppTest.from_file(page_path("pages/4_Import_Transactions.py"), default_timeout=60)
 
 
 def _staged_rows(accounts):

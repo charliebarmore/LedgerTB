@@ -2,6 +2,8 @@ from datetime import date
 
 from streamlit.testing.v1 import AppTest
 
+from tests.conftest import page_path
+
 from conftest import post_entry
 
 
@@ -19,7 +21,7 @@ def test_reconciliation_page_renders_draft_and_activity(client_id, accounts, mon
         client_id, accounts["cash"], date(2026, 1, 1), date(2026, 1, 31), 100
     )
 
-    at = AppTest.from_file("pages/10_Bank_Reconciliation.py", default_timeout=30).run()
+    at = AppTest.from_file(page_path("pages/10_Bank_Reconciliation.py"), default_timeout=30).run()
 
     assert not at.exception
     assert any("Bank Reconciliation" in title.value for title in at.title)

@@ -1,4 +1,6 @@
 from streamlit.testing.v1 import AppTest
+
+from tests.conftest import page_path
 import streamlit as st
 
 from models.import_profile import ImportProfile
@@ -15,8 +17,7 @@ def _page(monkeypatch, client_id, bank_account_id, content=SAVED_FORMAT_CSV):
 
     monkeypatch.setattr(selector, "render_client_selector", lambda: client_id)
     monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
-    page = AppTest.from_file(
-        "pages/4_Import_Transactions.py", default_timeout=60
+    page = AppTest.from_file(page_path("pages/4_Import_Transactions.py"), default_timeout=60
     )
     page.session_state["import_active_tab"] = "Upload CSV"
     page.session_state["csv_multi_account_mode"] = False
