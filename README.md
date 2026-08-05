@@ -19,20 +19,30 @@ A **Ledger Labs LLC** product — the software studio of [Charlie Barmore, CPA](
 
 ## Download
 
-Grab the latest from the [Releases page](../../releases/latest) — no account needed.
+Grab the latest from the [Releases page](../../releases/latest).
 
-**Windows** — download `ProBooks-windows-x64.zip`, right-click → **Extract
-All…**, open the extracted folder, run `ProBooks.exe`. The first launch shows
-a SmartScreen warning ("Windows protected your PC") because the build is not
-yet code-signed: click **More info → Run anyway**. That's a one-time step.
+**Windows** — download `ProBooks-windows-x64-setup.exe` and run it. Because the
+build is not yet code-signed, Windows shows a SmartScreen warning ("Windows
+protected your PC"): click **More info**, then the button to run it anyway
+(Windows labels it *Run anyway* or *Open anyway* depending on version). It
+installs for you alone, under your own user profile, and never asks for an
+administrator password — so it works on a locked-down firm laptop. You get a
+Start Menu entry and a normal entry in Add/Remove Programs.
 
-**macOS** — download the Mac zip, unzip, drag **ProBooks.app** to
-Applications, open it. macOS asks once to confirm an app downloaded from the
-internet.
+A `ProBooks-windows-x64.zip` is also attached for anyone who needs to deploy
+without an installer. **Read this before using it:** when Windows extracts a
+downloaded zip it marks every file as coming from the internet, and that stops
+part of ProBooks loading — the app will refuse to start and tell you so. To use
+the zip, right-click it → **Properties** → tick **Unblock** → **OK**, *then*
+extract. The installer has none of this friction and is the supported path.
 
-Both are self-contained — no Python, no installers, no dependencies. Your
-books live in an encrypted database under your user profile, never inside
-the app folder, so replacing the app with a newer version keeps your data.
+**macOS** — no packaged Mac download yet; the release pipeline currently builds
+Windows only. Build it locally with `./scripts/build_release.sh` (see
+`DESKTOP.md`), or run from source as below.
+
+The app is self-contained — no Python and no dependencies to install. Your books
+live in an encrypted database under your user profile, never inside the app
+folder, so upgrading keeps your data and uninstalling does not delete it.
 
 ## Quickstart (from source)
 
@@ -53,8 +63,8 @@ The app runs fully without any API key. To turn on AI categorization, either set
 
 ## Desktop builds
 
-- **macOS**: a signed standalone `ProBooks.app` — build with `./scripts/build_release.sh` (see `DESKTOP.md`; signing is configured via a local `scripts/signing.env`).
-- **Windows**: a standalone `ProBooks.exe` built by CI (`.github/workflows/release.yml`, tag-triggered). The release pipeline refuses to ship a build whose encryption is unavailable.
+- **macOS**: a signed standalone `ProBooks.app` — build with `./scripts/build_release.sh` (see `DESKTOP.md`; signing is configured via a local `scripts/signing.env`). Not yet automated in CI, so no macOS release asset is published.
+- **Windows**: an Inno Setup installer built by CI (`.github/workflows/release.yml`, tag-triggered) from `scripts/probooks.iss`. The release pipeline refuses to ship a build whose encryption is unavailable, installs the pinned set in `requirements-windows.lock`, and will not publish a build that cannot serve a page (`scripts/smoke_serve.ps1`).
 
 ## The posture
 

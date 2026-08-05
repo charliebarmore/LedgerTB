@@ -1,9 +1,12 @@
 name: Windows build spike
 
-# Answers three questions about a Windows port, in one run:
-#   1. Does sqlcipher3 have a usable win_amd64 wheel (encrypted-at-rest)?
+# Answers the questions a Windows release depends on, in one run:
+#   1. Does the pinned dependency set install and give encryption at rest?
 #   2. Does the test suite pass on Windows?
 #   3. Does PyInstaller produce a runnable ProBooks.exe (frozen selfcheck)?
+#   4. Does the built app actually SERVE A PAGE? (selfcheck alone missed a
+#      starlette break that 500'd every request)
+#   5. Does the Inno Setup installer build?
 # Steps continue on error so a single failure still yields the other signals.
 
 on:
@@ -14,33 +17,27 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies (except sqlcipher3)
+      - name: Install dependencies (pinned)
         shell: pwsh
         run: |
-          python -c "lines = [l for l in open('requirements.txt') if not l.startswith('sqlcipher3')]; open('req-win.txt','w').writelines(lines)"
           python -m pip install --upgrade pip
-          pip install -r req-win.txt -r requirements-desktop.txt
+          pip install -r requirements-windows.lock
 
-      - name: "Signal 1: sqlcipher3 wheel availability"
+      - name: "Signal 1: encryption at rest"
         id: sqlcipher
         continue-on-error: true
         shell: pwsh
         run: |
-          pip install --only-binary :all: "sqlcipher3>=0.6.2"
+          pip check
+          python -c "import starlette, streamlit; print('starlette', starlette.__version__, '| streamlit', streamlit.__version__)"
           python -c "from database import connection; assert connection.ENCRYPTION_AVAILABLE, 'driver imported but encryption unavailable'; print('SQLCIPHER OK - encrypted at rest works on Windows')"
-
-      - name: "Signal 1b: fallback probe (only if wheel missing)"
-        if: steps.sqlcipher.outcome == 'failure'
-        shell: pwsh
-        run: |
-          python -c "from database import connection; print('FALLBACK MODE - ENCRYPTION_AVAILABLE:', connection.ENCRYPTION_AVAILABLE)"
 
       - name: "Signal 2: test suite"
         id: tests
@@ -66,6 +63,51 @@ jobs:
           $p = Start-Process -FilePath dist/ProBooks/ProBooks.exe -Wait -PassThru
           if ($p.ExitCode -ne 0) { exit $p.ExitCode }
 
+      - name: "Signal 4: the built app serves a page"
+        id: smoke
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        # selfcheck imports modules; this starts the server and fetches a page
+        # with gzip requested. Build 31013372986 passed selfcheck and returned
+        # HTTP 500 on every request.
+        run: pwsh scripts/smoke_serve.ps1 -ExePath dist/ProBooks/ProBooks.exe
+
+      - name: Read app version
+        id: ver
+        if: steps.build.outcome == 'success'
+        shell: pwsh
+        run: |
+          $v = python -c "from version import APP_VERSION; print(APP_VERSION)"
+          "value=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: "Signal 5: Inno Setup installer"
+        id: installer
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          # chocolatey and winget put ISCC in different places, so find it
+          # rather than hardcode one path.
+          $roots = @("${env:ProgramFiles(x86)}", "$env:ProgramFiles", "$env:LOCALAPPDATA\Programs")
+          $iscc = $roots | Where-Object { $_ } | ForEach-Object {
+              Get-ChildItem -Path $_ -Filter ISCC.exe -Recurse -Depth 2 -ErrorAction SilentlyContinue
+          } | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) { Write-Error "ISCC.exe not found after installing Inno Setup"; exit 1 }
+          Write-Host "using $iscc"
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.value }}" scripts\probooks.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem installer
+
+      - name: Upload installer
+        if: steps.installer.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProBooks-windows-installer
+          path: installer/*.exe
+          retention-days: 7
+
       - name: Upload Windows bundle
         if: steps.build.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -84,11 +126,14 @@ jobs:
         # with a failure buried in an annotation is how 34 test failures
         # shipped unnoticed.
         run: |
-          Write-Host "sqlcipher wheel: ${{ steps.sqlcipher.outcome }}"
-          Write-Host "test suite:      ${{ steps.tests.outcome }}"
-          Write-Host "pyinstaller:     ${{ steps.build.outcome }}"
-          Write-Host "selfcheck:       ${{ steps.selfcheck.outcome }}"
+          Write-Host "deps + encryption: ${{ steps.sqlcipher.outcome }}"
+          Write-Host "test suite:        ${{ steps.tests.outcome }}"
+          Write-Host "pyinstaller:       ${{ steps.build.outcome }}"
+          Write-Host "selfcheck:         ${{ steps.selfcheck.outcome }}"
+          Write-Host "serves a page:     ${{ steps.smoke.outcome }}"
+          Write-Host "installer:         ${{ steps.installer.outcome }}"
           $bad = @("${{ steps.sqlcipher.outcome }}", "${{ steps.tests.outcome }}",
-                   "${{ steps.build.outcome }}", "${{ steps.selfcheck.outcome }}") |
+                   "${{ steps.build.outcome }}", "${{ steps.selfcheck.outcome }}",
+                   "${{ steps.smoke.outcome }}", "${{ steps.installer.outcome }}") |
                  Where-Object { $_ -eq "failure" }
           if ($bad) { Write-Error "one or more signals failed"; exit 1 }
