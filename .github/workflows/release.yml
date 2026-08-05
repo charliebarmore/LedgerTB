@@ -65,11 +65,18 @@ jobs:
       # Swap for an Inno Setup installer when that lands.
       - name: Package
         shell: pwsh
-        run: Compress-Archive -Path dist/ProBooks/* -DestinationPath ProBooks-${{ github.ref_name }}-windows-x64.zip
+        # Two names for the same bytes: the versioned zip for the archive, and
+        # a stable name so releases/latest/download/ProBooks-windows-x64.zip
+        # is an evergreen link that always serves the newest release.
+        run: |
+          Compress-Archive -Path dist/ProBooks/* -DestinationPath ProBooks-${{ github.ref_name }}-windows-x64.zip
+          Copy-Item ProBooks-${{ github.ref_name }}-windows-x64.zip ProBooks-windows-x64.zip
 
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ProBooks-${{ github.ref_name }}-windows-x64.zip
+          files: |
+            ProBooks-${{ github.ref_name }}-windows-x64.zip
+            ProBooks-windows-x64.zip
           draft: true # review before it goes live
           generate_release_notes: true
