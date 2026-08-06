@@ -199,6 +199,15 @@ def render_client_selector() -> Optional[int]:
         st.sidebar.page_link("pages/6_Transactions.py", label="Transactions", icon=icons.TRANSACTIONS)
         st.sidebar.page_link("pages/10_Bank_Reconciliation.py", label="Bank Reconciliation", icon=icons.RECONCILIATION)
         st.sidebar.page_link("pages/11_Book_Review.py", label="Book Review", icon=icons.REVIEW)
+        ar_label = "Assistant Review"
+        try:
+            from models import assistant_review as _ar
+            _unreviewed = _ar.unreviewed_count(selected_id)
+            if _unreviewed:
+                ar_label = f"Assistant Review ({_unreviewed})"
+        except Exception:
+            pass  # pre-migration database: no review-marks table yet
+        st.sidebar.page_link("pages/13_Assistant_Review.py", label=ar_label, icon=icons.ASSISTANT)
         st.sidebar.page_link("pages/8_Audit_Trail.py", label="Audit Trail", icon=icons.AUDIT_TRAIL)
         render_safety_status()
 
