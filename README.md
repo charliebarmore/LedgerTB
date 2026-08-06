@@ -6,15 +6,16 @@ A **Ledger Labs LLC** product — the software studio of [Charlie Barmore, CPA](
 
 ## What it does
 
-- **Clients**: separate books per client, with chart-of-accounts templates by entity type (S corp, partnership, nonprofit, and more) and industry.
+- **Clients**: separate books per client, with chart-of-accounts templates by entity type (S corp, partnership, nonprofit, and more) and industry — and a chart importer that speaks **QuickBooks type names** directly (Bank, Credit Card, A/R, COGS, …), so a QB export comes in whole, with unmappable rows reported rather than silently dropped.
 - **Journal entries**: classic double-entry with validation. If it doesn't balance, it doesn't post.
 - **Bank imports**: bring in transactions from CSV with saved per-bank formats, duplicate detection, and an import verification step (including row-continuity checks — a balanced trial balance is *not* proof an import was complete). New accounts can be created right in the category dropdown. **Or skip the format question entirely**: hand any statement — CSV, PDF, a pasted table — to your assistant, which normalizes and stages it into the same review flow (see Assistant access below).
 - **AI categorization**: Claude suggests the account for each imported transaction and learns your patterns over time. Suggestions only: you review, you post. The audit trail records what happened either way.
 - **Book Review**: a deterministic integrity sweep (unbalanced entries, unposted imports, broken links, date problems, quiet accounts) plus an AI category-consistency review governed by your own per-client policy notes, and an analytical memo.
 - **Reports & the close**: trial balance, income statement, balance sheet, general ledger (whole-book view), trial balance worksheet, bank reconciliation — and an exportable **close package** (PDF + Excel) carrying your firm's branding from Firm Settings.
-- **Assistant access (MCP)**: opt-in MCP server so Claude Desktop or Claude Code can query your books — trial balance, ledgers, entry search, the integrity sweep — file **draft entries**, **stage imports from any statement format**, and — only if you turn the dial up — post balanced entries itself. **You choose the access level** (read / propose / post) on Data Safety, the setting lives outside the assistant's reach, and every level is enforced by the database engine, not by promises: even at full access the assistant is append-only and can never edit or delete anything. See `docs/MCP.md`.
+- **Assistant access (MCP)**: opt-in MCP server so Claude Desktop or Claude Code can work these books — query everything (trial balance, ledgers, entry search, the integrity sweep), **set up a new client and its chart**, file **draft entries**, **stage imports from any statement format**, export the close package to your workpaper tool, and — only if you turn the dial up — post balanced entries itself. **You choose the access level** (read / propose / post) on Data Safety, the setting lives outside the assistant's reach, and every level is enforced by the database engine, not by promises: even at full access the assistant is append-only and can never edit or delete anything. See `docs/MCP.md`.
+- **Assistant Review**: one page gathering everything the assistant has done — proposals waiting on you, plus every AI-attributed action since your last sign-off, with an append-only, audit-logged "reviewed through here" checkpoint. The sidebar badges what's unreviewed; nothing the assistant does can look pre-approved.
 - **Firm mode**: book files can live on a shared drive, ProSystem-style — the app installs locally, each book has its own passphrase, and an in-use lock keeps two writers out of one book. See `docs/FIRM-MODE.md`.
-- **Audit trail**: every change is logged, with the OS account name as the actor. Bookkeeping without an audit trail is just a spreadsheet with opinions.
+- **Audit trail**: every change is logged, with the OS account name as the actor — and assistant actions stamped **"(AI)"**, so automated work is never presented as yours. Bookkeeping without an audit trail is just a spreadsheet with opinions.
 - **Data safety**: the database is encrypted at rest behind a launch passphrase (SQLCipher), verified backups are built in, and a production-readiness checklist gates real use. If SQLCipher isn't installed, the app still runs, unencrypted, and says so on every page.
 
 ## Download
@@ -76,7 +77,7 @@ This tool follows the same rule we teach in the Lab: AI drafts, the professional
 python -m pytest
 ```
 
-More than 300 tests cover the ledger math, posting rules, imports, reports, the MCP tools, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
+More than 340 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the assistant review checkpoint, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
 
 ## More documentation
 
