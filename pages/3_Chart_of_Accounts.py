@@ -14,7 +14,7 @@ from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
 from constants import AccountType
-from services.coa_import import parse_coa_csv
+from services.coa_import import assign_missing_numbers, parse_coa_csv
 
 # Initialize database
 
@@ -233,6 +233,15 @@ with tab3:
 
         if parsed:
             existing = {a.account_number for a in Account.get_all(client_id, active_only=False)}
+            assigned = assign_missing_numbers(parsed, taken=existing)
+            if assigned:
+                shown = ", ".join(f"{no} {name}" for no, name in assigned[:6])
+                more = f" …and {len(assigned) - 6} more" if len(assigned) > 6 else ""
+                st.info(
+                    f"{len(assigned)} account(s) came without numbers — "
+                    f"numbers were assigned by type range: {shown}{more}. "
+                    "Edit any account later to renumber.", icon="🔢",
+                )
             preview = pd.DataFrame([{
                 "Acct #": a["number"], "Name": a["name"], "Type": a["type"],
                 "Subtype": a["subtype"] or "", "Description": a["description"] or "",

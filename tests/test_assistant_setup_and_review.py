@@ -115,3 +115,19 @@ def test_review_audit_events_actually_write(client_id):
             "SELECT COUNT(*) AS n FROM audit_log WHERE client_id = ? "
             "AND action = 'REVIEW'", (client_id,))
         assert cursor.fetchone()["n"] >= 1
+
+
+def test_import_accounts_assigns_numbers_when_absent(db, monkeypatch):
+    _as_assistant(monkeypatch)
+    cid = mcp_tools.create_client("Numberless Co", seed_default_chart=False)["client_id"]
+
+    result = mcp_tools.import_accounts(cid, [
+        {"name": "Operating Checking", "type": "Bank"},
+        {"name": "Design Revenue", "type": "Income"},
+    ])
+    assert result["created"] == 2 and not result["errors"]
+    assigned = {a["name"]: a["number"] for a in result["numbers_assigned"]}
+    assert assigned["Operating Checking"].startswith("1")
+    assert assigned["Design Revenue"].startswith("4")
+    by_no = {a.account_number: a for a in Account.get_all(cid, active_only=False)}
+    assert by_no[assigned["Operating Checking"]].subtype == "Cash"
