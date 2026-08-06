@@ -1,10 +1,10 @@
-"""Read-only views of the books for the MCP server.
+"""JSON-facing bookkeeping operations for the local MCP server.
 
 Every function returns plain JSON-able dicts/lists and takes primitives
 (ints, ISO date strings), so the MCP layer stays a thin wrapper and this
-module is directly unit-testable. Nothing here writes: the server also pins
-every connection read-only (database.connection.READ_ONLY), so a write
-attempt is a database error, not a policy.
+module is directly unit-testable. The server revalidates its user-selected
+read/propose/post level for every call, and SQLite's authorizer enforces the
+corresponding append-only write surface. Updates and deletes are always denied.
 
 Amounts are dollars (floats) — presentation values for an assistant, not
 ledger arithmetic (the ledger itself stores integer cents).
@@ -485,7 +485,12 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
     from models.audit_log import AuditLog
     from models.client import Client
     from models.reports import ReportGenerator
-    from services.close_package import build_close_package, build_close_package_pdf
+    from services.close_package import (
+        build_close_package,
+        build_close_package_pdf,
+        consistent_export_window,
+        load_close_package_snapshot,
+    )
 
     client = _require_client(client_id)
     start = _parse_date(period_start, "period_start")
@@ -508,15 +513,23 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
         )
     target.mkdir(parents=True, exist_ok=True)
 
-    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, start, end)
     safe_client = re.sub(r"[^A-Za-z0-9 ._-]", "_", client.name).strip() or "client"
     stem = f"{safe_client} close package {start.isoformat()} to {end.isoformat()}"
     pdf_path = target / f"{stem}.pdf"
     xlsx_path = target / f"{stem}.xlsx"
-    pdf_path.write_bytes(
-        build_close_package_pdf(client_id, client.name, start, end, tb_rows).read())
-    xlsx_path.write_bytes(
-        build_close_package(client_id, client.name, start, end, tb_rows).read())
+    with consistent_export_window():
+        tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, start, end)
+        snapshot = load_close_package_snapshot(client_id, start, end)
+        pdf_path.write_bytes(
+            build_close_package_pdf(
+                client_id, client.name, start, end, tb_rows, snapshot=snapshot
+            ).read()
+        )
+        xlsx_path.write_bytes(
+            build_close_package(
+                client_id, client.name, start, end, tb_rows, snapshot=snapshot
+            ).read()
+        )
 
     AuditLog.log_event(client_id, "EXPORT", "close_package_mcp", {
         "start_date": start, "end_date": end,

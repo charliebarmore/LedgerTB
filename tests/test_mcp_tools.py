@@ -100,6 +100,7 @@ def test_vault_unlock_round_trip(client_id, monkeypatch):
     # test database.
     test_db = dbconn.DATABASE_PATH
     monkeypatch.setattr(books, "active_book", lambda: test_db)
+    monkeypatch.setattr(books, "is_local_book", lambda path: True)
     session_key = dbconn.get_active_key()
     assert session_key, "db fixture should have keyed the session"
 

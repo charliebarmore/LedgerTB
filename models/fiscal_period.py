@@ -166,8 +166,10 @@ class FiscalPeriod:
         trial_balance = cursor.fetchone()
         cursor.execute(
             """
-            SELECT SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END) pending_imports,
+            SELECT SUM(CASE WHEN status = 'Pending' AND dismissed_at IS NULL
+                            THEN 1 ELSE 0 END) pending_imports,
                    SUM(CASE WHEN suggested_account_id IS NULL AND status != 'Posted'
+                                  AND dismissed_at IS NULL
                             THEN 1 ELSE 0 END) uncategorized_items
             FROM imported_transactions
             WHERE client_id = ? AND transaction_date BETWEEN ? AND ?
@@ -187,6 +189,7 @@ class FiscalPeriod:
                        ) duplicate_number
                 FROM imported_transactions
                 WHERE client_id = ? AND transaction_date BETWEEN ? AND ?
+                  AND dismissed_at IS NULL
             ) duplicates
             WHERE duplicate_number > 1 AND duplicate_override = 0
             """,

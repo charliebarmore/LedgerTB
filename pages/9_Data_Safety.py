@@ -13,7 +13,7 @@ from services.backups import backup_health, create_backup, list_backups, restore
 from services.production_readiness import get_readiness_checks, is_production_ready
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
-from utils import icons
+from utils import books, icons
 
 st.set_page_config(page_title="Data Safety", page_icon=icons.SECURITY, layout="wide")
 # Gate on the database passphrase before any DB access, then ensure schema.
@@ -140,13 +140,14 @@ if backups:
 st.divider()
 st.subheader("Assistant access (MCP)")
 st.caption(
-    "Lets an AI assistant on THIS computer (Claude Desktop, Claude Code) read "
-    "these books through a local MCP server — trial balance, statements, "
-    "ledgers, entry search, integrity checks. Strictly read-only: every "
-    "connection it opens is pinned query-only at the database level, and "
-    "nothing listens on a network. Enabling stores the derived database key "
-    "(never your passphrase) in the system credential vault so the server can "
-    "unlock without you; disabling deletes it."
+    "Lets an AI assistant on THIS computer (Claude Desktop, Claude Code) use "
+    "these books through a local, stdio-only MCP server. You choose whether it "
+    "can only read, can also file proposals for your review, or can post new "
+    "balanced entries. The database engine blocks anything above that level "
+    "and always blocks edits and deletes. Enabling stores the derived database "
+    "key (never your passphrase) in the system credential vault; disabling "
+    "revokes the next tool call. Tool results may be sent by your MCP client to "
+    "its configured AI provider, so use only a provider your firm has approved."
 )
 
 import json
@@ -166,6 +167,7 @@ _mcp_enabled = bool(_mcp_get(MCP_KEY_SECRET))
 _mcp_level = _mcp_get(MCP_LEVEL_SECRET) or "propose"
 if _mcp_level not in _MCP_LEVELS:
     _mcp_level = "propose"
+_mcp_book_is_local = books.is_local_book(dbconn.DATABASE_PATH)
 
 if _mcp_enabled:
     st.success(f"Assistant access is enabled — level: "
@@ -180,6 +182,14 @@ _picked_level = st.radio(
     index=list(_MCP_LEVELS).index(_mcp_level),
     key="mcp_level_pick",
 )
+_book_level_ok = _mcp_book_is_local or _picked_level == "read"
+if not _mcp_book_is_local:
+    st.warning(
+        "This book uses a custom or shared-drive path. Assistant access is "
+        "limited to read only because the MCP process does not participate in "
+        "the book's one-writer lock. Move the book to ProBooks' local data "
+        "folder to enable proposals or direct posting."
+    )
 _post_ok = True
 if _picked_level == "post":
     st.warning(
@@ -196,25 +206,34 @@ if _picked_level == "post":
 mcp_cols = st.columns([1, 1, 3])
 with mcp_cols[0]:
     if not _mcp_enabled and st.button("Enable assistant access", type="primary",
-                                      disabled=not _post_ok):
+                                      disabled=not _post_ok or not _book_level_ok):
         session_key = dbconn.get_active_key()
         if not session_key:
             st.error("Unlock the database first.")
         else:
             try:
-                _mcp_set(MCP_KEY_SECRET, session_key)
+                # Store the permission first and the enabling key last. A
+                # partial credential-vault write must never enable access with
+                # an unintended fallback level.
                 _mcp_set(MCP_LEVEL_SECRET, _picked_level)
+                _mcp_set(MCP_KEY_SECRET, session_key)
                 audit_safety_event("EXPORT", "mcp_access_enabled",
                                    {"level": _picked_level})
                 st.rerun()
             except Exception as exc:
+                _mcp_delete(MCP_KEY_SECRET)
+                _mcp_delete(MCP_LEVEL_SECRET)
                 st.error(f"Could not store the key securely: {exc}")
     if (_mcp_enabled and _picked_level != _mcp_level
-            and st.button("Change level", type="primary", disabled=not _post_ok)):
-        _mcp_set(MCP_LEVEL_SECRET, _picked_level)
-        audit_safety_event("EXPORT", "mcp_access_level_changed",
-                           {"from": _mcp_level, "to": _picked_level})
-        st.rerun()
+            and st.button("Change level", type="primary",
+                          disabled=not _post_ok or not _book_level_ok)):
+        try:
+            _mcp_set(MCP_LEVEL_SECRET, _picked_level)
+            audit_safety_event("EXPORT", "mcp_access_level_changed",
+                               {"from": _mcp_level, "to": _picked_level})
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Could not change assistant access securely: {exc}")
 with mcp_cols[1]:
     if _mcp_enabled and st.button("Disable assistant access"):
         _mcp_delete(MCP_KEY_SECRET)
@@ -222,7 +241,7 @@ with mcp_cols[1]:
         audit_safety_event("EXPORT", "mcp_access_disabled", {})
         st.rerun()
 if _mcp_enabled and _picked_level != _mcp_level:
-    st.caption("Level changes apply to the assistant's next session.")
+    st.caption("Level changes apply on the assistant's next tool call.")
 
 if _mcp_enabled:
     if getattr(sys, "frozen", False):

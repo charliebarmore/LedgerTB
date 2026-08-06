@@ -40,6 +40,22 @@ def active_book() -> Path:
     return Path(saved) if saved else DEFAULT_BOOK
 
 
+def is_local_book(path) -> bool:
+    """Whether a book is in ProBooks' local managed-data area.
+
+    Custom/external paths are treated conservatively as shared-drive books.
+    MCP writes are disabled for those paths because the MCP process does not
+    participate in the desktop app's sidecar writer lock.
+    """
+    try:
+        resolved = Path(path).expanduser().resolve()
+        default = Path(DEFAULT_BOOK).expanduser().resolve()
+        managed = Path(USER_DATA_DIR).expanduser().resolve()
+        return resolved == default or resolved.is_relative_to(managed)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def set_active_book(path) -> None:
     path = str(Path(path))
     data = _load()

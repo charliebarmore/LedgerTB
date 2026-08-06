@@ -798,7 +798,7 @@ if active_view == "Drafts":
     st.caption(
         "Proposals filed by your assistant (MCP). Nothing here is in the "
         "books: approving posts a real journal entry under your name, "
-        "rejecting discards the draft, and the audit trail records both."
+        "rejecting marks the proposal rejected, and the audit trail records both."
     )
     _draft_msg = st.session_state.pop("draft_result", None)
     if _draft_msg:
@@ -846,3 +846,19 @@ if active_view == "Drafts":
                         d.reject()
                         st.session_state.draft_result = f"Draft #{d.id} rejected."
                         st.rerun()
+
+    _reviewed_drafts = DraftEntry.get_resolved(client_id)
+    if _reviewed_drafts:
+        with st.expander(f"Recently reviewed drafts ({len(_reviewed_drafts)})"):
+            st.dataframe([
+                {
+                    "Draft": f"#{d.id}",
+                    "Entry date": d.entry_date,
+                    "Description": d.description,
+                    "Result": d.status.title(),
+                    "Reviewed by": d.resolved_by or "—",
+                    "Reviewed at": d.resolved_at or "—",
+                    "Journal entry": f"#{d.posted_entry_id}" if d.posted_entry_id else "—",
+                }
+                for d in _reviewed_drafts
+            ], width="stretch", hide_index=True)

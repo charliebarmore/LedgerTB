@@ -29,7 +29,7 @@ def test_create_tables_records_migrations(db):
         "004_bank_reconciliation", "005_audit_events", "006_import_idempotency",
         "007_import_profiles", "008_multiple_import_profiles",
         "009_activity_actor", "010_review_policies",
-        "011_firm_branding", "012_draft_entries"]
+        "011_firm_branding", "012_draft_entries", "013_import_dismissal"]
     conn.close()
 
 
@@ -42,7 +42,7 @@ def test_create_tables_is_idempotent(db):
 
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM schema_migrations")
-    assert cur.fetchone()[0] == 12
+    assert cur.fetchone()[0] == 13
     conn.close()
 
 
@@ -51,7 +51,9 @@ def test_actor_columns_exist(db):
     cur = conn.cursor()
     for table, column in [("audit_log", "performed_by"),
                           ("journal_entries", "created_by"),
-                          ("imported_transactions", "created_by")]:
+                          ("imported_transactions", "created_by"),
+                          ("imported_transactions", "dismissed_at"),
+                          ("imported_transactions", "dismissed_by")]:
         cur.execute(f"PRAGMA table_info({table})")
         columns = {row[1] for row in cur.fetchall()}
         assert column in columns, f"{table} missing {column}"

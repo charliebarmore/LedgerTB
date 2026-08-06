@@ -37,6 +37,7 @@ class TxnStatus:
     PENDING = "Pending"
     CATEGORIZED = "Categorized"
     POSTED = "Posted"
+    DISMISSED = "Dismissed"
 
 
 # Fallback accounts the AI categorizer suggests when nothing else fits. These

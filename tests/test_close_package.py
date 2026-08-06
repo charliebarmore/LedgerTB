@@ -8,11 +8,13 @@ import pytest
 import fitz
 
 from models.reports import ReportGenerator
+from models.journal_entry import JournalEntry, JournalEntryLine
 from services.close_package import (
     build_close_package,
     build_close_package_pdf,
     get_cash_activity,
     get_period_transactions,
+    load_close_package_snapshot,
 )
 from tests.conftest import post_entry
 
@@ -95,6 +97,50 @@ def test_workbook_sheets_and_tie_outs(booked_period, accounts):
     )
 
 
+def test_workbook_stores_untrusted_text_as_literals(client_id, accounts):
+    dangerous_client = "=CLIENT()"
+    dangerous_account = "+CASH()"
+    dangerous_description = "-DDE()"
+    dangerous_memo = "@SUM(A1:A2)"
+    dangerous_source = "=HYPERLINK(\"https://invalid.example\")"
+
+    from models.account import Account
+    cash = Account.get_by_id(accounts["cash"], client_id=client_id)
+    cash.name = dangerous_account
+    cash.save()
+    entry = JournalEntry(
+        client_id=client_id,
+        entry_date=date(2026, 1, 15),
+        description=dangerous_description,
+        source_reference=dangerous_source,
+        entry_type="Adjusting",
+        lines=[
+            JournalEntryLine(account_id=accounts["cash"], debit=25.0,
+                             memo=dangerous_memo),
+            JournalEntryLine(account_id=accounts["revenue"], credit=25.0),
+        ],
+    )
+    entry.save()
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+
+    wb = openpyxl.load_workbook(BytesIO(
+        build_close_package(client_id, dangerous_client, *Q1, tb_rows).read()
+    ))
+    expected = {
+        dangerous_client, dangerous_account, dangerous_description,
+        dangerous_memo, dangerous_source,
+    }
+    found = {}
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.value in expected:
+                    found[cell.value] = cell.data_type
+
+    assert set(found) == expected
+    assert all(data_type == "s" for data_type in found.values())
+
+
 def test_pdf_package_contains_every_section(booked_period, accounts):
     client_id = booked_period
     tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
@@ -113,3 +159,28 @@ def test_pdf_package_contains_every_section(booked_period, accounts):
     assert "690.00" in text          # ending cash
     assert "TOTALS" in text
     assert doc.page_count >= 4
+
+
+def test_pdf_and_excel_can_share_one_captured_snapshot(
+    booked_period, accounts, monkeypatch
+):
+    import services.close_package as close_package
+
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(booked_period, *Q1)
+    snapshot = load_close_package_snapshot(booked_period, *Q1)
+
+    def unexpected_reload(*args, **kwargs):
+        raise AssertionError("the captured snapshot should be reused")
+
+    monkeypatch.setattr(close_package, "get_period_transactions", unexpected_reload)
+    monkeypatch.setattr(close_package, "get_cash_activity", unexpected_reload)
+    monkeypatch.setattr(close_package, "get_branding", unexpected_reload)
+
+    xlsx = build_close_package(
+        booked_period, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    )
+    pdf = build_close_package_pdf(
+        booked_period, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    )
+    assert xlsx.read().startswith(b"PK")
+    assert pdf.read().startswith(b"%PDF")
