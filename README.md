@@ -68,7 +68,7 @@ The app runs fully without any API key. To turn on AI categorization, either set
 
 ## The posture
 
-This tool follows the same rule we teach in the Lab: AI drafts, the professional decides. Categorization suggestions are never auto-posted, everything is reviewable, and the audit trail keeps the record. Assistant access via MCP is off by default, opt-in, and read-only at the database level — an assistant can analyze the books but cannot post, edit, or delete. Use the app with your own or sample data first, and never put client data into any tool until you have vetted where that data goes (here, the only outbound call is the optional Anthropic API for categorization; the books themselves stay in a local encrypted database).
+This tool follows the same rule we teach in the Lab: AI drafts, the professional decides. Categorization suggestions are never auto-posted, everything is reviewable, and the audit trail keeps the record. Assistant access via MCP is off by default and permissioned at **read / propose / post**; the default is propose, while direct posting requires an explicit warning and confirmation. The database always blocks assistant edits and deletes. ProBooks itself makes an outbound call only when you enable Anthropic categorization. If you enable MCP, your MCP client may also send returned book data to its configured AI provider—vet that provider and your firm's data policy before using client data. The books remain in the local encrypted database.
 
 ## Tests
 
@@ -76,7 +76,7 @@ This tool follows the same rule we teach in the Lab: AI drafts, the professional
 python -m pytest
 ```
 
-299 tests cover the ledger math, posting rules, imports, reports, the MCP tools, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
+More than 300 tests cover the ledger math, posting rules, imports, reports, the MCP tools, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
 
 ## More documentation
 

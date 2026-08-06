@@ -39,8 +39,9 @@ deliberately out of scope — that's what keeps a shared book safe.
 
 - Backups (Data Safety) always back up the currently open book, into the
   local backups folder of the machine that ran them.
-- Assistant access (MCP) reads whichever book was most recently opened,
-  read-only as always. Books with different passphrases need assistant
-  access re-enabled after switching.
+- Assistant access (MCP) reads whichever book was most recently opened.
+  Custom/shared-drive books are capped at read only because the separate MCP
+  process does not yet participate in the one-writer sidecar lock. Books with
+  different passphrases need assistant access re-enabled after switching.
 - The shared drive sees only SQLCipher-encrypted bytes; without a book's
   passphrase the file is unreadable.

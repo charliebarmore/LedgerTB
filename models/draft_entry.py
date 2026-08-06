@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
 
-from database.connection import get_cursor
+from database.connection import get_connection, get_cursor
 from money import to_dollars
 
 
@@ -36,6 +36,23 @@ class DraftEntry:
     status: str = "pending"
     posted_entry_id: Optional[int] = None
     proposed_at: str = ""
+    resolved_at: str = ""
+    resolved_by: str = ""
+
+    def _audit_values(self) -> dict:
+        return {
+            "proposed_by": self.proposed_by,
+            "proposed_at": self.proposed_at,
+            "entry_date": self.entry_date,
+            "entry_type": self.entry_type,
+            "description": self.description,
+            "rationale": self.rationale,
+            "lines": [line.__dict__ for line in self.lines],
+            "status": self.status,
+            "resolved_at": self.resolved_at or None,
+            "resolved_by": self.resolved_by or None,
+            "posted_entry_id": self.posted_entry_id,
+        }
 
     # ---------------------------------------------------------------- checks
     def validate(self) -> None:
@@ -70,6 +87,8 @@ class DraftEntry:
 
     # ---------------------------------------------------------------- io
     def save(self) -> int:
+        from models.audit_log import AuditLog
+
         self.validate()
         with get_cursor(commit=True) as cursor:
             cursor.execute(
@@ -82,6 +101,16 @@ class DraftEntry:
                  json.dumps([line.__dict__ for line in self.lines])),
             )
             self.id = cursor.lastrowid
+            cursor.execute(
+                "SELECT datetime(proposed_at, 'localtime') proposed_at_local "
+                "FROM draft_entries WHERE id = ?",
+                (self.id,),
+            )
+            self.proposed_at = cursor.fetchone()["proposed_at_local"] or ""
+            AuditLog.write(
+                cursor, self.client_id, "draft_entries", self.id, "INSERT",
+                new_values=self._audit_values(),
+            )
         return self.id
 
     @staticmethod
@@ -93,14 +122,20 @@ class DraftEntry:
             rationale=row["rationale"] or "",
             lines=[DraftLine(**l) for l in json.loads(row["lines_json"])],
             status=row["status"], posted_entry_id=row["posted_entry_id"],
-            proposed_at=row["proposed_at"] or "",
+            proposed_at=(row["proposed_at_local"]
+                         if "proposed_at_local" in row.keys()
+                         else row["proposed_at"]) or "",
+            resolved_at=row["resolved_at"] or "",
+            resolved_by=row["resolved_by"] or "",
         )
 
     @staticmethod
     def get_by_id(draft_id: int, client_id: int) -> Optional["DraftEntry"]:
         with get_cursor() as cursor:
             cursor.execute(
-                "SELECT * FROM draft_entries WHERE id = ? AND client_id = ?",
+                """SELECT draft_entries.*,
+                          datetime(proposed_at, 'localtime') proposed_at_local
+                   FROM draft_entries WHERE id = ? AND client_id = ?""",
                 (draft_id, client_id))
             row = cursor.fetchone()
         return DraftEntry._from_row(row) if row else None
@@ -109,10 +144,27 @@ class DraftEntry:
     def get_pending(client_id: int) -> List["DraftEntry"]:
         with get_cursor() as cursor:
             cursor.execute(
-                "SELECT * FROM draft_entries WHERE client_id = ? AND "
-                "status = 'pending' ORDER BY proposed_at, id", (client_id,))
+                """SELECT draft_entries.*,
+                          datetime(proposed_at, 'localtime') proposed_at_local
+                   FROM draft_entries WHERE client_id = ? AND status = 'pending'
+                   ORDER BY proposed_at, id""", (client_id,))
             rows = cursor.fetchall()
         return [DraftEntry._from_row(r) for r in rows]
+
+    @staticmethod
+    def get_resolved(client_id: int, limit: int = 20) -> List["DraftEntry"]:
+        """Recently approved or rejected proposals, newest review first."""
+        with get_cursor() as cursor:
+            cursor.execute(
+                """SELECT draft_entries.*,
+                          datetime(proposed_at, 'localtime') proposed_at_local
+                   FROM draft_entries
+                   WHERE client_id = ? AND status != 'pending'
+                   ORDER BY resolved_at DESC, id DESC LIMIT ?""",
+                (client_id, max(1, int(limit))),
+            )
+            rows = cursor.fetchall()
+        return [DraftEntry._from_row(row) for row in rows]
 
     @staticmethod
     def pending_count(client_id: int) -> int:
@@ -127,11 +179,10 @@ class DraftEntry:
         """Post the draft as a real journal entry (normal validation, audit,
         actor) and mark it approved. Returns the new journal entry id."""
         from models.account import Account
+        from models.audit_log import AuditLog
         from models.journal_entry import JournalEntry, JournalEntryLine
         from utils.actor import current_actor
 
-        if self.status != "pending":
-            raise ValueError("Only a pending draft can be approved.")
         self.validate()  # accounts may have changed since it was filed
         by_number = {a.account_number: a.id
                      for a in Account.get_all(self.client_id, active_only=False)}
@@ -150,24 +201,107 @@ class DraftEntry:
                 memo=l.memo or None,
             ) for l in self.lines],
         )
-        entry_id = entry.save()
-        self._resolve("approved", current_actor(), entry_id)
+        actor = current_actor()
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            # The conditional update is the claim.  It is deliberately the
+            # first write in this transaction: concurrent/stale DraftEntry
+            # objects cannot both claim the same pending row.
+            cursor.execute(
+                """UPDATE draft_entries
+                   SET status = 'approved',
+                       resolved_at = datetime('now', 'localtime'),
+                       resolved_by = ?
+                   WHERE id = ? AND client_id = ? AND status = 'pending'""",
+                (actor, self.id, self.client_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Only a pending draft can be approved.")
+
+            entry_id = entry.save(conn=conn)
+            cursor.execute(
+                """UPDATE draft_entries SET posted_entry_id = ?
+                   WHERE id = ? AND client_id = ? AND status = 'approved'""",
+                (entry_id, self.id, self.client_id),
+            )
+            cursor.execute(
+                """SELECT resolved_at, resolved_by FROM draft_entries
+                   WHERE id = ? AND client_id = ?""",
+                (self.id, self.client_id),
+            )
+            resolved = cursor.fetchone()
+
+            old_values = self._audit_values()
+            new_values = dict(old_values)
+            new_values.update({
+                "status": "approved",
+                "resolved_at": resolved["resolved_at"],
+                "resolved_by": resolved["resolved_by"],
+                "posted_entry_id": entry_id,
+            })
+            AuditLog.write(
+                cursor, self.client_id, "draft_entries", self.id, "UPDATE",
+                old_values=old_values, new_values=new_values,
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        self.status = "approved"
+        self.posted_entry_id = entry_id
+        self.resolved_at = resolved["resolved_at"]
+        self.resolved_by = resolved["resolved_by"]
         return entry_id
 
     def reject(self) -> None:
+        from models.audit_log import AuditLog
         from utils.actor import current_actor
 
-        if self.status != "pending":
-            raise ValueError("Only a pending draft can be rejected.")
-        self._resolve("rejected", current_actor(), None)
-
-    def _resolve(self, status: str, actor: str, posted_entry_id) -> None:
-        with get_cursor(commit=True) as cursor:
+        actor = current_actor()
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
             cursor.execute(
                 """UPDATE draft_entries
-                   SET status = ?, resolved_at = CURRENT_TIMESTAMP,
-                       resolved_by = ?, posted_entry_id = ?
+                   SET status = 'rejected',
+                       resolved_at = datetime('now', 'localtime'),
+                       resolved_by = ?, posted_entry_id = NULL
+                   WHERE id = ? AND client_id = ? AND status = 'pending'""",
+                (actor, self.id, self.client_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Only a pending draft can be rejected.")
+            cursor.execute(
+                """SELECT resolved_at, resolved_by FROM draft_entries
                    WHERE id = ? AND client_id = ?""",
-                (status, actor, posted_entry_id, self.id, self.client_id))
-        self.status = status
-        self.posted_entry_id = posted_entry_id
+                (self.id, self.client_id),
+            )
+            resolved = cursor.fetchone()
+
+            old_values = self._audit_values()
+            new_values = dict(old_values)
+            new_values.update({
+                "status": "rejected",
+                "resolved_at": resolved["resolved_at"],
+                "resolved_by": resolved["resolved_by"],
+                "posted_entry_id": None,
+            })
+            AuditLog.write(
+                cursor, self.client_id, "draft_entries", self.id, "UPDATE",
+                old_values=old_values, new_values=new_values,
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        self.status = "rejected"
+        self.posted_entry_id = None
+        self.resolved_at = resolved["resolved_at"]
+        self.resolved_by = resolved["resolved_by"]

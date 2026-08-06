@@ -11,6 +11,8 @@ import pytest
 
 from database import connection as dbconn
 from models.account import Account
+from models.audit_log import AuditLog
+from models.client import Client
 from models.transaction import ImportedTransaction
 from services import mcp_tools
 from services.import_identity import classify_import_duplicates
@@ -111,3 +113,50 @@ def test_hydration_does_not_self_match_and_posting_adopts_the_row(
     all_rows = (ImportedTransaction.get_by_status(client_id, "Pending")
                 + ImportedTransaction.get_by_status(client_id, "Posted"))
     assert len(all_rows) == 3  # nothing double-recorded
+
+
+def test_dismiss_staged_rows_is_durable_audited_and_client_scoped(
+    client_id, accounts
+):
+    cash_no = _cash_number(client_id, accounts)
+    result = mcp_tools.propose_import(client_id, cash_no, ROWS, "July stmt")
+    staged = ImportedTransaction.get_by_status(client_id, "Pending")
+    dismissed_ids = [staged[0].id, staged[1].id]
+
+    assert ImportedTransaction.dismiss_pending(client_id, dismissed_ids) == 2
+    assert {t.id for t in ImportedTransaction.get_by_status(client_id, "Pending")} == {
+        staged[2].id
+    }
+    dismissed = ImportedTransaction.get_by_status(client_id, "Dismissed")
+    assert {t.id for t in dismissed} == set(dismissed_ids)
+    assert all(t.dismissed_at and t.dismissed_by for t in dismissed)
+    assert {row["id"] for row in mcp_tools.list_staged_imports(client_id)} == {
+        staged[2].id
+    }
+
+    log = AuditLog.get_history("imported_transactions", dismissed_ids[0])[0]
+    assert log.action == "UPDATE"
+    assert log.old_values["status"] == "Pending"
+    assert log.new_values["status"] == "Dismissed"
+
+    # Identity remains, so the assistant cannot make a dismissed row reappear.
+    again = mcp_tools.propose_import(client_id, cash_no, ROWS, "July stmt")
+    assert again["staged"] == 0 and again["skipped_already_known"] == 3
+
+    other = Client(name="Other Co", entity_type="S-Corp",
+                   fiscal_year_end_month=12).save(seed_accounts=False)
+    with pytest.raises(ValueError, match="selected client"):
+        ImportedTransaction.dismiss_pending(other, [staged[2].id])
+    assert result["staged"] == 3
+
+
+def test_dismiss_refuses_posted_rows(client_id, accounts):
+    transaction = {
+        "date": date(2026, 7, 20), "description": "POSTED", "amount": -10.0,
+    }
+    _, posted = post_transaction(
+        client_id, transaction, target_account_id=accounts["expense"],
+        bank_account_id=accounts["cash"], batch_id="posted",
+    )
+    with pytest.raises(ValueError, match="pending"):
+        ImportedTransaction.dismiss_pending(client_id, [posted.id])

@@ -20,6 +20,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Verify release tag matches app version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $appVersion = python -c "from version import APP_VERSION; print(APP_VERSION)"
+          $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
+          if ($tagVersion -ne $appVersion) {
+            Write-Error "Release tag ${{ github.ref_name }} does not match APP_VERSION $appVersion"
+            exit 1
+          }
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"

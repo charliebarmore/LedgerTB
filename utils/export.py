@@ -38,3 +38,16 @@ def sanitize_df(df):
         if _holds_text(df[col]):
             df[col] = df[col].map(sanitize_cell)
     return df
+
+
+def set_excel_literal(cell, value):
+    """Write an OpenPyXL cell while forcing string values to remain text.
+
+    OpenPyXL otherwise classifies a leading ``=`` as a formula. Explicitly
+    storing text preserves the exact visible value without adding an apostrophe.
+    Intentional formulas should be assigned directly instead of using this helper.
+    """
+    cell.value = value
+    if isinstance(value, str):
+        cell.data_type = "s"
+    return cell

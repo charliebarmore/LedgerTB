@@ -65,12 +65,9 @@ _AUTH_ALLOWED_ACTIONS = {
     )
 }
 _AUTH_INSERT = getattr(_driver, "SQLITE_INSERT", 18)
-_AUTH_UPDATE = getattr(_driver, "SQLITE_UPDATE", 23)
-
-
 # INSERT surface per level (cumulative). audit_log rides along from "propose"
-# up so every assistant write is recorded. UPDATE is draft_entries only, at
-# propose and above; nothing is ever DELETE-able at any level.
+# up so every assistant write is recorded. Nothing is UPDATE- or DELETE-able
+# at any assistant level; draft resolution belongs to the human app process.
 _ASSISTANT_INSERT_TABLES = {
     # audit_log at every level: even a read-level assistant's actions that
     # matter (file exports) get recorded, and the log is append-only anyway.
@@ -86,9 +83,6 @@ def _assistant_authorizer(action, arg1, arg2, dbname, source):
     if action in _AUTH_ALLOWED_ACTIONS:
         return _AUTH_OK
     if action == _AUTH_INSERT and arg1 in _ASSISTANT_INSERT_TABLES[level]:
-        return _AUTH_OK
-    if (action == _AUTH_UPDATE and arg1 == "draft_entries"
-            and level in ("propose", "post")):
         return _AUTH_OK
     return _AUTH_DENY
 

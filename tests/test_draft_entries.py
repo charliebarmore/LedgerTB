@@ -10,6 +10,7 @@ import pytest
 
 from database import connection as dbconn
 from models.account import Account
+from models.audit_log import AuditLog
 from models.draft_entry import DraftEntry, DraftLine
 from models.journal_entry import JournalEntry
 from services import mcp_tools
@@ -65,6 +66,63 @@ def test_approve_posts_a_real_audited_entry(client_id, accounts):
     with pytest.raises(ValueError, match="pending"):
         draft.approve()  # no double-posting
 
+    draft_logs = [
+        log for log in AuditLog.get_all(client_id)
+        if log.table_name == "draft_entries" and log.record_id == draft.id
+    ]
+    assert [log.action for log in draft_logs] == ["UPDATE", "INSERT"]
+    assert draft_logs[0].old_values["status"] == "pending"
+    assert draft_logs[0].new_values["status"] == "approved"
+    assert draft_logs[0].new_values["posted_entry_id"] == entry_id
+
+
+def test_stale_draft_objects_cannot_double_post(client_id, accounts):
+    cash_no, rev_no = _numbers(client_id, accounts)
+    draft = DraftEntry(
+        client_id=client_id, entry_date="2026-07-31", description="One only",
+        lines=[DraftLine(cash_no, debit_cents=100),
+               DraftLine(rev_no, credit_cents=100)],
+    )
+    draft.save()
+    first = DraftEntry.get_by_id(draft.id, client_id)
+    stale = DraftEntry.get_by_id(draft.id, client_id)
+
+    first.approve()
+    with pytest.raises(ValueError, match="pending"):
+        stale.approve()
+
+    assert JournalEntry.count(client_id) == 1
+    assert DraftEntry.get_by_id(draft.id, client_id).posted_entry_id == first.posted_entry_id
+
+
+def test_approval_rolls_back_entry_and_claim_when_draft_audit_fails(
+    client_id, accounts, monkeypatch
+):
+    cash_no, rev_no = _numbers(client_id, accounts)
+    draft = DraftEntry(
+        client_id=client_id, entry_date="2026-07-31", description="Atomic",
+        lines=[DraftLine(cash_no, debit_cents=100),
+               DraftLine(rev_no, credit_cents=100)],
+    )
+    draft.save()
+    original_write = AuditLog.write
+
+    def fail_draft_resolution(cursor, client_id, table_name, record_id, action, **kwargs):
+        if table_name == "draft_entries" and action == "UPDATE":
+            raise RuntimeError("draft audit failed")
+        return original_write(
+            cursor, client_id, table_name, record_id, action, **kwargs
+        )
+
+    monkeypatch.setattr(AuditLog, "write", fail_draft_resolution)
+    with pytest.raises(RuntimeError, match="draft audit failed"):
+        draft.approve()
+
+    assert JournalEntry.count(client_id) == 0
+    stored = DraftEntry.get_by_id(draft.id, client_id)
+    assert stored.status == "pending"
+    assert stored.posted_entry_id is None
+
 
 def test_reject_leaves_the_ledger_alone(client_id, accounts):
     cash_no, rev_no = _numbers(client_id, accounts)
@@ -77,6 +135,15 @@ def test_reject_leaves_the_ledger_alone(client_id, accounts):
     draft.reject()
     assert draft.status == "rejected"
     assert JournalEntry.count(client_id) == before
+    draft_logs = [
+        log for log in AuditLog.get_all(client_id)
+        if log.table_name == "draft_entries" and log.record_id == draft.id
+    ]
+    assert [log.action for log in draft_logs] == ["UPDATE", "INSERT"]
+    assert draft_logs[0].new_values["status"] == "rejected"
+    reviewed = DraftEntry.get_resolved(client_id)
+    assert [item.id for item in reviewed] == [draft.id]
+    assert reviewed[0].resolved_at and reviewed[0].resolved_by
 
 
 def test_draft_inbox_mode_files_drafts_but_cannot_reach_the_ledger(

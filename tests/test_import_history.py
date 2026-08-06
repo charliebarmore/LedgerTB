@@ -83,6 +83,27 @@ def test_posted_and_pending_rows_are_counted_separately(client_id, accounts):
     assert batch["net_amount"] == -30.00
 
 
+def test_dismissed_rows_remain_in_history_but_not_in_pending_count(
+    client_id, accounts
+):
+    pending = ImportedTransaction(
+        client_id=client_id, import_batch="REVIEWED",
+        transaction_date=date(2026, 1, 6), description="NOT OUR CHARGE",
+        amount=-20.00, bank_account_id=accounts["cash"], status="Pending",
+        source_filename="REVIEWED.csv", source_row_number=2,
+    )
+    pending.save()
+    ImportedTransaction.dismiss_pending(client_id, [pending.id])
+
+    batch = ImportedTransaction.get_batch_summaries(client_id)[0]
+    assert batch["row_count"] == 1
+    assert batch["pending_count"] == 0
+    assert batch["dismissed_count"] == 1
+    assert ImportedTransaction.get_pending_count(client_id) == 0
+    row = ImportedTransaction.get_by_batch(client_id, "REVIEWED")[0]
+    assert row.status == "Dismissed"
+
+
 def test_each_batch_is_summarized_separately(client_id, accounts):
     _post(client_id, accounts, "RELAY", 2, "GO DADDY", -26.18, 12)
     _post(client_id, accounts, "AMEX", 2, "CANVA", -15.00, 7)

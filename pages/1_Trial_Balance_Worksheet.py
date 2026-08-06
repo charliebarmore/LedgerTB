@@ -23,13 +23,19 @@ from utils.client_selector import render_client_selector, get_selected_client
 from utils.ui import apply_default_on_change
 from utils.unlock import require_unlock
 from utils import icons
+from utils.export import set_excel_literal
 from models.client import Client
 from models.fiscal_period import FiscalPeriod
 from models.reports import ReportGenerator
 from models.journal_entry import JournalEntry, JournalEntryLine
 from models.account import Account
 from models.audit_log import AuditLog
-from services.close_package import build_close_package, build_close_package_pdf
+from services.close_package import (
+    build_close_package,
+    build_close_package_pdf,
+    consistent_export_window,
+    load_close_package_snapshot,
+)
 
 
 st.set_page_config(
@@ -421,10 +427,15 @@ with btn_cols[1]:
             ws.title = "Trial Balance Worksheet"
 
             # Header
-            ws['A1'] = f"Trial Balance Worksheet - {client.name}"
+            set_excel_literal(ws['A1'], f"Trial Balance Worksheet - {client.name}")
             ws['A1'].font = Font(bold=True, size=14)
-            ws['A2'] = f"Period: {period_start.strftime('%m/%d/%Y')} - {period_end.strftime('%m/%d/%Y')}"
-            ws['A3'] = f"Generated: {datetime.now().strftime('%m/%d/%Y %H:%M')}"
+            set_excel_literal(
+                ws['A2'],
+                f"Period: {period_start.strftime('%m/%d/%Y')} - {period_end.strftime('%m/%d/%Y')}",
+            )
+            set_excel_literal(
+                ws['A3'], f"Generated: {datetime.now().strftime('%m/%d/%Y %H:%M')}",
+            )
 
             # Column headers starting at row 5
             headers = ['Acct #', 'Account Name', 'Type', 'Beg Bal Dr', 'Beg Bal Cr',
@@ -432,16 +443,16 @@ with btn_cols[1]:
                        'AJE Dr', 'AJE Cr', 'Adj TB Dr', 'Adj TB Cr']
 
             for col_idx, header in enumerate(headers, 1):
-                cell = ws.cell(row=5, column=col_idx, value=header)
+                cell = set_excel_literal(ws.cell(row=5, column=col_idx), header)
                 cell.font = Font(bold=True)
                 cell.alignment = Alignment(horizontal='center')
 
             # Data rows starting at row 6
             data_start_row = 6
             for row_idx, row in enumerate(rows, data_start_row):
-                ws.cell(row=row_idx, column=1, value=row.account_number)
-                ws.cell(row=row_idx, column=2, value=row.account_name)
-                ws.cell(row=row_idx, column=3, value=row.account_type)
+                set_excel_literal(ws.cell(row=row_idx, column=1), row.account_number)
+                set_excel_literal(ws.cell(row=row_idx, column=2), row.account_name)
+                set_excel_literal(ws.cell(row=row_idx, column=3), row.account_type)
                 ws.cell(row=row_idx, column=4, value=row.beginning_dr if row.beginning_dr > 0 else None)
                 ws.cell(row=row_idx, column=5, value=row.beginning_cr if row.beginning_cr > 0 else None)
                 ws.cell(row=row_idx, column=6, value=row.period_debits if row.period_debits > 0 else None)
@@ -457,7 +468,7 @@ with btn_cols[1]:
 
             # Totals row with formulas
             totals_row = data_start_row + len(rows)
-            ws.cell(row=totals_row, column=1, value="TOTALS")
+            set_excel_literal(ws.cell(row=totals_row, column=1), "TOTALS")
             ws.cell(row=totals_row, column=1).font = Font(bold=True)
 
             for col_idx in range(4, 14):
@@ -498,9 +509,21 @@ with btn_cols[2]:
     # PDF is the file/record copy; the Excel workbook is for further work.
     # (Replaced the old attest-claw bridge export.)
     if rows:
-        pdf = build_close_package_pdf(
-            client_id, client.name, period_start, period_end, rows
-        )
+        with consistent_export_window():
+            export_rows, _ = ReportGenerator.trial_balance_worksheet(
+                client_id, period_start, period_end
+            )
+            export_snapshot = load_close_package_snapshot(
+                client_id, period_start, period_end
+            )
+            pdf = build_close_package_pdf(
+                client_id, client.name, period_start, period_end, export_rows,
+                snapshot=export_snapshot,
+            )
+            package = build_close_package(
+                client_id, client.name, period_start, period_end, export_rows,
+                snapshot=export_snapshot,
+            )
         st.download_button(
             label="Close Package (PDF)",
             data=pdf,
@@ -512,11 +535,8 @@ with btn_cols[2]:
             args=(client_id, "EXPORT", "close_package_export", {
                 "format": "pdf",
                 "period_start": period_start, "period_end": period_end,
-                "row_count": len(rows),
+                "row_count": len(export_rows),
             }),
-        )
-        package = build_close_package(
-            client_id, client.name, period_start, period_end, rows
         )
         st.download_button(
             label="Close Package (Excel)",
@@ -528,7 +548,7 @@ with btn_cols[2]:
             args=(client_id, "EXPORT", "close_package_export", {
                 "format": "xlsx",
                 "period_start": period_start, "period_end": period_end,
-                "row_count": len(rows),
+                "row_count": len(export_rows),
             }),
         )
 

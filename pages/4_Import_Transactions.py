@@ -1329,7 +1329,7 @@ elif selected_tab == "Review & Categorize":
     _staged = [t for t in ImportedTransaction.get_by_status(client_id, "Pending")
                if t.id not in _in_session]
     if _staged:
-        _sc1, _sc2 = st.columns([4, 1])
+        _sc1, _sc2, _sc3 = st.columns([3, 1, 1])
         with _sc1:
             noun = "transaction" if len(_staged) == 1 else "transactions"
             st.info(f"{len(_staged)} {noun} staged by your assistant await "
@@ -1368,6 +1368,52 @@ elif selected_tab == "Review & Categorize":
                         "text": f"{duplicate_count} potential duplicate(s) "
                                 "were auto-deselected.",
                     }
+                st.rerun()
+        with _sc3:
+            if st.button("Dismiss staged", key="dismiss_staged_imports",
+                         width="stretch"):
+                st.session_state.confirm_dismiss_staged = {
+                    "client_id": client_id,
+                    "ids": [t.id for t in _staged],
+                }
+                st.rerun()
+
+    _dismiss_request = st.session_state.get("confirm_dismiss_staged")
+    if (_dismiss_request
+            and _dismiss_request.get("client_id") != client_id):
+        st.session_state.confirm_dismiss_staged = None
+        _dismiss_request = None
+    _dismiss_ids = _dismiss_request["ids"] if _dismiss_request else []
+    if _dismiss_ids:
+        st.warning(
+            f"Dismiss {len(_dismiss_ids)} staged transaction"
+            f"{'' if len(_dismiss_ids) == 1 else 's'}? They will leave the review "
+            "queue but remain in history and cannot be staged again."
+        )
+        _dc1, _dc2, _dc3 = st.columns([1, 1, 3])
+        with _dc1:
+            if st.button("Confirm dismissal", type="primary",
+                         key="confirm_dismiss_staged_button"):
+                try:
+                    _dismissed = ImportedTransaction.dismiss_pending(
+                        client_id, _dismiss_ids)
+                    _dismissed_ids = set(_dismiss_ids)
+                    st.session_state.transactions_to_review = [
+                        row for row in st.session_state.transactions_to_review
+                        if row.get("staged_id") not in _dismissed_ids
+                    ]
+                    st.session_state.confirm_dismiss_staged = None
+                    st.session_state.post_result = {
+                        "level": "info",
+                        "text": f"Dismissed {_dismissed} staged transaction"
+                                f"{'' if _dismissed == 1 else 's'}.",
+                    }
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Could not dismiss staged transactions: {exc}")
+        with _dc2:
+            if st.button("Cancel", key="cancel_dismiss_staged_button"):
+                st.session_state.confirm_dismiss_staged = None
                 st.rerun()
 
     if not st.session_state.transactions_to_review:
@@ -1987,8 +2033,18 @@ elif selected_tab == "Review & Categorize":
                     st.rerun()
 
         with col2:
-            if st.button("Clear All"):
+            if st.button("Clear review list"):
                 st.session_state.transactions_to_review = []
+                st.rerun()
+            _loaded_staged_ids = [
+                t["staged_id"] for t in transactions if t.get("staged_id")
+            ]
+            if (_loaded_staged_ids
+                    and st.button("Dismiss staged rows", key="dismiss_loaded_staged")):
+                st.session_state.confirm_dismiss_staged = {
+                    "client_id": client_id,
+                    "ids": _loaded_staged_ids,
+                }
                 st.rerun()
 
         with col3:
@@ -2020,7 +2076,13 @@ elif selected_tab == "Import History":
         def _batch_status(batch):
             if batch["pending_count"] or batch["categorized_count"]:
                 unposted = batch["pending_count"] + batch["categorized_count"]
-                return f"{batch['posted_count']} posted, {unposted} not yet posted"
+                text = f"{batch['posted_count']} posted, {unposted} not yet posted"
+                if batch["dismissed_count"]:
+                    text += f", {batch['dismissed_count']} dismissed"
+                return text
+            if batch["dismissed_count"]:
+                return (f"{batch['posted_count']} posted, "
+                        f"{batch['dismissed_count']} dismissed")
             return "All posted"
 
         overview = pd.DataFrame([{
@@ -2085,6 +2147,12 @@ elif selected_tab == "Import History":
             st.info(
                 f"{batch['posted_count']} of {batch['row_count']} rows are posted to the "
                 f"ledger. The rest are waiting in **Review & Categorize**."
+            )
+        if batch["dismissed_count"]:
+            st.caption(
+                f"{batch['dismissed_count']} row"
+                f"{'' if batch['dismissed_count'] == 1 else 's'} dismissed from review; "
+                "the source record and audit history were retained."
             )
 
         # The stronger check: re-supply the file and compare row by row. Only a

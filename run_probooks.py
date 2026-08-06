@@ -310,7 +310,7 @@ def main() -> int:
     if os.environ.get("PROBOOKS_MODE") == "server":
         return _run_server()
     if os.environ.get("PROBOOKS_MODE") == "mcp":
-        # Read-only MCP server over stdio (spawned by Claude Desktop/Code).
+        # Permissioned MCP server over stdio (spawned by Claude Desktop/Code).
         os.chdir(BUNDLE)
         sys.path.insert(0, str(BUNDLE))
         from mcp_server import main as mcp_main

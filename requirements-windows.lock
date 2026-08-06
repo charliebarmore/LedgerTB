@@ -12,7 +12,7 @@
 # bytes, and "what is in the build members are running" has an answer.
 #
 # VERIFIED on Windows 11 / Python 3.12.10, 2026-08-05:
-#   - 306 tests pass (pytest -m "not performance")
+#   - the full non-performance suite passes (pytest -m "not performance")
 #   - the server starts and returns HTTP 200
 #
 # TO REGENERATE (on Windows, Python 3.12, after changing requirements.txt):

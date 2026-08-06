@@ -7,9 +7,10 @@ in the period), Adjusting Entries, and Receipts & Disbursements per cash
 account.
 """
 from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import date, datetime
 from io import BytesIO
-from typing import List
+from typing import List, Optional
 
 import openpyxl
 from openpyxl.styles import Font
@@ -28,14 +29,37 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from database.connection import get_cursor
+from database import connection as dbconn
+from database.connection import get_connection, get_cursor
 from models.reports import TrialBalanceWorksheetRow
 from money import to_dollars
 from services.branding import FirmBranding, get_branding
 from utils.dates import long_date, long_datetime
+from utils.export import set_excel_literal
 
 _HEADER_FONT = Font(bold=True)
 _MONEY_FMT = "#,##0.00"
+
+
+@contextmanager
+def consistent_export_window():
+    """Prevent ledger writes while a multi-format close package is rendered.
+
+    PDF and Excel perform several read queries. A reserved SQLite transaction
+    lets other readers continue but prevents a writer from committing between
+    those queries, so both files describe one committed ledger state.
+    """
+    conn = get_connection()
+    try:
+        from utils import books
+        if not dbconn.READ_ONLY and books.is_local_book(dbconn.DATABASE_PATH):
+            conn.execute("BEGIN IMMEDIATE")
+        else:
+            conn.execute("BEGIN")
+        yield
+    finally:
+        conn.rollback()
+        conn.close()
 
 
 @dataclass
@@ -49,6 +73,14 @@ class CashActivityRow:
     @property
     def ending(self) -> float:
         return round(self.beginning + self.receipts - self.disbursements, 2)
+
+
+@dataclass
+class ClosePackageSnapshot:
+    transactions: List[dict]
+    cash: List[CashActivityRow]
+    branding: FirmBranding
+    generated_at: datetime
 
 
 def get_period_transactions(client_id: int, period_start: date, period_end: date) -> List[dict]:
@@ -131,12 +163,33 @@ def get_cash_activity(client_id: int, period_start: date, period_end: date) -> L
     ]
 
 
+def load_close_package_snapshot(
+    client_id: int, period_start: date, period_end: date
+) -> ClosePackageSnapshot:
+    """Capture the non-TB inputs once so PDF and Excel cannot drift apart."""
+    return ClosePackageSnapshot(
+        transactions=get_period_transactions(client_id, period_start, period_end),
+        cash=get_cash_activity(client_id, period_start, period_end),
+        branding=get_branding(),
+        generated_at=datetime.now(),
+    )
+
+
+def _append_literal_row(ws, values):
+    """Append a row while ensuring every string is stored as literal text."""
+    ws.append(values)
+    cells = ws[ws.max_row]
+    for cell, value in zip(cells, values):
+        set_excel_literal(cell, value)
+    return cells
+
+
 def _write_table(ws, headers, data_rows, money_cols):
-    ws.append(headers)
+    _append_literal_row(ws, headers)
     for cell in ws[1]:
         cell.font = _HEADER_FONT
     for row in data_rows:
-        ws.append(row)
+        _append_literal_row(ws, row)
     for col_idx in money_cols:
         for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
             for cell in row:
@@ -153,11 +206,15 @@ def build_close_package(
     period_start: date,
     period_end: date,
     tb_rows: List[TrialBalanceWorksheetRow],
+    snapshot: Optional[ClosePackageSnapshot] = None,
 ) -> BytesIO:
     """Build the close-package workbook and return it as an in-memory file."""
-    transactions = get_period_transactions(client_id, period_start, period_end)
+    snapshot = snapshot or load_close_package_snapshot(
+        client_id, period_start, period_end
+    )
+    transactions = snapshot.transactions
     ajes = [t for t in transactions if t["entry_type"] == "Adjusting"]
-    cash = get_cash_activity(client_id, period_start, period_end)
+    cash = snapshot.cash
 
     wb = openpyxl.Workbook()
 
@@ -166,11 +223,11 @@ def build_close_package(
     ws.title = "Summary"
     total_dr = round(sum(r.adjusted_dr for r in tb_rows), 2)
     total_cr = round(sum(r.adjusted_cr for r in tb_rows), 2)
-    branding = get_branding()
+    branding = snapshot.branding
     lines = [
         (client_name, ""),
         ("Close package", f"{period_start.isoformat()} to {period_end.isoformat()}"),
-        ("Generated", datetime.now().strftime("%Y-%m-%d %H:%M")),
+        ("Generated", snapshot.generated_at.strftime("%Y-%m-%d %H:%M")),
     ]
     if branding.firm_name:
         lines.append(("Prepared by", branding.firm_name))
@@ -190,7 +247,7 @@ def build_close_package(
             f"{row.receipts:,.2f} / {row.disbursements:,.2f}",
         ))
     for left, right in lines:
-        ws.append([left, right])
+        _append_literal_row(ws, [left, right])
     ws["A1"].font = _HEADER_FONT
     ws.column_dimensions["A"].width = 38
     ws.column_dimensions["B"].width = 28
@@ -368,14 +425,18 @@ def build_close_package_pdf(
     period_start: date,
     period_end: date,
     tb_rows: List[TrialBalanceWorksheetRow],
+    snapshot: Optional[ClosePackageSnapshot] = None,
 ) -> BytesIO:
     """One presentable PDF: Summary, TB, Transactions, AJEs, R&D."""
-    transactions = get_period_transactions(client_id, period_start, period_end)
+    snapshot = snapshot or load_close_package_snapshot(
+        client_id, period_start, period_end
+    )
+    transactions = snapshot.transactions
     ajes = [t for t in transactions if t["entry_type"] == "Adjusting"]
-    cash = get_cash_activity(client_id, period_start, period_end)
+    cash = snapshot.cash
     period_label = f"{long_date(period_start)} to {long_date(period_end)}"
 
-    branding = get_branding()
+    branding = snapshot.branding
     accent = colors.HexColor(branding.accent_hex) if branding.accent_hex else colors.black
     heading_1 = ParagraphStyle("bh1", parent=_PDF_H1, textColor=accent)
     heading_2 = ParagraphStyle("bh2", parent=_PDF_H2, textColor=accent)
@@ -421,7 +482,7 @@ def build_close_package_pdf(
         Paragraph(client_name, heading_1),
         Paragraph("Close Package", _PDF_META),
         Paragraph(period_label, _PDF_META),
-        Paragraph(f"Generated {long_datetime(datetime.now())}", _PDF_META),
+        Paragraph(f"Generated {long_datetime(snapshot.generated_at)}", _PDF_META),
         Spacer(1, 18),
         Paragraph("Summary", heading_2),
         _pdf_table(

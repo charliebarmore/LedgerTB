@@ -17,5 +17,6 @@ def test_entry_types():
 
 
 def test_txn_statuses():
-    assert (TxnStatus.PENDING, TxnStatus.CATEGORIZED, TxnStatus.POSTED) == \
-        ("Pending", "Categorized", "Posted")
+    assert (TxnStatus.PENDING, TxnStatus.CATEGORIZED, TxnStatus.POSTED,
+            TxnStatus.DISMISSED) == \
+        ("Pending", "Categorized", "Posted", "Dismissed")

@@ -37,6 +37,16 @@ def test_registry_round_trip_and_recents(settings, tmp_path):
         del os.environ["PROBOOKS_DB_PATH"]
 
 
+def test_local_book_detection_is_conservative(settings, tmp_path, monkeypatch):
+    managed = tmp_path / "managed"
+    monkeypatch.setattr(books, "USER_DATA_DIR", managed)
+    monkeypatch.setattr(books, "DEFAULT_BOOK", managed / "probooks.db")
+
+    assert books.is_local_book(managed / "probooks.db")
+    assert books.is_local_book(managed / "client-books" / "Smith.db")
+    assert not books.is_local_book(tmp_path / "shared" / "Smith.db")
+
+
 def test_lock_acquire_conflict_takeover_release(settings, tmp_path):
     book = tmp_path / "shared.db"
 

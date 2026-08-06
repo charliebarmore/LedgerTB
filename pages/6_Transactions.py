@@ -77,7 +77,7 @@ with col4:
     # Status filter
     status_filter = st.selectbox(
         "Status",
-        options=["All", "Posted", "Pending", "Categorized"],
+        options=["All", "Posted", "Pending", "Categorized", "Dismissed"],
         index=0
     )
 
@@ -242,6 +242,8 @@ else:
                 st.markdown(":green[Posted]")
             elif t.status == "Pending":
                 st.markdown(":orange[Pending]")
+            elif t.status == "Dismissed":
+                st.markdown(":gray[Dismissed]")
             else:
                 st.markdown(f":blue[{t.status}]")
 

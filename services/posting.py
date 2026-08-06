@@ -139,6 +139,10 @@ def post_transaction(
         )
         existing = cursor.fetchone()
         staged_row_id = None
+        if existing and existing["dismissed_at"] is not None:
+            raise ValueError(
+                "This staged transaction was dismissed and can no longer be posted."
+            )
         if existing and existing["journal_entry_id"] is None and existing["status"] == "Pending":
             # An assistant-staged row awaiting review: this post IS its
             # completion, not a retry — adopt the record instead of refusing.

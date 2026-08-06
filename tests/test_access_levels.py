@@ -90,6 +90,7 @@ def test_server_reads_level_from_vault(client_id, monkeypatch):
     monkeypatch.setattr(dbconn, "READ_ONLY", dbconn.READ_ONLY)
     test_db = dbconn.DATABASE_PATH
     monkeypatch.setattr(books, "active_book", lambda: test_db)
+    monkeypatch.setattr(books, "is_local_book", lambda path: True)
 
     session_key = dbconn.get_active_key()
     set_secret(mcp_server.MCP_KEY_SECRET, session_key)
@@ -104,9 +105,98 @@ def test_server_reads_level_from_vault(client_id, monkeypatch):
 
     set_secret(mcp_server.MCP_LEVEL_SECRET, "bogus")
     assert mcp_server._unlock_from_vault() is True
-    assert dbconn.ASSISTANT_ACCESS_LEVEL == "propose"  # unknown -> safe default
+    assert dbconn.ASSISTANT_ACCESS_LEVEL == "read"  # unknown -> least privilege
 
     # The tool gate reads the vault too.
     set_secret(mcp_server.MCP_LEVEL_SECRET, "read")
     with pytest.raises(ValueError, match="access level"):
+        mcp_server._require_level("propose")
+
+
+def test_running_server_honors_disable_and_reenable(client_id, monkeypatch):
+    import mcp_server
+    from utils import books
+    from utils.secure_store import delete_secret, set_secret
+
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL",
+                        dbconn.ASSISTANT_ACCESS_LEVEL)
+    test_db = dbconn.DATABASE_PATH
+    monkeypatch.setattr(books, "active_book", lambda: test_db)
+    monkeypatch.setattr(books, "is_local_book", lambda path: True)
+    session_key = dbconn.get_active_key()
+    set_secret(mcp_server.MCP_LEVEL_SECRET, "read")
+    set_secret(mcp_server.MCP_KEY_SECRET, session_key)
+
+    assert mcp_server.list_clients()
+    delete_secret(mcp_server.MCP_KEY_SECRET)
+    with pytest.raises(PermissionError, match="disabled"):
+        mcp_server.list_clients()
+    assert dbconn.ASSISTANT_ACCESS_LEVEL is None
+    assert dbconn.has_active_key() is False
+
+    set_secret(mcp_server.MCP_LEVEL_SECRET, "read")
+    set_secret(mcp_server.MCP_KEY_SECRET, session_key)
+    assert mcp_server.list_clients()
+    assert dbconn.ASSISTANT_ACCESS_LEVEL == "read"
+
+
+def test_running_server_honors_level_changes(client_id, accounts, monkeypatch):
+    import mcp_server
+    from utils import books
+    from utils.secure_store import set_secret
+
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL",
+                        dbconn.ASSISTANT_ACCESS_LEVEL)
+    test_db = dbconn.DATABASE_PATH
+    monkeypatch.setattr(books, "active_book", lambda: test_db)
+    monkeypatch.setattr(books, "is_local_book", lambda path: True)
+    session_key = dbconn.get_active_key()
+    cash_no, rev_no = _numbers(client_id, accounts)
+    set_secret(mcp_server.MCP_KEY_SECRET, session_key)
+    set_secret(mcp_server.MCP_LEVEL_SECRET, "propose")
+
+    result = mcp_server.propose_entry(
+        client_id, "2026-07-31", "Allowed draft", BALANCED(cash_no, rev_no)
+    )
+    assert result["status"] == "pending"
+
+    set_secret(mcp_server.MCP_LEVEL_SECRET, "read")
+    with pytest.raises(ValueError, match="access level 'propose'"):
+        mcp_server.propose_entry(
+            client_id, "2026-07-31", "Denied draft", BALANCED(cash_no, rev_no)
+        )
+    assert dbconn.ASSISTANT_ACCESS_LEVEL == "read"
+
+
+def test_assistant_cannot_update_a_filed_draft(client_id, accounts, monkeypatch):
+    cash_no, rev_no = _numbers(client_id, accounts)
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "propose")
+    result = mcp_tools.propose_entry(
+        client_id, "2026-07-31", "Original", BALANCED(cash_no, rev_no)
+    )
+
+    with pytest.raises(Exception):
+        with get_cursor(commit=True) as cursor:
+            cursor.execute(
+                "UPDATE draft_entries SET description = 'Tampered' WHERE id = ?",
+                (result["draft_id"],),
+            )
+
+
+def test_external_book_caps_assistant_at_read(client_id, monkeypatch):
+    import mcp_server
+    from utils import books
+    from utils.secure_store import set_secret
+
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL",
+                        dbconn.ASSISTANT_ACCESS_LEVEL)
+    test_db = dbconn.DATABASE_PATH
+    monkeypatch.setattr(books, "active_book", lambda: test_db)
+    monkeypatch.setattr(books, "is_local_book", lambda path: False)
+    set_secret(mcp_server.MCP_KEY_SECRET, dbconn.get_active_key())
+    set_secret(mcp_server.MCP_LEVEL_SECRET, "post")
+
+    assert mcp_server._unlock_from_vault() is True
+    assert dbconn.ASSISTANT_ACCESS_LEVEL == "read"
+    with pytest.raises(ValueError, match="current level is 'read'"):
         mcp_server._require_level("propose")

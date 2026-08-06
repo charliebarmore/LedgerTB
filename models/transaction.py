@@ -17,7 +17,7 @@ class ImportedTransaction:
     amount: float = 0.0
     bank_account_id: Optional[int] = None
     suggested_account_id: Optional[int] = None
-    status: str = "Pending"  # Pending, Categorized, Posted
+    status: str = "Pending"  # Pending, Categorized, Posted, or logical Dismissed
     journal_entry_id: Optional[int] = None
     source_id: Optional[str] = None
     source_filename: Optional[str] = None
@@ -27,6 +27,8 @@ class ImportedTransaction:
     duplicate_override: bool = False
     duplicate_override_reason: Optional[str] = None
     duplicate_of_id: Optional[int] = None
+    dismissed_at: Optional[str] = None
+    dismissed_by: Optional[str] = None
 
     # Display fields (not stored)
     bank_account_name: Optional[str] = None
@@ -179,19 +181,28 @@ class ImportedTransaction:
     @staticmethod
     def get_by_status(client_id: int, status: str) -> List['ImportedTransaction']:
         """Get all transactions for a client with a specific status."""
+        if status == "Dismissed":
+            status_clause = "it.status = 'Pending' AND it.dismissed_at IS NOT NULL"
+            params = (client_id,)
+        elif status == "Pending":
+            status_clause = "it.status = ? AND it.dismissed_at IS NULL"
+            params = (client_id, status)
+        else:
+            status_clause = "it.status = ?"
+            params = (client_id, status)
         with get_cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT it.*,
                        ba.name as bank_account_name,
                        sa.name as suggested_account_name
                 FROM imported_transactions it
                 LEFT JOIN accounts ba ON it.bank_account_id = ba.id
                 LEFT JOIN accounts sa ON it.suggested_account_id = sa.id
-                WHERE it.client_id = ? AND it.status = ?
+                WHERE it.client_id = ? AND {status_clause}
                 ORDER BY it.transaction_date DESC
                 """,
-                (client_id, status)
+                params,
             )
 
             rows = cursor.fetchall()
@@ -205,7 +216,7 @@ class ImportedTransaction:
             amount=to_dollars(row['amount']),
             bank_account_id=row['bank_account_id'],
             suggested_account_id=row['suggested_account_id'],
-            status=row['status'],
+            status="Dismissed" if row['dismissed_at'] else row['status'],
             journal_entry_id=row['journal_entry_id'],
             source_id=row['source_id'],
             source_filename=row['source_filename'],
@@ -215,6 +226,8 @@ class ImportedTransaction:
             duplicate_override=bool(row['duplicate_override']),
             duplicate_override_reason=row['duplicate_override_reason'],
             duplicate_of_id=row['duplicate_of_id'],
+            dismissed_at=row['dismissed_at'],
+            dismissed_by=row['dismissed_by'],
             bank_account_name=row['bank_account_name'],
             suggested_account_name=row['suggested_account_name']
         ) for row in rows]
@@ -224,11 +237,86 @@ class ImportedTransaction:
         """Get count of pending transactions for a client."""
         with get_cursor() as cursor:
             cursor.execute(
-                "SELECT COUNT(*) FROM imported_transactions WHERE client_id = ? AND status = 'Pending'",
+                "SELECT COUNT(*) FROM imported_transactions WHERE client_id = ? "
+                "AND status = 'Pending' AND dismissed_at IS NULL",
                 (client_id,)
             )
             count = cursor.fetchone()[0]
         return count
+
+    @staticmethod
+    def dismiss_pending(client_id: int, transaction_ids: List[int]) -> int:
+        """Durably dismiss pending rows, preserving identity and audit history.
+
+        The operation is all-or-nothing and client-scoped. Posted, categorized,
+        already-dismissed, missing, or cross-client rows are refused rather
+        than silently producing a partial dismissal.
+        """
+        from models.audit_log import AuditLog
+
+        ids = sorted({int(transaction_id) for transaction_id in transaction_ids})
+        if not ids:
+            return 0
+
+        conn = get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE")
+            placeholders = ", ".join("?" for _ in ids)
+            cursor.execute(
+                f"SELECT * FROM imported_transactions WHERE id IN ({placeholders})",
+                ids,
+            )
+            rows = cursor.fetchall()
+            if (len(rows) != len(ids)
+                    or any(row["client_id"] != client_id
+                           or row["status"] != "Pending"
+                           or row["journal_entry_id"] is not None
+                           or row["dismissed_at"] is not None
+                           for row in rows)):
+                raise ValueError(
+                    "Only pending transactions for the selected client can be dismissed."
+                )
+
+            actor = current_actor()
+            for row in rows:
+                cursor.execute(
+                    """UPDATE imported_transactions
+                       SET dismissed_at = datetime('now', 'localtime'),
+                           dismissed_by = ?
+                       WHERE id = ? AND client_id = ? AND status = 'Pending'
+                         AND journal_entry_id IS NULL AND dismissed_at IS NULL""",
+                    (actor, row["id"], client_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError(
+                        "A transaction changed while it was being dismissed. Try again."
+                    )
+                cursor.execute(
+                    "SELECT dismissed_at FROM imported_transactions WHERE id = ?",
+                    (row["id"],),
+                )
+                dismissed_at = cursor.fetchone()["dismissed_at"]
+                AuditLog.write(
+                    cursor, client_id, "imported_transactions", row["id"], "UPDATE",
+                    old_values={
+                        "status": "Pending",
+                        "dismissed_at": None,
+                        "dismissed_by": None,
+                    },
+                    new_values={
+                        "status": "Dismissed",
+                        "dismissed_at": dismissed_at,
+                        "dismissed_by": actor,
+                    },
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return len(ids)
 
     @staticmethod
     def get_links_for_journal_entries(
@@ -426,7 +514,12 @@ class ImportedTransaction:
             query += " AND it.transaction_date <= ?"
             params.append(end_date.isoformat())
 
-        if status:
+        if status == "Dismissed":
+            query += " AND it.status = 'Pending' AND it.dismissed_at IS NOT NULL"
+        elif status == "Pending":
+            query += " AND it.status = ? AND it.dismissed_at IS NULL"
+            params.append(status)
+        elif status:
             query += " AND it.status = ?"
             params.append(status)
 
@@ -455,7 +548,7 @@ class ImportedTransaction:
             amount=to_dollars(row['amount']),
             bank_account_id=row['bank_account_id'],
             suggested_account_id=row['suggested_account_id'],
-            status=row['status'],
+            status="Dismissed" if row['dismissed_at'] else row['status'],
             journal_entry_id=row['journal_entry_id'],
             source_id=row['source_id'],
             source_filename=row['source_filename'],
@@ -465,6 +558,8 @@ class ImportedTransaction:
             duplicate_override=bool(row['duplicate_override']),
             duplicate_override_reason=row['duplicate_override_reason'],
             duplicate_of_id=row['duplicate_of_id'],
+            dismissed_at=row['dismissed_at'],
+            dismissed_by=row['dismissed_by'],
             bank_account_name=row['bank_account_name'],
             suggested_account_name=row['suggested_account_name'],
             is_cleared=row['reconciliation_id'] is not None,
@@ -492,7 +587,12 @@ class ImportedTransaction:
         if end_date:
             clauses.append("it.transaction_date <= ?")
             params.append(end_date.isoformat())
-        if status:
+        if status == "Dismissed":
+            clauses.append("it.status = 'Pending' AND it.dismissed_at IS NOT NULL")
+        elif status == "Pending":
+            clauses.append("it.status = ? AND it.dismissed_at IS NULL")
+            params.append(status)
+        elif status:
             clauses.append("it.status = ?")
             params.append(status)
         if bank_account_id:
@@ -518,7 +618,8 @@ class ImportedTransaction:
                    COALESCE(SUM(CASE WHEN it.amount > 0 THEN it.amount ELSE 0 END), 0) deposits,
                    COALESCE(SUM(CASE WHEN it.amount < 0 THEN it.amount ELSE 0 END), 0) withdrawals,
                    SUM(CASE WHEN it.status = 'Posted' THEN 1 ELSE 0 END) posted_count,
-                   SUM(CASE WHEN it.status = 'Pending' THEN 1 ELSE 0 END) pending_count
+                   SUM(CASE WHEN it.status = 'Pending' AND it.dismissed_at IS NULL
+                            THEN 1 ELSE 0 END) pending_count
             FROM imported_transactions it
             WHERE
         """ + " AND ".join(clauses)
@@ -562,7 +663,9 @@ class ImportedTransaction:
                        COALESCE(SUM(CASE WHEN it.amount < 0 THEN it.amount ELSE 0 END), 0) withdrawals,
                        SUM(CASE WHEN it.status = 'Posted' THEN 1 ELSE 0 END) posted_count,
                        SUM(CASE WHEN it.status = 'Categorized' THEN 1 ELSE 0 END) categorized_count,
-                       SUM(CASE WHEN it.status = 'Pending' THEN 1 ELSE 0 END) pending_count,
+                       SUM(CASE WHEN it.status = 'Pending' AND it.dismissed_at IS NULL
+                                THEN 1 ELSE 0 END) pending_count,
+                       SUM(CASE WHEN it.dismissed_at IS NOT NULL THEN 1 ELSE 0 END) dismissed_count,
                        MIN(it.transaction_date) first_date,
                        MAX(it.transaction_date) last_date,
                        -- created_at is stored UTC (CURRENT_TIMESTAMP), so convert
@@ -596,6 +699,7 @@ class ImportedTransaction:
             "posted_count": int(row["posted_count"] or 0),
             "categorized_count": int(row["categorized_count"] or 0),
             "pending_count": int(row["pending_count"] or 0),
+            "dismissed_count": int(row["dismissed_count"] or 0),
             "first_date": date.fromisoformat(row["first_date"]) if row["first_date"] else None,
             "last_date": date.fromisoformat(row["last_date"]) if row["last_date"] else None,
             "imported_at": row["imported_at"],
@@ -637,7 +741,7 @@ class ImportedTransaction:
             amount=to_dollars(row['amount']),
             bank_account_id=row['bank_account_id'],
             suggested_account_id=row['suggested_account_id'],
-            status=row['status'],
+            status="Dismissed" if row['dismissed_at'] else row['status'],
             journal_entry_id=row['journal_entry_id'],
             source_id=row['source_id'],
             source_filename=row['source_filename'],
@@ -647,6 +751,8 @@ class ImportedTransaction:
             duplicate_override=bool(row['duplicate_override']),
             duplicate_override_reason=row['duplicate_override_reason'],
             duplicate_of_id=row['duplicate_of_id'],
+            dismissed_at=row['dismissed_at'],
+            dismissed_by=row['dismissed_by'],
             bank_account_name=row['bank_account_name'],
             suggested_account_name=row['suggested_account_name'],
         ) for row in rows]
