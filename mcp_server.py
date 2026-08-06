@@ -105,6 +105,11 @@ server = MCPServer(
 def _unlock_from_vault() -> bool:
     """Key the database from the vault entry written by 'Enable assistant
     access'. Returns False when access has not been enabled."""
+    from utils import actor
+
+    # Every audit row, created_by, and activity line this process writes says
+    # "<user> (AI)" — assistant work is never presented as the person's own.
+    actor.mark_as_assistant()
     try:
         _refresh_access()
     except PermissionError:
