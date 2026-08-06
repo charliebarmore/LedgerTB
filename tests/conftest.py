@@ -20,6 +20,16 @@ from models.journal_entry import JournalEntry, JournalEntryLine
 
 
 @pytest.fixture(autouse=True)
+def _human_actor_by_default(monkeypatch):
+    """mcp_server's vault unlock marks the whole process as assistant
+    (utils.actor._ASSISTANT); without this reset, one vault-unlock test taints
+    every later test's writes with the "(AI)" stamp."""
+    from utils import actor
+
+    monkeypatch.setattr(actor, "_ASSISTANT", False)
+
+
+@pytest.fixture(autouse=True)
 def fake_credential_vault(request, monkeypatch):
     """No test may touch the real credential vault (see the env note above)."""
     if request.node.get_closest_marker("real_vault"):

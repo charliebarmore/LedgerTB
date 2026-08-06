@@ -257,6 +257,29 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
 
 
 @server.tool()
+def create_client(name: str, entity_type: str = "",
+                  fiscal_year_end_month: int = 12,
+                  seed_default_chart: bool = True) -> dict:
+    """Create a new client (a new set of books), optionally seeded with the
+    default chart of accounts. Setup only — the assistant can never modify or
+    delete a client afterwards. Needs access level "propose" or higher."""
+    _require_level("propose")
+    return mcp_tools.create_client(name, entity_type, fiscal_year_end_month,
+                                   seed_default_chart)
+
+
+@server.tool()
+def import_accounts(client_id: int, rows: list) -> dict:
+    """Add accounts to a client's chart of accounts. rows:
+    [{"number": "1000", "name": "Operating Checking", "type": "Bank"}] —
+    canonical or QuickBooks type names both work (QB names imply subtypes,
+    e.g. Bank -> Asset/Cash). Existing numbers are skipped and reported;
+    nothing is silently dropped. Needs access level "propose" or higher."""
+    _require_level("propose")
+    return mcp_tools.import_accounts(client_id, rows)
+
+
+@server.tool()
 def integrity_sweep(client_id: int, start: str, end: str) -> list:
     """Deterministic bookkeeping checks for a period: unbalanced or one-line
     entries, unposted imports, broken import links, future/pre-period dates,

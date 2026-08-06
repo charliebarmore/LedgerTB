@@ -29,7 +29,7 @@ def test_create_tables_records_migrations(db):
         "004_bank_reconciliation", "005_audit_events", "006_import_idempotency",
         "007_import_profiles", "008_multiple_import_profiles",
         "009_activity_actor", "010_review_policies",
-        "011_firm_branding", "012_draft_entries", "013_import_dismissal"]
+        "011_firm_branding", "012_draft_entries", "013_import_dismissal", "014_assistant_review", "015_review_action"]
     conn.close()
 
 
@@ -42,7 +42,7 @@ def test_create_tables_is_idempotent(db):
 
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM schema_migrations")
-    assert cur.fetchone()[0] == 13
+    assert cur.fetchone()[0] == 15
     conn.close()
 
 

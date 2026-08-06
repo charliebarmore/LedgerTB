@@ -552,3 +552,94 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
                  "(no uncalculated formulas), so a workpaper tool reads them "
                  "exactly."),
     }
+
+
+def create_client(name: str, entity_type: str = "",
+                  fiscal_year_end_month: int = 12,
+                  seed_default_chart: bool = True) -> dict:
+    """Create a new client (set of books), optionally seeded with the default
+    chart of accounts. Available at access level 'propose' and above."""
+    from models.client import Client
+
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("The client needs a name.")
+    if not 1 <= int(fiscal_year_end_month) <= 12:
+        raise ValueError("fiscal_year_end_month must be 1-12.")
+    existing = [c for c in Client.get_all(active_only=False) if c.name == name]
+    if existing:
+        raise ValueError(
+            f"A client named {name!r} already exists (client_id "
+            f"{existing[0].id}) — use it rather than creating a duplicate."
+        )
+    client = Client(
+        name=name,
+        entity_type=(entity_type or "").strip() or None,
+        fiscal_year_end_month=int(fiscal_year_end_month),
+    )
+    client_id = client.save(seed_accounts=bool(seed_default_chart))
+    chart = list_accounts(client_id)
+    return {
+        "client_id": client_id,
+        "accounts_seeded": len(chart) if seed_default_chart else 0,
+        "note": ("Client created" +
+                 (" with the default chart of accounts."
+                  if seed_default_chart else
+                  " with an empty chart — import_accounts can fill it.")),
+    }
+
+
+def import_accounts(client_id: int, rows: list) -> dict:
+    """Add accounts to a client's chart. rows: dicts with number, name, type
+    (canonical or QuickBooks type names — Bank, Credit Card, Accounts
+    Receivable (A/R), Cost of Goods Sold, … — which imply subtypes), optional
+    subtype/description. Existing numbers are skipped; unmappable rows are
+    reported, never silently dropped. Available at 'propose' and above."""
+    from models.account import Account
+    from services.coa_import import normalize_type
+
+    _require_client(client_id)
+    if not rows:
+        raise ValueError("No account rows given.")
+    existing = {a.account_number for a in Account.get_all(client_id, active_only=False)}
+    created, skipped_existing, errors = [], [], []
+    seen = set()
+    for i, r in enumerate(rows, start=1):
+        number = str(r.get("number", "")).strip()
+        name = str(r.get("name", "")).strip()
+        raw_type = str(r.get("type", "")).strip()
+        if not number or not name or not raw_type:
+            errors.append(f"rows[{i}]: needs number, name, and type.")
+            continue
+        if number in seen:
+            errors.append(f"rows[{i}]: duplicate number {number} in this request.")
+            continue
+        seen.add(number)
+        if number in existing:
+            skipped_existing.append(number)
+            continue
+        mapped = normalize_type(raw_type)
+        if mapped is None:
+            errors.append(
+                f"rows[{i}]: unknown type {raw_type!r} (#{number} {name}) — "
+                "NOT imported."
+            )
+            continue
+        acct_type, implied_subtype = mapped
+        account = Account(
+            client_id=client_id,
+            account_number=number,
+            name=name,
+            type=acct_type,
+            subtype=str(r.get("subtype", "") or "").strip() or implied_subtype,
+            description=str(r.get("description", "") or "").strip() or None,
+        )
+        account.save()
+        created.append(number)
+    return {
+        "created": len(created),
+        "skipped_existing": skipped_existing,
+        "errors": errors,
+        "note": ("Every row is accounted for above — nothing is silently "
+                 "dropped. Fix error rows and re-send just those."),
+    }

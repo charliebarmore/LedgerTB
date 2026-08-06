@@ -72,8 +72,13 @@ _ASSISTANT_INSERT_TABLES = {
     # audit_log at every level: even a read-level assistant's actions that
     # matter (file exports) get recorded, and the log is append-only anyway.
     "read": frozenset({"audit_log"}),
-    "propose": frozenset({"draft_entries", "imported_transactions", "audit_log"}),
+    # clients/accounts at propose+: an assistant may scaffold a new client
+    # and its chart (setup, not ledger); it still cannot alter either later
+    # (no UPDATE/DELETE at any level).
+    "propose": frozenset({"draft_entries", "imported_transactions", "audit_log",
+                          "clients", "accounts"}),
     "post": frozenset({"draft_entries", "imported_transactions", "audit_log",
+                       "clients", "accounts",
                        "journal_entries", "journal_entry_lines"}),
 }
 
