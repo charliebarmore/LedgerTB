@@ -23,13 +23,46 @@ _HEADER_ALIASES = {
 }
 
 # Common type spellings -> canonical account type.
+# Canonical names, plus the type vocabulary QuickBooks exports actually use.
+# QB names carry accounting meaning beyond the five canonical types, so they
+# imply a subtype when the file doesn't provide one — "Bank" without
+# subtype "Cash" would import fine and then silently miss every feature that
+# keys on cash accounts (receipts & disbursements, the close package).
 _TYPE_ALIASES = {
-    "asset": AccountType.ASSET, "assets": AccountType.ASSET,
-    "liability": AccountType.LIABILITY, "liabilities": AccountType.LIABILITY,
-    "equity": AccountType.EQUITY, "equities": AccountType.EQUITY,
-    "revenue": AccountType.REVENUE, "revenues": AccountType.REVENUE,
-    "income": AccountType.REVENUE,
-    "expense": AccountType.EXPENSE, "expenses": AccountType.EXPENSE,
+    "asset": (AccountType.ASSET, None), "assets": (AccountType.ASSET, None),
+    "liability": (AccountType.LIABILITY, None),
+    "liabilities": (AccountType.LIABILITY, None),
+    "equity": (AccountType.EQUITY, None), "equities": (AccountType.EQUITY, None),
+    "revenue": (AccountType.REVENUE, None),
+    "revenues": (AccountType.REVENUE, None),
+    "income": (AccountType.REVENUE, None),
+    "expense": (AccountType.EXPENSE, None),
+    "expenses": (AccountType.EXPENSE, None),
+    # QuickBooks account types
+    "bank": (AccountType.ASSET, "Cash"),
+    "accounts receivable": (AccountType.ASSET, "Receivable"),
+    "accounts receivable (a/r)": (AccountType.ASSET, "Receivable"),
+    "a/r": (AccountType.ASSET, "Receivable"),
+    "other current asset": (AccountType.ASSET, "Other Current Asset"),
+    "other current assets": (AccountType.ASSET, "Other Current Asset"),
+    "fixed asset": (AccountType.ASSET, "Fixed Asset"),
+    "fixed assets": (AccountType.ASSET, "Fixed Asset"),
+    "other asset": (AccountType.ASSET, "Other Asset"),
+    "other assets": (AccountType.ASSET, "Other Asset"),
+    "accounts payable": (AccountType.LIABILITY, "Payable"),
+    "accounts payable (a/p)": (AccountType.LIABILITY, "Payable"),
+    "a/p": (AccountType.LIABILITY, "Payable"),
+    "credit card": (AccountType.LIABILITY, "Credit Card"),
+    "other current liability": (AccountType.LIABILITY, "Other Current Liability"),
+    "other current liabilities": (AccountType.LIABILITY, "Other Current Liability"),
+    "long term liability": (AccountType.LIABILITY, "Long Term Liability"),
+    "long-term liability": (AccountType.LIABILITY, "Long Term Liability"),
+    "long term liabilities": (AccountType.LIABILITY, "Long Term Liability"),
+    "other income": (AccountType.REVENUE, "Other Income"),
+    "cost of goods sold": (AccountType.EXPENSE, "Cost of Goods Sold"),
+    "cogs": (AccountType.EXPENSE, "Cost of Goods Sold"),
+    "other expense": (AccountType.EXPENSE, "Other Expense"),
+    "other expenses": (AccountType.EXPENSE, "Other Expense"),
 }
 
 
@@ -49,7 +82,12 @@ def _map_headers(fieldnames):
 
 
 def normalize_type(raw):
-    """Map a raw type string to a canonical AccountType, or None if unknown."""
+    """Map a raw type string to ``(AccountType, implied_subtype)``.
+
+    Returns ``None`` for an unknown type. The implied subtype (e.g. "Cash"
+    for a QuickBooks "Bank" account) is used only when the file has no
+    explicit subtype column value for the row.
+    """
     return _TYPE_ALIASES.get(_norm(raw))
 
 
@@ -89,13 +127,15 @@ def parse_coa_csv(content: str):
         if not name:
             errors.append(f"Row {i}: missing name (#{number}).")
             continue
-        acct_type = normalize_type(raw_type)
-        if acct_type is None:
+        mapped = normalize_type(raw_type)
+        if mapped is None:
             errors.append(
-                f"Row {i}: unknown type '{raw_type}' (#{number}). "
-                f"Use one of: {', '.join(AccountType.ALL)}."
+                f"Row {i}: unknown type '{raw_type}' (#{number} {name}) — "
+                f"this row will NOT be imported. Use one of: "
+                f"{', '.join(AccountType.ALL)}, or a QuickBooks type name."
             )
             continue
+        acct_type, implied_subtype = mapped
         if number in seen:
             errors.append(f"Row {i}: duplicate account number #{number} in the file.")
             continue
@@ -105,7 +145,8 @@ def parse_coa_csv(content: str):
             "number": number,
             "name": name,
             "type": acct_type,
-            "subtype": (row.get(headers.get("subtype", "")) or "").strip() or None,
+            "subtype": (row.get(headers.get("subtype", "")) or "").strip()
+            or implied_subtype,
             "description": (row.get(headers.get("description", "")) or "").strip() or None,
         })
 
