@@ -78,3 +78,27 @@ def test_export_writes_both_files_at_read_level(client_id, accounts, tmp_path,
     monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", None)
     counts = AuditLog.get_filtered_counts(client_id)
     assert counts["total"] > 0
+
+
+def test_vault_export_root_works_and_env_overrides(client_id, accounts, tmp_path,
+                                                   monkeypatch):
+    """Members choose the export folder in-app (vault); the env var stays as a
+    power-user override that wins when both exist."""
+    from utils.secure_store import set_secret
+
+    _seed(client_id, accounts)
+    monkeypatch.delenv("PROBOOKS_MCP_EXPORT_ROOTS", raising=False)
+
+    vault_root = tmp_path / "vault-root"
+    vault_root.mkdir()
+    set_secret("mcp_export_roots", str(vault_root))
+    result = mcp_tools.export_close_package(
+        client_id, "2026-01-01", "2026-03-31", str(vault_root / "julyco"))
+    assert result["pdf"].startswith(str(vault_root))
+
+    env_root = tmp_path / "env-root"
+    env_root.mkdir()
+    monkeypatch.setenv("PROBOOKS_MCP_EXPORT_ROOTS", str(env_root))
+    with pytest.raises(ValueError, match="outside"):
+        mcp_tools.export_close_package(
+            client_id, "2026-01-01", "2026-03-31", str(vault_root / "again"))
