@@ -54,7 +54,8 @@ there, and neither can touch anything outside it.
 
 - ProBooks' assistant access is opt-in with a user-chosen level, and its
   ledger writes are append-only at most. File exports only land inside
-  `PROBOOKS_MCP_EXPORT_ROOTS` and are audit-logged.
+  the export folder chosen on Data Safety (an env-var override exists
+  for managed setups) and are audit-logged.
 - LedgerPDF's file access is off until `WPT_MCP_ROOTS` names approved
   folders.
 - Client data flowing to a hosted model is a disclosure decision (in the
