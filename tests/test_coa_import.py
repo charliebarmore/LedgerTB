@@ -48,6 +48,39 @@ def test_blank_lines_ignored():
 
 
 def test_normalize_type():
-    assert normalize_type("assets") == "Asset"
-    assert normalize_type("INCOME") == "Revenue"
+    assert normalize_type("assets") == ("Asset", None)
+    assert normalize_type("INCOME") == ("Revenue", None)
+    assert normalize_type("Bank") == ("Asset", "Cash")
     assert normalize_type("nonsense") is None
+
+
+def test_quickbooks_type_names_map_with_implied_subtypes():
+    """A real QB export imports whole: Bank must land as Asset/Cash or every
+    cash-keyed feature silently misses it; nothing may drop without an error."""
+    from services.coa_import import parse_coa_csv
+
+    csv_text = (
+        "Account Number,Account Name,Type,Subtype\n"
+        "1000,Operating Checking,Bank,\n"
+        "1100,Client Receivables,Accounts Receivable (A/R),\n"
+        "1500,Studio Equipment,Fixed Asset,\n"
+        "2100,Visa Card,Credit Card,\n"
+        "2200,Payroll Withholding,Other Current Liability,\n"
+        "4900,Interest Earned,Other Income,\n"
+        "5000,Production Costs,Cost of Goods Sold,\n"
+        "6100,Rent,Expense,Occupancy\n"
+        "9999,Mystery,Suspense Widget,\n"
+    )
+    accounts, errors = parse_coa_csv(csv_text)
+
+    assert len(accounts) == 8
+    by_no = {a["number"]: a for a in accounts}
+    assert by_no["1000"]["type"] == "Asset" and by_no["1000"]["subtype"] == "Cash"
+    assert by_no["1100"]["subtype"] == "Receivable"
+    assert by_no["2100"]["type"] == "Liability" and by_no["2100"]["subtype"] == "Credit Card"
+    assert by_no["5000"]["subtype"] == "Cost of Goods Sold"
+    # An explicit subtype in the file beats the implied one.
+    assert by_no["6100"]["subtype"] == "Occupancy"
+    # The unmappable row is loudly reported, never silently dropped.
+    assert len(errors) == 1
+    assert "will NOT be imported" in errors[0] and "Suspense Widget" in errors[0]

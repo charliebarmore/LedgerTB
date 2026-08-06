@@ -222,6 +222,14 @@ with tab3:
             st.error(e)
         if len(errors) > 15:
             st.caption(f"…and {len(errors) - 15} more issue(s).")
+        if errors and parsed:
+            # A partial chart must never look complete: say exactly what the
+            # import will leave out before offering the button.
+            st.warning(
+                f"**{len(errors)} row(s) from the file will not be imported** "
+                f"(listed above). Importing now creates a partial chart — fix "
+                f"the file to bring in everything.", icon="⚠️",
+            )
 
         if parsed:
             existing = {a.account_number for a in Account.get_all(client_id, active_only=False)}
