@@ -23,7 +23,12 @@ def test_flexible_headers_and_type_aliases():
 
 
 def test_missing_required_column():
-    accounts, errors = parse_coa_csv("Name,Type\nCash,Asset\n")  # no number column
+    # No number column is fine (QBO exports); no NAME column is not.
+    accounts, errors = parse_coa_csv("Name,Type\nCash,Asset\n")
+    assert len(accounts) == 1 and not errors
+    assert accounts[0]["number"] == ""  # assigned later by the importer
+
+    accounts, errors = parse_coa_csv("Number,Type\n1000,Asset\n")
     assert accounts == []
     assert errors and "Missing required column" in errors[0]
 
@@ -84,3 +89,28 @@ def test_quickbooks_type_names_map_with_implied_subtypes():
     # The unmappable row is loudly reported, never silently dropped.
     assert len(errors) == 1
     assert "will NOT be imported" in errors[0] and "Suspense Widget" in errors[0]
+
+
+def test_numberless_chart_gets_numbers_assigned_by_type():
+    """QuickBooks Online exports often have no number column at all; the
+    importer assigns by type range, collision-free, and reports what it chose."""
+    from services.coa_import import assign_missing_numbers, parse_coa_csv
+
+    csv_text = (
+        "Account Name,Type\n"
+        "Operating Checking,Bank\n"
+        "Owner Draws,Equity\n"
+        "Design Revenue,Income\n"
+        "Software,Expense\n"
+    )
+    accounts, errors = parse_coa_csv(csv_text)
+    assert not errors and len(accounts) == 4
+
+    assigned = assign_missing_numbers(accounts, taken={"1000", "6000"})
+    assert len(assigned) == 4
+    by_name = {a["name"]: a for a in accounts}
+    assert by_name["Operating Checking"]["number"] == "1010"  # 1000 taken
+    assert by_name["Owner Draws"]["number"] == "3000"
+    assert by_name["Design Revenue"]["number"] == "4000"
+    assert by_name["Software"]["number"] == "6010"  # 6000 taken
+    assert all(a["number_assigned"] for a in accounts)

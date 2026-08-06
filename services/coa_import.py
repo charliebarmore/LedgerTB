@@ -104,26 +104,31 @@ def parse_coa_csv(content: str):
     reader = csv.DictReader(io.StringIO(content))
     headers = _map_headers(reader.fieldnames)
 
-    missing = [f for f in ("number", "name", "type") if f not in headers]
+    # Number is optional (QuickBooks Online exports often have no number
+    # column at all) — the importer assigns numbers by type range instead.
+    missing = [f for f in ("name", "type") if f not in headers]
     if missing:
         found = ", ".join(reader.fieldnames or []) or "(none)"
         errors.append(
             f"Missing required column(s): {', '.join(missing)}. Found: {found}. "
-            f"Need at least Account Number, Name, and Type."
+            f"Need at least Name and Type (Account Number is optional)."
         )
         return accounts, errors
 
     seen = set()
     for i, row in enumerate(reader, start=2):  # row 1 is the header
-        number = (row.get(headers["number"]) or "").strip()
+        number = (row.get(headers.get("number", "")) or "").strip()
         name = (row.get(headers["name"]) or "").strip()
         raw_type = (row.get(headers["type"]) or "").strip()
 
         if not (number or name or raw_type):
             continue  # blank line
-        if not number:
-            errors.append(f"Row {i}: missing account number.")
+        if not raw_type:
+            errors.append(f"Row {i}: missing type ({name or '#' + number}).")
             continue
+        # A missing number is not an error — QuickBooks Online exports
+        # commonly have none. The importer assigns one by type range and
+        # shows the user what it chose (assign_missing_numbers).
         if not name:
             errors.append(f"Row {i}: missing name (#{number}).")
             continue
@@ -136,10 +141,11 @@ def parse_coa_csv(content: str):
             )
             continue
         acct_type, implied_subtype = mapped
-        if number in seen:
+        if number and number in seen:
             errors.append(f"Row {i}: duplicate account number #{number} in the file.")
             continue
-        seen.add(number)
+        if number:
+            seen.add(number)
 
         accounts.append({
             "number": number,
@@ -151,3 +157,39 @@ def parse_coa_csv(content: str):
         })
 
     return accounts, errors
+
+
+# Number ranges by type, matching the default seed chart's conventions.
+_NUMBER_BASES = {
+    AccountType.ASSET: 1000, AccountType.LIABILITY: 2000,
+    AccountType.EQUITY: 3000, AccountType.REVENUE: 4000,
+    AccountType.EXPENSE: 6000,
+}
+
+
+def assign_missing_numbers(accounts, taken=frozenset()):
+    """Give numberless accounts numbers by type range, never colliding.
+
+    QuickBooks Online turns account numbers off by default, so names-only
+    charts are common. Numbers are how ProBooks (and an assistant) reference
+    accounts unambiguously, so instead of demanding them we assign them —
+    type base upward in steps of 10, skipping anything in ``taken`` or in the
+    file itself. Mutates the dicts, sets ``number_assigned: True`` on each
+    one changed, and returns the list of (number, name) assignments so every
+    caller can SHOW the user what was chosen.
+    """
+    used = {str(t) for t in taken}
+    used.update(a["number"] for a in accounts if a.get("number"))
+    assigned = []
+    for account in accounts:
+        if account.get("number"):
+            continue
+        base = _NUMBER_BASES.get(account["type"], 9000)
+        candidate = base
+        while str(candidate) in used:
+            candidate += 10
+        account["number"] = str(candidate)
+        account["number_assigned"] = True
+        used.add(str(candidate))
+        assigned.append((str(candidate), account["name"]))
+    return assigned

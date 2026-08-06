@@ -603,19 +603,21 @@ def import_accounts(client_id: int, rows: list) -> dict:
         raise ValueError("No account rows given.")
     existing = {a.account_number for a in Account.get_all(client_id, active_only=False)}
     created, skipped_existing, errors = [], [], []
+    assigned_numbers = []
     seen = set()
     for i, r in enumerate(rows, start=1):
         number = str(r.get("number", "")).strip()
         name = str(r.get("name", "")).strip()
         raw_type = str(r.get("type", "")).strip()
-        if not number or not name or not raw_type:
-            errors.append(f"rows[{i}]: needs number, name, and type.")
+        if not name or not raw_type:
+            errors.append(f"rows[{i}]: needs name and type (number optional).")
             continue
-        if number in seen:
+        if number and number in seen:
             errors.append(f"rows[{i}]: duplicate number {number} in this request.")
             continue
-        seen.add(number)
-        if number in existing:
+        if number:
+            seen.add(number)
+        if number and number in existing:
             skipped_existing.append(number)
             continue
         mapped = normalize_type(raw_type)
@@ -626,6 +628,14 @@ def import_accounts(client_id: int, rows: list) -> dict:
             )
             continue
         acct_type, implied_subtype = mapped
+        if not number:
+            from services.coa_import import assign_missing_numbers
+
+            pending = {"number": "", "name": name, "type": acct_type}
+            assign_missing_numbers([pending], taken=existing | seen)
+            number = pending["number"]
+            seen.add(number)
+            assigned_numbers.append((number, name))
         account = Account(
             client_id=client_id,
             account_number=number,
@@ -639,6 +649,8 @@ def import_accounts(client_id: int, rows: list) -> dict:
     return {
         "created": len(created),
         "skipped_existing": skipped_existing,
+        "numbers_assigned": [{"number": no, "name": nm}
+                             for no, nm in assigned_numbers],
         "errors": errors,
         "note": ("Every row is accounted for above — nothing is silently "
                  "dropped. Fix error rows and re-send just those."),
