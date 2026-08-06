@@ -200,3 +200,31 @@ def test_external_book_caps_assistant_at_read(client_id, monkeypatch):
     assert dbconn.ASSISTANT_ACCESS_LEVEL == "read"
     with pytest.raises(ValueError, match="current level is 'read'"):
         mcp_server._require_level("propose")
+
+
+def test_assistant_process_actor_carries_ai_suffix(client_id, accounts, monkeypatch):
+    """Assistant work must never display as the person's own in the feed."""
+    from utils import actor as actor_mod
+
+    monkeypatch.setattr(actor_mod, "_ASSISTANT", False)
+    human = actor_mod.current_actor()
+    assert not human.endswith("(AI)")
+
+    actor_mod.mark_as_assistant()
+    assert actor_mod.current_actor() == f"{human} (AI)"
+
+    # Rows written under the assistant mark carry the suffix end to end.
+    cash_no, rev_no = _numbers(client_id, accounts)
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "propose")
+    from services import mcp_tools as mt
+    mt.propose_import(client_id, cash_no,
+                      [{"date": "2026-07-03", "description": "AI STAGED",
+                        "amount": -5.00}], "attribution test")
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", None)
+    from models.transaction import ImportedTransaction
+    staged = [t for t in ImportedTransaction.get_by_status(client_id, "Pending")
+              if t.description == "AI STAGED"]
+    with dbconn.get_cursor() as cursor:
+        cursor.execute("SELECT created_by FROM imported_transactions WHERE id = ?",
+                       (staged[0].id,))
+        assert cursor.fetchone()["created_by"].endswith("(AI)")
