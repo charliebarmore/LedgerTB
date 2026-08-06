@@ -38,16 +38,17 @@ Both MCP servers in one Claude Code session:
 
 ```bash
 claude mcp add probooks --env PROBOOKS_MODE=mcp \
-  --env PROBOOKS_MCP_EXPORT_ROOTS=/path/to/engagements \
   -- /Applications/ProBooks.app/Contents/MacOS/ProBooks
 
 claude mcp add ledgerpdf -e WPT_MCP_ROOTS=/path/to/engagements \
   -- node <ledgerpdf>/app/out/mcp-server.cjs
 ```
 
-Point both roots at the same engagement folder: ProBooks may write exports
-there, LedgerPDF may read sources from there, and neither can touch
-anything outside it.
+Then choose ProBooks' export folder on **Data Safety → Assistant
+access** (no config editing — it's stored with the access level) and
+point it at the same engagement folder as LedgerPDF's `WPT_MCP_ROOTS`:
+ProBooks may write exports there, LedgerPDF may read sources from
+there, and neither can touch anything outside it.
 
 ## The consent model, stated plainly
 

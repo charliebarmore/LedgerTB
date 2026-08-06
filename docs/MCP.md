@@ -86,10 +86,12 @@ from an already-running MCP process.
 
 ## Pairing with LedgerPDF
 
-`export_close_package` writes the close package (PDF + Excel) into a
-folder you approve via `PROBOOKS_MCP_EXPORT_ROOTS`, so a workpaper tool
-can ingest it — see `LEDGERPDF-PAIRING.md` for the full books-to-binder
-workflow with both MCP servers in one session.
+`export_close_package` writes the close package (PDF + Excel) into the
+**export folder you choose on Data Safety** (stored in the credential
+vault, outside the assistant's reach; blank = file export off). The
+`PROBOOKS_MCP_EXPORT_ROOTS` environment variable remains as an override
+for config-managed setups. See `LEDGERPDF-PAIRING.md` for the full
+books-to-binder workflow with both MCP servers in one session.
 
 ## What to expect
 

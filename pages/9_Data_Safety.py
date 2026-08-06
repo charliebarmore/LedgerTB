@@ -244,6 +244,45 @@ if _mcp_enabled and _picked_level != _mcp_level:
     st.caption("Level changes apply on the assistant's next tool call.")
 
 if _mcp_enabled:
+    # Export folder: where export_close_package may write files. Stored in
+    # the vault beside the level, so the assistant cannot change it and the
+    # user never edits a config file to set it.
+    MCP_EXPORT_SECRET = "mcp_export_roots"
+    _export_root = _mcp_get(MCP_EXPORT_SECRET) or ""
+    _ec1, _ec2 = st.columns([3, 1])
+    with _ec1:
+        _export_pick = st.text_input(
+            "Export folder (assistant may write close packages here)",
+            value=_export_root,
+            placeholder=str(Path.home() / "Documents" / "ProBooks Exports"),
+            help="The only place export_close_package can write files. Leave "
+                 "blank to keep file export off. Point it at the same folder "
+                 "as your workpaper tool's root to pass files between them.",
+            key="mcp_export_root_pick",
+        )
+    with _ec2:
+        st.write("")
+        if st.button("Save folder", disabled=_export_pick.strip() == _export_root):
+            _picked = _export_pick.strip()
+            if _picked:
+                try:
+                    _resolved = Path(_picked).expanduser()
+                    _resolved.mkdir(parents=True, exist_ok=True)
+                    _mcp_set(MCP_EXPORT_SECRET, str(_resolved.resolve()))
+                    audit_safety_event("EXPORT", "mcp_export_root_set",
+                                       {"root": str(_resolved.resolve())})
+                except Exception as exc:
+                    st.error(f"Could not use that folder: {exc}")
+                else:
+                    st.rerun()
+            else:
+                _mcp_delete(MCP_EXPORT_SECRET)
+                audit_safety_event("EXPORT", "mcp_export_root_cleared", {})
+                st.rerun()
+    if not _export_root:
+        st.caption("File export is **off** — the assistant can read the books "
+                   "but cannot write any files until a folder is chosen.")
+
     if getattr(sys, "frozen", False):
         _mcp_config = {"command": sys.executable, "args": [],
                        "env": {"PROBOOKS_MODE": "mcp"}}
@@ -252,7 +291,9 @@ if _mcp_enabled:
                        "args": [str(Path(__file__).resolve().parent.parent / "mcp_server.py")]}
     st.caption(
         "Add this to your MCP client's configuration (Claude Desktop: "
-        "Settings → Developer → Edit Config, inside `mcpServers`):"
+        "Settings → Developer → Edit Config, inside `mcpServers`). It "
+        "contains no personal paths beyond the app's own location — the "
+        "access level and export folder are read from this page's settings:"
     )
     st.code(json.dumps({"probooks": _mcp_config}, indent=2), language="json")
 

@@ -498,12 +498,21 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
     if start is None or end is None or start > end:
         raise ValueError("period_start and period_end must be ISO dates in order.")
 
-    roots_raw = os.environ.get("PROBOOKS_MCP_EXPORT_ROOTS", "")
-    roots = [Path(p).resolve() for p in roots_raw.split(os.pathsep) if p.strip()]
+    # The export folder is the user's consent boundary. Normal path: chosen on
+    # Data Safety and stored in the OS vault (outside the assistant's reach,
+    # like the access level). The env var remains as a power-user override so
+    # config-managed setups keep working.
+    from utils import secure_store
+
+    roots_raw = (os.environ.get("PROBOOKS_MCP_EXPORT_ROOTS", "")
+                 or secure_store.get_secret("mcp_export_roots") or "")
+    roots = [Path(p).expanduser().resolve()
+             for p in roots_raw.split(os.pathsep) if p.strip()]
     if not roots:
         raise ValueError(
-            "File export is off: set PROBOOKS_MCP_EXPORT_ROOTS to the "
-            "folder(s) the assistant may write into, then restart the server."
+            "File export is off: choose an export folder on ProBooks -> "
+            "Data Safety -> Assistant access (or set the "
+            "PROBOOKS_MCP_EXPORT_ROOTS environment variable)."
         )
     target = Path(out_dir).resolve()
     if not any(target == root or root in target.parents for root in roots):
