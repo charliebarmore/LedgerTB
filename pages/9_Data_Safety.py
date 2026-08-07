@@ -10,7 +10,7 @@ from database import connection as dbconn
 from models.audit_log import AuditLog
 from models.client import Client
 from services.backups import backup_health, create_backup, list_backups, restore_backup
-from services.production_readiness import get_readiness_checks, is_production_ready
+from services.production_readiness import get_safety_checks, overall_status
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import books, icons
@@ -72,15 +72,21 @@ if _gs(_unlock.saved_key_name(dbconn.DATABASE_PATH)):
             audit_safety_event("EXPORT", "book_key_forgotten", {})
             st.rerun()
 
-if is_production_ready():
-    st.success("Production safeguards are ready.")
+_checks = get_safety_checks()
+_status = overall_status(_checks)
+if _status == "protected":
+    st.success("This book is protected — encrypted, restricted to your account, "
+               "and backed up.")
+elif _status == "backup_needed":
+    st.warning("This book is protected, but there's no recent verified backup. "
+               "Create one below — it takes a few seconds.")
 else:
-    st.error("TEST DATA ONLY — required production safeguards are incomplete.")
+    st.error("This book is not fully protected. Fix the items marked "
+             "“Action needed” below before keeping client work in it.")
 
-st.subheader("Production readiness")
-for check in get_readiness_checks():
-    status = "Pass" if check.passed else "Action required"
-    st.markdown(f"**{check.label}** · {status}")
+st.subheader("Safety checklist")
+for check in _checks:
+    st.markdown(f"**{check.label}** · {check.status_label}")
     st.caption(check.detail)
 
 st.divider()
