@@ -58,7 +58,7 @@ if selected_client_id:
 
 # ---- Header ----
 st.title(APP_NAME)
-st.caption("CPA-focused bookkeeping — trial balance worksheet, adjusting entries, and workpaper-ready reports.")
+st.caption("Double-entry bookkeeping for client work — trial balance worksheet, adjusting entries, and workpaper-ready reports.")
 
 # ---- At-a-glance metrics ----
 clients = Client.get_all()

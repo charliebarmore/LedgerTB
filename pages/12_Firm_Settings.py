@@ -37,11 +37,13 @@ branding = get_branding()
 
 name_col, tagline_col = st.columns(2)
 with name_col:
+    # Placeholders are examples every user sees, so keep them generic -- a real
+    # firm name here reads as the app's owner, not as a prompt to type your own.
     firm_name = st.text_input("Firm name", value=branding.firm_name,
-                              placeholder="Charles J Barmore CPA PC")
+                              placeholder="Your firm name")
 with tagline_col:
     tagline = st.text_input("Tagline / address line", value=branding.tagline,
-                            placeholder="Evans, GA · cbarmorecpa.com")
+                            placeholder="City, ST · yourfirm.com")
 
 accent_col, logo_col = st.columns(2)
 with accent_col:
