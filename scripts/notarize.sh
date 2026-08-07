@@ -29,7 +29,11 @@ PROFILE="${NOTARY_PROFILE:-probooks-notary}"
 
 echo "==> Verifying signature + hardened runtime..."
 codesign --verify --deep --strict --verbose=2 "$APP"
-if ! codesign -dvv "$APP" 2>&1 | grep -q "flags=.*runtime"; then
+# Capture first: piping codesign straight into `grep -q` races under
+# pipefail — grep exits on the first match, codesign takes SIGPIPE, and the
+# pipeline "fails" with the flag present.
+SIGN_INFO="$(codesign -dvv "$APP" 2>&1)"
+if ! printf '%s' "$SIGN_INFO" | grep -q "flags=.*runtime"; then
     echo "ERROR: $APP is not signed with the Hardened Runtime."
     echo "Rebuild with PROBOOKS_CODESIGN_ID set to your Developer ID Application identity"
     echo "(a plain/ad-hoc build cannot be notarized)."
