@@ -11,13 +11,41 @@ def _patched(monkeypatch):
     monkeypatch.setattr(st, "page_link", lambda *a, **k: None)
 
 
-def test_data_safety_page_renders_readiness_gate(db, monkeypatch):
+def test_stale_backup_alone_is_a_warning_not_a_red_banner(db, monkeypatch):
+    """A missing backup must never read as 'TEST DATA ONLY' over real books."""
+    import services.production_readiness as pr
+
     _patched(monkeypatch)
+    checks = [
+        pr.SafetyCheck("book_encrypted", "The book itself is encrypted", True, "ok"),
+        pr.SafetyCheck("backup", "Recent verified backup", False,
+                       "No backup exists yet.", required=False),
+    ]
+    monkeypatch.setattr(pr, "get_safety_checks", lambda: checks)
     at = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30).run()
 
     assert not at.exception
     assert any("Data Safety" in title.value for title in at.title)
-    assert any("TEST DATA ONLY" in error.value for error in at.error)
+    assert any("no recent verified backup" in w.value for w in at.warning)
+    assert not at.error
+    all_text = " ".join([w.value for w in at.warning] + [e.value for e in at.error]
+                        + [s.value for s in at.success])
+    assert "TEST DATA" not in all_text and "production" not in all_text.lower()
+
+
+def test_failed_protection_shows_the_red_banner(db, monkeypatch):
+    import services.production_readiness as pr
+
+    _patched(monkeypatch)
+    checks = [
+        pr.SafetyCheck("book_encrypted", "The book itself is encrypted", False,
+                       "This book is NOT encrypted."),
+    ]
+    monkeypatch.setattr(pr, "get_safety_checks", lambda: checks)
+    at = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30).run()
+
+    assert not at.exception
+    assert any("not fully protected" in e.value for e in at.error)
 
 
 def test_api_key_setup_lives_on_firm_settings_not_data_safety(db, monkeypatch):
