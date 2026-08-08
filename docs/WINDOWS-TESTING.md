@@ -26,10 +26,23 @@ works on real Windows.
 ## Expected friction (not bugs)
 
 - **SmartScreen** says "Windows protected your PC" — click **More info**, then
-  the run-anyway button. The build is unsigned for now. *Observed on Windows 11
-  Pro 26200 on 2026-08-05: the second button read **"open anyway"**, not "Run
-  anyway" as this doc previously predicted. The wording varies by Windows
-  version and launch path; don't send anyone hunting for an exact label.*
+  the button that runs it anyway. The build is unsigned for now.
+
+  **Both wordings observed on the same machine** (Windows 11 Pro 26200):
+
+  | Launched | 2026-08-05 (bare `ProBooks.exe` from a zip) | 2026-08-07 (the installer) |
+  |---|---|---|
+  | Second button | **"open anyway"** | **"Run anyway"** |
+
+  Same OS, same unsigned build, different label. **Tell people what the button
+  does, never what it says** — a member hunting for "Run anyway" and seeing
+  "open anyway" concludes they downloaded the wrong thing.
+
+  The installer dialog also names the file and shows **Publisher: Unknown
+  publisher**. That line is the code-signing gap in plain sight: a Developer ID
+  / OV certificate would put *Ledger Labs LLC* there instead, and reputation
+  would eventually retire the dialog altogether. Until then, expect this once
+  per new build.
 - If the app window never appears, install the **Microsoft Edge WebView2
   runtime** (preinstalled on most Win 10/11; free from Microsoft).
 
