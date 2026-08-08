@@ -185,6 +185,66 @@ def _render_lock_choice():
             st.rerun()
 
 
+def _render_switch_screen():
+    """The gate after "Switch book…": choosing is the point, so the chooser
+    IS the screen — no passphrase form for the book being left."""
+    st.caption(
+        "A **book** is one set of books — everything for one company or one "
+        "firm — kept in a single encrypted file, like a QuickBooks company "
+        "file. You can have as many books as you want, and each opens with "
+        "its own passphrase."
+    )
+    if st.button("← Keep using the current book"):
+        st.session_state.pop("_switch_book", None)
+        st.rerun()
+    st.divider()
+
+    recents = [p for p in books.recent_books()
+               if str(p) != str(dbconn.DATABASE_PATH)]
+    if recents:
+        st.subheader("Open a recent book")
+        pick = st.selectbox(
+            "Recent books", options=[str(p) for p in recents], index=None,
+            placeholder="Choose a book", key="book_recent_pick",
+            label_visibility="collapsed",
+        )
+        if pick and st.button("Open selected", key="book_open_recent"):
+            books.set_active_book(pick)
+            st.session_state.pop("_switch_book", None)
+            st.rerun()
+
+    st.subheader("Start a new book")
+    new_name = st.text_input(
+        "Name the new book",
+        placeholder="e.g. Northline Digital, or Smith & Co",
+        key="book_new_name",
+    )
+    st.caption("Created in ProBooks' data folder on this computer; "
+               "you set its passphrase on the next screen.")
+    if new_name.strip() and st.button("Create this book", type="primary",
+                                      key="book_create_named"):
+        safe = "".join(ch for ch in new_name.strip() if ch not in "/\\:")
+        target = Path(books.USER_DATA_DIR) / "Books" / f"{safe}.probooks"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        books.set_active_book(target)
+        st.session_state.pop("_switch_book", None)
+        st.rerun()
+
+    with st.expander("Open or create a book at a specific path "
+                     "(shared-drive books)"):
+        other = st.text_input(
+            "Full path to the book file",
+            placeholder=r"e.g. /Volumes/Shared/Books/SmithCo.probooks",
+            key="book_other_path",
+        )
+        if other and st.button("Open this path", key="book_open_other"):
+            books.set_active_book(other.strip())
+            st.session_state.pop("_switch_book", None)
+            st.rerun()
+
+    st.caption(f"Current book: `{dbconn.DATABASE_PATH}`")
+
+
 def _render_book_chooser():
     """Open a different book file (shared-drive workflow)."""
     with st.expander("Book file", expanded=False):
@@ -213,11 +273,13 @@ def _render_book_chooser():
             st.session_state.pop("_switch_book", None)
             st.rerun()
         st.caption(
-            "A book is one encrypted ProBooks database. Book files can live "
-            "on a shared drive, and an in-use lock keeps two people from "
-            "writing to one book at once. Each book has a passphrase — using "
-            "the same one for all your books is fine (one office passphrase), "
-            "and \"Remember on this computer\" skips the prompt entirely."
+            "A book is one set of books — everything for one company or one "
+            "firm — kept in a single encrypted file, like a QuickBooks "
+            "company file. Book files can live on a shared drive, and an "
+            "in-use lock keeps two people from writing to one book at once. "
+            "Each book has a passphrase — using the same one for all your "
+            "books is fine (one office passphrase), and \"Remember on this "
+            "computer\" skips the prompt entirely."
         )
 
 
@@ -228,11 +290,8 @@ def _render_gate(state: str):
         _render_lock_choice()
         return
     if st.session_state.get("_switch_book"):
-        st.caption("Choose a book below — or keep working in the one "
-                   "that was open.")
-        if st.button("Keep using the current book"):
-            st.session_state.pop("_switch_book", None)
-            st.rerun()
+        _render_switch_screen()
+        return
     if state == "encrypted":
         _unlock_form()
     elif state == "plaintext":

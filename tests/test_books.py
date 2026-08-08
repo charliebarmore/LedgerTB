@@ -164,5 +164,9 @@ def test_switch_book_flag_suppresses_auto_unlock(db, monkeypatch):
         assert not at.exception
         assert not calls, "auto-unlock ran despite the switch-book request"
         assert any("Keep using the current book" in b.label for b in at.button)
+        # The switch screen leads with choosing/creating, not a passphrase
+        # form for the book being left.
+        assert any(ti.key == "book_new_name" for ti in at.text_input)
+        assert not any("Unlock" in b.label for b in at.button)
     finally:
         dbconn.set_active_key(key)
