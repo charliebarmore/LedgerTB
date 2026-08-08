@@ -32,7 +32,7 @@ from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
-from utils.ui import apply_default_on_change, view_switcher
+from utils.ui import apply_default_on_change, is_parking_account, view_switcher
 from utils import icons
 from utils.import_review import ensure_row_ids, row_key, classify_review_rows
 
@@ -1524,7 +1524,17 @@ elif selected_tab == "Review & Categorize":
         with col2:
             st.metric("Selected", included_count)
         with col3:
-            st.metric("Uncategorized", uncategorized_count)
+            parked_count = sum(
+                1 for t in transactions
+                if is_parking_account(account_options.get(
+                    st.session_state.get(row_key("cat", t)), ""))
+            )
+            if parked_count:
+                st.metric("Uncategorized", uncategorized_count,
+                          delta=f"{parked_count} parked for review",
+                          delta_color="inverse")
+            else:
+                st.metric("Uncategorized", uncategorized_count)
         with col4:
             if duplicate_count > 0:
                 st.metric("Duplicates", duplicate_count, delta="Review", delta_color="inverse")
@@ -1936,6 +1946,9 @@ elif selected_tab == "Review & Categorize":
                 transactions[i]['selected_account_id'] = (
                     selected if selected and selected != ADD_NEW_ACCOUNT else 0
                 )
+                if (selected and selected != ADD_NEW_ACCOUNT
+                        and is_parking_account(account_options.get(selected, ""))):
+                    st.caption(":red[⚠ Parked — still needs a real category]")
 
             # Picking "Add new account…" opens the form right under this row;
             # creating selects the account here and in the chart of accounts.

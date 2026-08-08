@@ -131,3 +131,16 @@ def test_all_ready_leaves_nothing_to_keep():
                   {"uid": "b", "acct": 4000, "inc": True}])
     assert len(plan.to_post) == 2
     assert not plan.uncategorized and not plan.excluded
+
+
+def test_parking_accounts_are_recognized():
+    """"Ask My Accountant" is filed, not decided — the review screen flags it
+    so a parked row can't read as categorized."""
+    from utils.ui import is_parking_account
+
+    assert is_parking_account("6900 - Ask My Accountant (uncategorized)")
+    assert is_parking_account("9999 Suspense")
+    assert is_parking_account("Uncategorized Expense")
+    assert not is_parking_account("6400 - Office Supplies")
+    assert not is_parking_account("")
+    assert not is_parking_account(None)

@@ -89,6 +89,17 @@ def view_switcher(options, key, label="View"):
     return selected
 
 
+_PARKING_HINTS = ("ask my accountant", "uncategorized", "suspense")
+
+
+def is_parking_account(label):
+    """Whether an account label is a park-it-for-review bucket rather than a
+    real category — "Ask My Accountant", "Uncategorized", "Suspense". A row
+    coded to one is filed, not decided, so review screens flag it instead of
+    letting it read as categorized."""
+    return any(hint in (label or "").lower() for hint in _PARKING_HINTS)
+
+
 _STATEMENT_CSS = """
 <style>
 table.pb-statement {
