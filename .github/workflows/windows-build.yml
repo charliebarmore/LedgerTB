@@ -101,30 +101,39 @@ jobs:
           Get-ChildItem installer
 
       - name: Upload installer
+        id: upload_installer
         if: steps.installer.outcome == 'success'
+        # Uploads are a convenience, not a signal: the free plan's artifact
+        # quota can block them (recalculated slowly after deletions), and
+        # that must not mask six green signals or skip the scorecard.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ProBooks-windows-installer
           path: installer/*.exe
-          retention-days: 7
+          retention-days: 3
 
       - name: Upload Windows bundle
+        id: upload_bundle
         if: steps.build.outcome == 'success'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: ProBooks-windows
           path: dist/ProBooks/
-          retention-days: 7
+          retention-days: 3
           # .streamlit/ is dot-prefixed; without this the artifact silently
           # ships without the theme/product-chrome config (found the hard way).
           include-hidden-files: true
 
       - name: Scorecard
+        if: always()
         shell: pwsh
         # continue-on-error above exists to gather ALL signals in one run —
         # but the JOB must still go red if any signal failed. A green run
         # with a failure buried in an annotation is how 34 test failures
-        # shipped unnoticed.
+        # shipped unnoticed. Upload outcomes are REPORTED, never gated:
+        # a quota-blocked artifact is an inconvenience, not a broken build.
         run: |
           Write-Host "deps + encryption: ${{ steps.sqlcipher.outcome }}"
           Write-Host "test suite:        ${{ steps.tests.outcome }}"
@@ -132,6 +141,10 @@ jobs:
           Write-Host "selfcheck:         ${{ steps.selfcheck.outcome }}"
           Write-Host "serves a page:     ${{ steps.smoke.outcome }}"
           Write-Host "installer:         ${{ steps.installer.outcome }}"
+          Write-Host "artifact uploads:  installer=${{ steps.upload_installer.outcome }} bundle=${{ steps.upload_bundle.outcome }} (informational)"
+          if ("${{ steps.upload_installer.outcome }}" -eq "failure" -or "${{ steps.upload_bundle.outcome }}" -eq "failure") {
+            Write-Warning "artifact upload failed (storage quota?) - build validated but no downloadable artifact on this run"
+          }
           $bad = @("${{ steps.sqlcipher.outcome }}", "${{ steps.tests.outcome }}",
                    "${{ steps.build.outcome }}", "${{ steps.selfcheck.outcome }}",
                    "${{ steps.smoke.outcome }}", "${{ steps.installer.outcome }}") |
