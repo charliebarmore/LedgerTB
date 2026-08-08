@@ -56,6 +56,9 @@ with _book_cols[1]:
         _bl.release(dbconn.DATABASE_PATH)
         dbconn.READ_ONLY = False
         dbconn.clear_active_key()
+        # Without this flag a remembered passphrase re-unlocks the same book
+        # on the very next run and the chooser never appears.
+        st.session_state["_switch_book"] = True
         st.rerun()
 
 from utils import unlock as _unlock

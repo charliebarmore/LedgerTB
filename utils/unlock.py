@@ -106,8 +106,12 @@ def require_unlock():
         return
     # Locked: point at the chosen book before deciding which form to show.
     dbconn.DATABASE_PATH = books.active_book()
-    # A remembered key skips the prompt — but never skips the in-use lock.
-    if not st.session_state.get("_book_lock_holder") and try_saved_key():
+    # A remembered key skips the prompt — but never skips the in-use lock,
+    # and never while the user asked to switch books ("_switch_book"), or
+    # auto-unlock would reopen the same book before the chooser can render.
+    if (not st.session_state.get("_book_lock_holder")
+            and not st.session_state.get("_switch_book")
+            and try_saved_key()):
         result = book_lock.acquire(dbconn.DATABASE_PATH)
         if result["acquired"]:
             books.set_active_book(dbconn.DATABASE_PATH)
@@ -141,6 +145,7 @@ def _finish_unlock(raw_key_hex: str, remember: bool = False):
     if result["acquired"]:
         dbconn.set_active_key(raw_key_hex)
         books.set_active_book(dbconn.DATABASE_PATH)
+        st.session_state.pop("_switch_book", None)
         st.rerun()
     else:
         st.session_state["_pending_book_key"] = raw_key_hex
@@ -162,6 +167,7 @@ def _render_lock_choice():
             dbconn.READ_ONLY = True
             dbconn.set_active_key(st.session_state.pop("_pending_book_key"))
             st.session_state.pop("_book_lock_holder", None)
+            st.session_state.pop("_switch_book", None)
             books.set_active_book(dbconn.DATABASE_PATH)
             st.rerun()
     with c2:
@@ -169,6 +175,7 @@ def _render_lock_choice():
             book_lock.takeover(dbconn.DATABASE_PATH)
             dbconn.set_active_key(st.session_state.pop("_pending_book_key"))
             st.session_state.pop("_book_lock_holder", None)
+            st.session_state.pop("_switch_book", None)
             books.set_active_book(dbconn.DATABASE_PATH)
             st.rerun()
     with c3:
@@ -194,6 +201,7 @@ def _render_book_chooser():
             )
             if pick and st.button("Open selected", key="book_open_recent"):
                 books.set_active_book(pick)
+                st.session_state.pop("_switch_book", None)
                 st.rerun()
         other = st.text_input(
             "Open or create another book by path",
@@ -202,6 +210,7 @@ def _render_book_chooser():
         )
         if other and st.button("Open this path", key="book_open_other"):
             books.set_active_book(other.strip())
+            st.session_state.pop("_switch_book", None)
             st.rerun()
         st.caption(
             "A book is one encrypted ProBooks database. Book files can live "
@@ -218,6 +227,12 @@ def _render_gate(state: str):
     if st.session_state.get("_book_lock_holder"):
         _render_lock_choice()
         return
+    if st.session_state.get("_switch_book"):
+        st.caption("Choose a book below — or keep working in the one "
+                   "that was open.")
+        if st.button("Keep using the current book"):
+            st.session_state.pop("_switch_book", None)
+            st.rerun()
     if state == "encrypted":
         _unlock_form()
     elif state == "plaintext":

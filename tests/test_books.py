@@ -133,3 +133,36 @@ def test_remembered_key_round_trip_and_stale_cleanup(client_id, monkeypatch):
     # Nothing saved: quietly declines.
     assert unlock.try_saved_key() is False
     dbconn.set_active_key(real_key)  # restore for teardown
+
+
+def test_switch_book_flag_suppresses_auto_unlock(db, monkeypatch):
+    """Data Safety's "Switch book…" must reach the chooser even when the
+    passphrase is remembered — auto-unlock used to reopen the same book on
+    the very next run, so the button appeared to do nothing."""
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+
+    import utils.client_selector as selector
+    from tests.conftest import page_path
+
+    monkeypatch.setattr(selector, "render_client_selector", lambda: None)
+    monkeypatch.setattr(st, "page_link", lambda *a, **k: None)
+
+    calls = []
+    monkeypatch.setattr("utils.unlock.try_saved_key",
+                        lambda: calls.append(1) or True)
+    monkeypatch.setattr("utils.books.active_book",
+                        lambda: dbconn.DATABASE_PATH)
+
+    key = dbconn.get_active_key()
+    dbconn.clear_active_key()
+    try:
+        at = AppTest.from_file(page_path("pages/9_Data_Safety.py"),
+                               default_timeout=30)
+        at.session_state["_switch_book"] = True
+        at.run()
+        assert not at.exception
+        assert not calls, "auto-unlock ran despite the switch-book request"
+        assert any("Keep using the current book" in b.label for b in at.button)
+    finally:
+        dbconn.set_active_key(key)
