@@ -193,7 +193,9 @@ def propose_entry(client_id: int, entry_date: str, description: str,
     """File a DRAFT journal entry for human review in ProBooks. It does NOT
     touch the ledger — a person approves or rejects it in the app. lines:
     [{"account_number": "7300", "debit": 24.00}, {"account_number": "2000",
-    "credit": 24.00}] (dollars; optional "memo"). Explain WHY in rationale."""
+    "credit": 24.00}] (dollars; optional "memo"). Explain WHY in rationale.
+    entry_type: "Regular" (default), "Adjusting", "Beginning Balance" (use
+    for opening-balance entries), or "Closing"."""
     _require_level("propose")
     return mcp_tools.propose_entry(client_id, entry_date, description,
                                    lines, rationale, entry_type)
@@ -236,7 +238,8 @@ def post_entry(client_id: int, entry_date: str, description: str,
     assistant access level "post" (chosen by the user on Data Safety) and is
     APPEND-ONLY: entries can be added, never edited or deleted — corrections
     are new visible entries. Prefer propose_entry unless the user asked you
-    to post. lines like propose_entry (dollars)."""
+    to post. lines and entry_type like propose_entry (dollars; entry_type
+    "Beginning Balance" for opening balances)."""
     _require_level("post")
     return mcp_tools.post_entry(client_id, entry_date, description,
                                 lines, entry_type)

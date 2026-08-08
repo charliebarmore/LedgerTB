@@ -175,3 +175,31 @@ def test_draft_inbox_mode_files_drafts_but_cannot_reach_the_ledger(
     draft = DraftEntry.get_by_id(drafts[0]["draft_id"], client_id)
     entry_id = draft.approve()
     assert JournalEntry.get_by_id(entry_id, client_id=client_id) is not None
+
+
+def test_beginning_balance_draft_round_trips(db, client_id, accounts):
+    """An opening-balance proposal files as Beginning Balance and keeps that
+    type on the posted entry — the assistant should never have to mislabel
+    it Regular and ask the human to fix it on approval."""
+    from models.draft_entry import DraftEntry, DraftLine
+    from models.journal_entry import JournalEntry
+    import pytest
+
+    draft = DraftEntry(
+        client_id=client_id, proposed_by="Assistant (MCP)",
+        entry_date="2026-01-01", entry_type="Beginning Balance",
+        description="Opening balances",
+        lines=[DraftLine(account_number="1000", debit_cents=500_00),
+               DraftLine(account_number="3000", credit_cents=500_00)],
+    )
+    draft_id = draft.save()
+    entry_id = DraftEntry.get_by_id(draft_id, client_id).approve()
+    assert JournalEntry.get_by_id(entry_id).entry_type == "Beginning Balance"
+
+    with pytest.raises(ValueError, match="entry_type"):
+        DraftEntry(
+            client_id=client_id, proposed_by="Assistant (MCP)",
+            entry_date="2026-01-01", entry_type="Wumbo", description="x",
+            lines=[DraftLine(account_number="1000", debit_cents=1),
+                   DraftLine(account_number="3000", credit_cents=1)],
+        ).save()

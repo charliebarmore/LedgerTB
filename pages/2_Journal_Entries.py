@@ -817,7 +817,11 @@ if active_view == "Drafts":
                            f"{d.proposed_by}"
                            + (f" · {d.proposed_at}" if d.proposed_at else ""))
                 if d.rationale:
-                    st.markdown(f"*Why:* {d.rationale}")
+                    # Plain body text, not italics — an assistant's rationale
+                    # runs to a paragraph, and italics at that length is the
+                    # hardest-reading text on the page.
+                    st.markdown("**Why:** "
+                                + d.rationale.replace("\n", "  \n"))
                 st.table([
                     {"Account": f"{l.account_number} - "
                                 f"{_names.get(str(l.account_number), '?')}",

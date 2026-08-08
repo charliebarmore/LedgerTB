@@ -12,6 +12,7 @@ ledger arithmetic (the ledger itself stores integer cents).
 from datetime import date
 from typing import Optional
 
+from constants import EntryType
 from models.account import Account
 from models.client import Client
 from models.journal_entry import JournalEntry
@@ -439,8 +440,9 @@ def post_entry(client_id: int, entry_date: str, description: str,
 
     _require_client(client_id)
     when = _parse_date(entry_date, "entry_date")
-    if entry_type not in ("Regular", "Adjusting"):
-        raise ValueError("entry_type must be Regular or Adjusting.")
+    if entry_type not in EntryType.ALL:
+        raise ValueError(
+            "entry_type must be one of: " + ", ".join(EntryType.ALL) + ".")
     by_number = {a.account_number: a.id
                  for a in Account.get_all(client_id, active_only=False)}
     entry_lines = []

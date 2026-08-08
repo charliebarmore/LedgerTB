@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
 
+from constants import EntryType
 from database.connection import get_connection, get_cursor
 from money import to_dollars
 
@@ -64,8 +65,9 @@ class DraftEntry:
             datetime.strptime(self.entry_date, "%Y-%m-%d")
         except (TypeError, ValueError):
             raise ValueError("entry_date must be an ISO date (YYYY-MM-DD).")
-        if self.entry_type not in ("Regular", "Adjusting"):
-            raise ValueError("entry_type must be Regular or Adjusting.")
+        if self.entry_type not in EntryType.ALL:
+            raise ValueError(
+                "entry_type must be one of: " + ", ".join(EntryType.ALL) + ".")
         if len(self.lines) < 2:
             raise ValueError("A draft needs at least two lines.")
         debits = credits = 0
