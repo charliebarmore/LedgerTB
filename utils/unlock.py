@@ -189,10 +189,12 @@ def _render_switch_screen():
     """The gate after "Switch book…": choosing is the point, so the chooser
     IS the screen — no passphrase form for the book being left."""
     st.caption(
-        "A **book** is one set of books — everything for one company or one "
-        "firm — kept in a single encrypted file, like a QuickBooks company "
-        "file. You can have as many books as you want, and each opens with "
-        "its own passphrase."
+        "A **book** is one encrypted file that holds clients — each client "
+        "with its own chart of accounts, entries, and reports. One book for "
+        "your whole practice is the normal setup; you switch clients inside "
+        "it without ever coming back here. Start a **separate book** only "
+        "when data should be fully walled off from your real work — a demo "
+        "or training book, or a firm book kept on a shared drive."
     )
     if st.button("← Keep using the current book"):
         st.session_state.pop("_switch_book", None)
@@ -273,13 +275,14 @@ def _render_book_chooser():
             st.session_state.pop("_switch_book", None)
             st.rerun()
         st.caption(
-            "A book is one set of books — everything for one company or one "
-            "firm — kept in a single encrypted file, like a QuickBooks "
-            "company file. Book files can live on a shared drive, and an "
-            "in-use lock keeps two people from writing to one book at once. "
-            "Each book has a passphrase — using the same one for all your "
-            "books is fine (one office passphrase), and \"Remember on this "
-            "computer\" skips the prompt entirely."
+            "A book is one encrypted file that holds clients — your whole "
+            "practice usually lives in a single book, and adding a client "
+            "never creates a new one. Separate books are for data you want "
+            "fully walled off (a demo book) or for firm books on a shared "
+            "drive, where an in-use lock keeps two people from writing to "
+            "one book at once. Each book has a passphrase — using the same "
+            "one for all your books is fine (one office passphrase), and "
+            "\"Remember on this computer\" skips the prompt entirely."
         )
 
 
