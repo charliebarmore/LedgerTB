@@ -1,0 +1,49 @@
+name: Security checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 13 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned security tools
+        run: | # pragma: allowlist secret -- scanner installs itself here
+          python -m pip install --disable-pip-version-check \
+            pip-audit==2.10.1 \
+            zizmor==1.29.0
+          python -m pip install --disable-pip-version-check detect-secrets==1.5.0  # pragma: allowlist secret
+
+      - name: Reject secrets in tracked files
+        shell: bash
+        run: |
+          mapfile -d '' tracked_files < <(git ls-files -z)
+          detect-secrets-hook -- "${tracked_files[@]}"
+
+      - name: Audit release dependencies
+        run: pip-audit --no-deps --disable-pip -r requirements-windows.lock
+
+      - name: Audit GitHub Actions workflows
+        run: zizmor --pedantic --offline .github/workflows
