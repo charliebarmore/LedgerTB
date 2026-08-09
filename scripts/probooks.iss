@@ -27,7 +27,7 @@
 
 #define AppName "ProBooks"
 #define AppPublisher "Ledger Labs LLC"
-#define AppURL "https://cbarmorecpa.com"
+#define AppURL "https://ledgerlabs.co"
 #define AppExeName "ProBooks.exe"
 
 [Setup]

@@ -1,10 +1,11 @@
 # ProBooks + LedgerPDF — books to binder
 
 ProBooks keeps the books; [LedgerPDF](https://ledgerpdf.com) builds the
-workpaper binder. Both are local-first, both expose an MCP server, and both
-attribute and audit everything an agent does — so one Claude session can
-close the books in one app and support them in the other, with a human
-reviewing at both ends.
+workpaper binder. LedgerPDF is a separate product, not part of this
+repository — this page only matters if you have it. Both are local-first,
+both expose an MCP server, and both attribute and audit everything an agent
+does — so one Claude session can close the books in one app and support them
+in the other, with a human reviewing at both ends.
 
 ## The workflow
 

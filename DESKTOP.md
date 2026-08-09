@@ -9,11 +9,11 @@ and displayed.
 Install the desktop dependency into the same Python that runs ProBooks:
 
 ```bash
-/opt/anaconda3/bin/python -m pip install -r requirements-desktop.txt
+python -m pip install -r requirements-desktop.txt
 ```
 
-(If your Python lives elsewhere, install there instead and set `PROBOOKS_PYTHON`
-— see below.)
+(If ProBooks runs under a different Python than the one on your PATH, install
+there instead and set `PROBOOKS_PYTHON` — see below.)
 
 ## Launch it
 
@@ -37,14 +37,15 @@ window to shut the app (and its background server) down cleanly.
 it to be ready, then shows that URL in a pywebview window. `ProBooks.app` is a
 thin macOS wrapper that runs `desktop.py` from this folder.
 
-- **Which Python it uses:** `ProBooks.app` uses `/opt/anaconda3/bin/python` by
-  default. Override with the `PROBOOKS_PYTHON` env var if your environment
-  differs. `python desktop.py` just uses whatever `python` is on your PATH.
+- **Which Python it uses:** `ProBooks.app` tries `PROBOOKS_PYTHON` first, then
+  a repo-local `.macos-venv`, then `python3` on your PATH. Set
+  `PROBOOKS_PYTHON` if it picks the wrong one. `python desktop.py` just uses
+  whatever `python` is on your PATH.
 - **Logs:** double-click launches write output to `~/Library/Logs/ProBooks.log`
   — check there if the window doesn't appear.
 - **Data location:** unchanged from the normal app. Before storing **real**
-  client data, set `PROBOOKS_DB_PATH` to a file under `~/Practice` so it lands in
-  the encrypted-backup path (see `config.py`).
+  client data, set `PROBOOKS_DB_PATH` to a location your firm's encrypted
+  backup covers (see `config.py`).
 - **Backup location:** defaults to the app data directory. Override it with
   `PROBOOKS_BACKUP_DIR`; the in-app Data Safety page shows the active database
   and verified-backup status.
@@ -74,7 +75,8 @@ On Apple Silicon, use the committed Python 3.12 lock for a repeatable build:
 ```bash
 python3.12 -m venv .macos-venv
 .macos-venv/bin/pip install -r requirements-macos-arm64.lock
-.macos-venv/bin/python scripts/build_release.sh
+source .macos-venv/bin/activate
+./scripts/build_release.sh
 ```
 
 `requirements-macos-arm64.lock` is architecture-specific because the desktop
@@ -112,8 +114,8 @@ anything.
 - **Data location (frozen):** because the app bundle is read-only, a standalone
   build keeps its database and saved API key in
   `~/Library/Application Support/ProBooks/`. (Running from source still uses the
-  repo `data/` folder.) Set `PROBOOKS_DB_PATH` to a `~/Practice` file before
-  storing real client data, as always.
+  repo `data/` folder.) Set `PROBOOKS_DB_PATH` to a location your firm's
+  encrypted backup covers before storing real client data, as always.
 - **First open (unsigned build):** a plain build is ad-hoc signed, so macOS
   Gatekeeper will warn. Right-click `dist/ProBooks.app` → **Open** once. Fine for
   personal use.

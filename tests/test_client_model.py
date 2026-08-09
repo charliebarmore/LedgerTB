@@ -9,7 +9,7 @@ def test_client_extended_fields_roundtrip(db):
     cid = Client(
         name="Acme LLC", entity_type="S-Corporation", business_type="Professional Services",
         fiscal_year_end_month=6, tax_id="12-3456789", dba_name="Acme",
-        address_line1="123 Main St", address_city="Evans", address_state="GA", address_zip="30809",
+        address_line1="123 Main St", address_city="Riverton", address_state="GA", address_zip="30301",
         contact_name="Jane Doe", contact_email="jane@acme.com", contact_phone="706-555-0100",
         notes="Quarterly reviews",
     ).save(seed_accounts=False)
@@ -18,7 +18,7 @@ def test_client_extended_fields_roundtrip(db):
     assert c.dba_name == "Acme"
     assert c.tax_id == "12-3456789"
     assert (c.address_line1, c.address_city, c.address_state, c.address_zip) == \
-        ("123 Main St", "Evans", "GA", "30809")
+        ("123 Main St", "Riverton", "GA", "30301")
     assert (c.contact_name, c.contact_email, c.contact_phone) == \
         ("Jane Doe", "jane@acme.com", "706-555-0100")
     assert c.notes == "Quarterly reviews"

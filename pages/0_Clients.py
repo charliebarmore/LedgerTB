@@ -53,7 +53,7 @@ def _mask_tax_id(tax_id):
 
 
 def _format_address(client):
-    """One-line address, e.g. '123 Main St, Evans, GA 30809' (parts optional)."""
+    """One-line address, e.g. '123 Main St, Riverton, GA 30301' (parts optional)."""
     csz = " ".join(p for p in [
         f"{client.address_city}," if client.address_city else "",
         client.address_state or "",

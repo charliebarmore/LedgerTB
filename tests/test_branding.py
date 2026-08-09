@@ -31,18 +31,18 @@ def test_normalize_hex():
 
 def test_branding_round_trip_with_logo(db):
     assert get_branding().is_branded is False
-    save_branding("Charles J Barmore CPA PC", tagline="Evans, GA",
+    save_branding("Meridian Ledger CPA PC", tagline="Riverton, GA",
                   accent_hex="#B85439", logo=_PNG, logo_mime="image/png")
     branding = get_branding()
-    assert branding.firm_name == "Charles J Barmore CPA PC"
+    assert branding.firm_name == "Meridian Ledger CPA PC"
     assert branding.accent_hex == "#B85439"
     assert branding.logo == _PNG
 
     # Re-saving without a logo keeps the stored one…
-    save_branding("Charles J Barmore CPA PC", accent_hex="#B85439")
+    save_branding("Meridian Ledger CPA PC", accent_hex="#B85439")
     assert get_branding().logo == _PNG
     # …and explicit removal drops it.
-    save_branding("Charles J Barmore CPA PC", keep_existing_logo=False)
+    save_branding("Meridian Ledger CPA PC", keep_existing_logo=False)
     assert get_branding().logo is None
 
 
@@ -57,7 +57,7 @@ def test_logo_validation(db):
 def test_close_package_carries_the_brand(client_id, accounts):
     post_entry(client_id, date(2026, 1, 15),
                [(accounts["cash"], 250, 0), (accounts["revenue"], 0, 250)])
-    save_branding("Charles J Barmore CPA PC", tagline="cbarmorecpa.com",
+    save_branding("Meridian Ledger CPA PC", tagline="meridianledgercpa.example",
                   accent_hex="#B85439", logo=_PNG, logo_mime="image/png")
 
     period = (date(2026, 1, 1), date(2026, 3, 31))
@@ -82,8 +82,8 @@ def test_close_package_carries_the_brand(client_id, accounts):
             finally:
                 page.close()
         text = "\n".join(pages)
-        assert "Charles J Barmore CPA PC" in text
-        assert "cbarmorecpa.com" in text
+        assert "Meridian Ledger CPA PC" in text
+        assert "meridianledgercpa.example" in text
         assert image_count >= 1  # the logo made the masthead
     finally:
         doc.close()
@@ -93,7 +93,7 @@ def test_close_package_carries_the_brand(client_id, accounts):
     summary = {wb["Summary"].cell(row=i, column=1).value:
                wb["Summary"].cell(row=i, column=2).value
                for i in range(1, wb["Summary"].max_row + 1)}
-    assert summary.get("Prepared by") == "Charles J Barmore CPA PC"
+    assert summary.get("Prepared by") == "Meridian Ledger CPA PC"
 
 
 def test_unbranded_package_still_builds(client_id, accounts):

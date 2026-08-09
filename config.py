@@ -25,10 +25,9 @@ USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 # frozen). Overridable via the PROBOOKS_DB_PATH env var.
 #
 # IMPORTANT (FTC Safeguards): before this app holds REAL client financial data,
-# point PROBOOKS_DB_PATH at a file under ~/Practice so the database is covered by
-# the sanctioned Backblaze encrypted backup with the customer-managed key. The
-# default location is for test/seed data only and is NOT a sanctioned location
-# for client PII.
+# point PROBOOKS_DB_PATH at a location your firm's encrypted backup covers.
+# The default location is for test/seed data only and is not part of any
+# backup plan you haven't set up yourself.
 DATABASE_PATH = Path(os.getenv("PROBOOKS_DB_PATH", USER_DATA_DIR / "accounting.db"))
 BACKUP_DIR = Path(os.getenv("PROBOOKS_BACKUP_DIR", USER_DATA_DIR / "backups"))
 

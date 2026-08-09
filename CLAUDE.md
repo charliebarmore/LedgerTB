@@ -16,7 +16,8 @@ custody of anyone's data. Built and maintained with Claude Code.
 - `utils/` — unlock gate (passphrase + book chooser), books/book_lock (firm
   mode), secure_store (OS credential vault), ui (statement/ledger renderers),
   client_selector (sidebar + nav).
-- `mcp_server.py` — read-only MCP server (stdio); `run_probooks.py` — frozen
+- `mcp_server.py` — MCP server (stdio) enforcing the leveled assistant dial
+  (read / propose / post — see invariants); `run_probooks.py` — frozen
   entry (`PROBOOKS_MODE`: server / selfcheck / mcp).
 
 ## Non-negotiable invariants
