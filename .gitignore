@@ -10,6 +10,7 @@ __pycache__/
 .Python
 venv/
 .venv/
+.macos-venv/
 env/
 ENV/
 *.egg-info/
