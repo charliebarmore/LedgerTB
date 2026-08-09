@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an improvement to ProBooks
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the accounting or workflow problem first. Do not include real client or confidential data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or workflow
+      description: Who encounters this problem, and what are they trying to accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the result you want without requiring a particular implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternatives
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional sanitized context
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues for a similar request.
+          required: true
+        - label: I removed all client, personal, financial, and credential data from this request.
+          required: true

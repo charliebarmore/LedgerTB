@@ -81,6 +81,9 @@ More than 340 tests cover the ledger math, posting rules, imports, reports, the 
 
 ## More documentation
 
+- `CONTRIBUTING.md` — development setup and contribution expectations
+- `SUPPORT.md` — support scope and safe bug-reporting guidance
+- `CODE_OF_CONDUCT.md` — community participation standards
 - `DESKTOP.md` — desktop builds, packaging, notarization
 - `docs/MCP.md` — assistant access setup and security model
 - `docs/LEDGERPDF-PAIRING.md` — books-to-binder workflow with LedgerPDF
