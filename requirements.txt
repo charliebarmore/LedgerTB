@@ -1,13 +1,13 @@
-streamlit>=1.59.0
+streamlit>=1.61.1
 sqlcipher3>=0.6.2
-pandas>=2.0.0
-openpyxl>=3.1.0
-anthropic>=0.18.0
-python-dotenv>=1.0.0
-platformdirs>=3.0
-keyring>=25.0
+pandas>=3.0.5
+openpyxl>=3.1.5
+anthropic>=0.120.2
+python-dotenv>=1.2.2
+platformdirs>=4.11.0
+keyring>=25.7.0
 mcp>=2.0
-pypdfium2>=5.4.0
-reportlab>=4.4.0
-Pillow>=10.0.0
-pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
+pypdfium2>=5.12.1
+reportlab>=5.0.0
+Pillow>=12.3.0
+pyobjc-framework-Quartz>=12.2.1; sys_platform == "darwin"
