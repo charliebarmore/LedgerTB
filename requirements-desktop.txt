@@ -2,5 +2,5 @@
 -r requirements-dev.txt
 
 # Desktop app: native window (Tier 1) + standalone .app build (Tier 2)
-pywebview>=6.2.1
-pyinstaller>=6.21.0
+pywebview>=5.0,<7.0
+pyinstaller>=6.0,<7.0

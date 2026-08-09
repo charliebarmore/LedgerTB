@@ -16,6 +16,13 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    # Only raise a floor when a security fix actually requires it, and never
+    # propose a major-version jump: the requirements ranges are deliberately
+    # capped at the last major the full test suite has passed on.
+    versioning-strategy: increase-if-necessary
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       python-dependencies:
         patterns:
