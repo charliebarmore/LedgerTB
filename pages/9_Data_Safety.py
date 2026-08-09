@@ -10,6 +10,7 @@ from database import connection as dbconn
 from models.audit_log import AuditLog
 from models.client import Client
 from services.backups import (
+    active_book_id,
     backup_health,
     create_backup,
     legacy_backup_count,
@@ -20,6 +21,7 @@ from services.production_readiness import get_safety_checks, overall_status
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import books, icons
+from utils.assistant_access import credential_names, revoke_legacy_credentials
 
 st.set_page_config(page_title="Data Safety", page_icon=icons.SECURITY, layout="wide")
 # Gate on the database passphrase before any DB access, then ensure schema.
@@ -168,7 +170,8 @@ st.divider()
 st.subheader("Assistant access (MCP)")
 st.caption(
     "Lets an AI assistant on THIS computer (Claude Desktop, Claude Code) use "
-    "these books through a local, stdio-only MCP server. You choose whether it "
+    "this book through a local, stdio-only MCP server. Each book is authorized "
+    "separately. You choose whether it "
     "can only read, can also file proposals for your review, or can post new "
     "balanced entries. The database engine blocks anything above that level "
     "and always blocks edits and deletes. Enabling stores the derived database "
@@ -183,17 +186,26 @@ from utils.secure_store import delete_secret as _mcp_delete
 from utils.secure_store import get_secret as _mcp_get
 from utils.secure_store import set_secret as _mcp_set
 
-MCP_KEY_SECRET = "mcp_db_key"
-MCP_LEVEL_SECRET = "mcp_access_level"
+_legacy_mcp_revoked = revoke_legacy_credentials()
+if _legacy_mcp_revoked:
+    st.info(
+        "An older machine-wide assistant authorization was revoked for safety. "
+        "Enable access separately for each book you want an assistant to use."
+    )
+_mcp_book_id = active_book_id()
+_mcp_names = credential_names(dbconn.DATABASE_PATH)
 _MCP_LEVELS = {
     "read": "Read only — query the books, change nothing",
     "propose": "Read + propose — file drafts and stage imports; you post everything (recommended)",
     "post": "Read + propose + post — may also post balanced entries, append-only",
 }
-_mcp_enabled = bool(_mcp_get(MCP_KEY_SECRET))
-_mcp_level = _mcp_get(MCP_LEVEL_SECRET) or "propose"
+_mcp_enabled = bool(
+    _mcp_get(_mcp_names.key)
+    and _mcp_get(_mcp_names.book_id) == _mcp_book_id
+)
+_mcp_level = _mcp_get(_mcp_names.level) or ("read" if _mcp_enabled else "propose")
 if _mcp_level not in _MCP_LEVELS:
-    _mcp_level = "propose"
+    _mcp_level = "read" if _mcp_enabled else "propose"
 _mcp_book_is_local = books.is_local_book(dbconn.DATABASE_PATH)
 
 if _mcp_enabled:
@@ -242,20 +254,22 @@ with mcp_cols[0]:
                 # Store the permission first and the enabling key last. A
                 # partial credential-vault write must never enable access with
                 # an unintended fallback level.
-                _mcp_set(MCP_LEVEL_SECRET, _picked_level)
-                _mcp_set(MCP_KEY_SECRET, session_key)
+                _mcp_set(_mcp_names.book_id, _mcp_book_id)
+                _mcp_set(_mcp_names.level, _picked_level)
+                _mcp_set(_mcp_names.key, session_key)
                 audit_safety_event("EXPORT", "mcp_access_enabled",
                                    {"level": _picked_level})
                 st.rerun()
             except Exception as exc:
-                _mcp_delete(MCP_KEY_SECRET)
-                _mcp_delete(MCP_LEVEL_SECRET)
+                _mcp_delete(_mcp_names.key)
+                _mcp_delete(_mcp_names.level)
+                _mcp_delete(_mcp_names.book_id)
                 st.error(f"Could not store the key securely: {exc}")
     if (_mcp_enabled and _picked_level != _mcp_level
             and st.button("Change level", type="primary",
                           disabled=not _post_ok or not _book_level_ok)):
         try:
-            _mcp_set(MCP_LEVEL_SECRET, _picked_level)
+            _mcp_set(_mcp_names.level, _picked_level)
             audit_safety_event("EXPORT", "mcp_access_level_changed",
                                {"from": _mcp_level, "to": _picked_level})
             st.rerun()
@@ -263,8 +277,10 @@ with mcp_cols[0]:
             st.error(f"Could not change assistant access securely: {exc}")
 with mcp_cols[1]:
     if _mcp_enabled and st.button("Disable assistant access"):
-        _mcp_delete(MCP_KEY_SECRET)
-        _mcp_delete(MCP_LEVEL_SECRET)
+        _mcp_delete(_mcp_names.key)
+        _mcp_delete(_mcp_names.level)
+        _mcp_delete(_mcp_names.book_id)
+        _mcp_delete(_mcp_names.export_roots)
         audit_safety_event("EXPORT", "mcp_access_disabled", {})
         st.rerun()
 if _mcp_enabled and _picked_level != _mcp_level:
@@ -274,8 +290,7 @@ if _mcp_enabled:
     # Export folder: where export_close_package may write files. Stored in
     # the vault beside the level, so the assistant cannot change it and the
     # user never edits a config file to set it.
-    MCP_EXPORT_SECRET = "mcp_export_roots"
-    _export_root = _mcp_get(MCP_EXPORT_SECRET) or ""
+    _export_root = _mcp_get(_mcp_names.export_roots) or ""
     _ec1, _ec2 = st.columns([3, 1])
     with _ec1:
         _export_pick = st.text_input(
@@ -295,7 +310,7 @@ if _mcp_enabled:
                 try:
                     _resolved = Path(_picked).expanduser()
                     _resolved.mkdir(parents=True, exist_ok=True)
-                    _mcp_set(MCP_EXPORT_SECRET, str(_resolved.resolve()))
+                    _mcp_set(_mcp_names.export_roots, str(_resolved.resolve()))
                     audit_safety_event("EXPORT", "mcp_export_root_set",
                                        {"root": str(_resolved.resolve())})
                 except Exception as exc:
@@ -303,7 +318,7 @@ if _mcp_enabled:
                 else:
                     st.rerun()
             else:
-                _mcp_delete(MCP_EXPORT_SECRET)
+                _mcp_delete(_mcp_names.export_roots)
                 audit_safety_event("EXPORT", "mcp_export_root_cleared", {})
                 st.rerun()
     if not _export_root:

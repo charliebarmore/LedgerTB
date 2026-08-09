@@ -93,6 +93,8 @@ def test_vault_unlock_round_trip(client_id, monkeypatch):
     import mcp_server
     from utils import books
     from utils.secure_store import set_secret
+    from utils.assistant_access import credential_names
+    from services.backups import active_book_id
 
     monkeypatch.setattr(dbconn, "READ_ONLY", dbconn.READ_ONLY)  # restore later
     monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", dbconn.ASSISTANT_ACCESS_LEVEL)
@@ -103,11 +105,15 @@ def test_vault_unlock_round_trip(client_id, monkeypatch):
     monkeypatch.setattr(books, "is_local_book", lambda path: True)
     session_key = dbconn.get_active_key()
     assert session_key, "db fixture should have keyed the session"
+    book_id = active_book_id()
 
     # Not enabled -> refuses (fake vault starts empty each test).
     assert mcp_server._unlock_from_vault() is False
 
-    set_secret(mcp_server.MCP_KEY_SECRET, session_key)
+    names = credential_names(test_db)
+    set_secret(names.book_id, book_id)
+    set_secret(names.level, "propose")
+    set_secret(names.key, session_key)
     dbconn.clear_active_key()
     assert mcp_server._unlock_from_vault() is True
     assert dbconn.has_active_key()

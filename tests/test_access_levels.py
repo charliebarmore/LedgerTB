@@ -13,7 +13,9 @@ from database.connection import get_cursor
 from models.account import Account
 from models.journal_entry import JournalEntry
 from services import mcp_tools
+from services.backups import active_book_id
 from tests.conftest import post_entry
+from utils.assistant_access import credential_names
 
 
 def _numbers(client_id, accounts):
@@ -26,6 +28,15 @@ BALANCED = lambda cash_no, rev_no: [
     {"account_number": cash_no, "debit": 55.00},
     {"account_number": rev_no, "credit": 55.00},
 ]
+
+
+def _authorize_current_book(set_secret, level="propose"):
+    names = credential_names(dbconn.DATABASE_PATH)
+    set_secret(names.book_id, active_book_id())
+    set_secret(names.key, dbconn.get_active_key())
+    if level is not None:
+        set_secret(names.level, level)
+    return names
 
 
 def test_read_level_reads_but_proposes_nothing(client_id, accounts, monkeypatch):
@@ -92,23 +103,22 @@ def test_server_reads_level_from_vault(client_id, monkeypatch):
     monkeypatch.setattr(books, "active_book", lambda: test_db)
     monkeypatch.setattr(books, "is_local_book", lambda path: True)
 
-    session_key = dbconn.get_active_key()
-    set_secret(mcp_server.MCP_KEY_SECRET, session_key)
+    names = _authorize_current_book(set_secret, level=None)
 
-    # No stored level -> the pre-levels default, propose.
+    # Missing level fails to least privilege.
     assert mcp_server._unlock_from_vault() is True
-    assert dbconn.ASSISTANT_ACCESS_LEVEL == "propose"
+    assert dbconn.ASSISTANT_ACCESS_LEVEL == "read"
 
-    set_secret(mcp_server.MCP_LEVEL_SECRET, "post")
+    set_secret(names.level, "post")
     assert mcp_server._unlock_from_vault() is True
     assert dbconn.ASSISTANT_ACCESS_LEVEL == "post"
 
-    set_secret(mcp_server.MCP_LEVEL_SECRET, "bogus")
+    set_secret(names.level, "bogus")
     assert mcp_server._unlock_from_vault() is True
     assert dbconn.ASSISTANT_ACCESS_LEVEL == "read"  # unknown -> least privilege
 
     # The tool gate reads the vault too.
-    set_secret(mcp_server.MCP_LEVEL_SECRET, "read")
+    set_secret(names.level, "read")
     with pytest.raises(ValueError, match="access level"):
         mcp_server._require_level("propose")
 
@@ -124,18 +134,19 @@ def test_running_server_honors_disable_and_reenable(client_id, monkeypatch):
     monkeypatch.setattr(books, "active_book", lambda: test_db)
     monkeypatch.setattr(books, "is_local_book", lambda path: True)
     session_key = dbconn.get_active_key()
-    set_secret(mcp_server.MCP_LEVEL_SECRET, "read")
-    set_secret(mcp_server.MCP_KEY_SECRET, session_key)
+    names = _authorize_current_book(set_secret, level="read")
+    book_id = active_book_id()
 
     assert mcp_server.list_clients()
-    delete_secret(mcp_server.MCP_KEY_SECRET)
-    with pytest.raises(PermissionError, match="disabled"):
+    delete_secret(names.key)
+    with pytest.raises(PermissionError, match="not enabled"):
         mcp_server.list_clients()
     assert dbconn.ASSISTANT_ACCESS_LEVEL is None
     assert dbconn.has_active_key() is False
 
-    set_secret(mcp_server.MCP_LEVEL_SECRET, "read")
-    set_secret(mcp_server.MCP_KEY_SECRET, session_key)
+    set_secret(names.level, "read")
+    set_secret(names.book_id, book_id)
+    set_secret(names.key, session_key)
     assert mcp_server.list_clients()
     assert dbconn.ASSISTANT_ACCESS_LEVEL == "read"
 
@@ -150,17 +161,15 @@ def test_running_server_honors_level_changes(client_id, accounts, monkeypatch):
     test_db = dbconn.DATABASE_PATH
     monkeypatch.setattr(books, "active_book", lambda: test_db)
     monkeypatch.setattr(books, "is_local_book", lambda path: True)
-    session_key = dbconn.get_active_key()
     cash_no, rev_no = _numbers(client_id, accounts)
-    set_secret(mcp_server.MCP_KEY_SECRET, session_key)
-    set_secret(mcp_server.MCP_LEVEL_SECRET, "propose")
+    names = _authorize_current_book(set_secret, level="propose")
 
     result = mcp_server.propose_entry(
         client_id, "2026-07-31", "Allowed draft", BALANCED(cash_no, rev_no)
     )
     assert result["status"] == "pending"
 
-    set_secret(mcp_server.MCP_LEVEL_SECRET, "read")
+    set_secret(names.level, "read")
     with pytest.raises(ValueError, match="access level 'propose'"):
         mcp_server.propose_entry(
             client_id, "2026-07-31", "Denied draft", BALANCED(cash_no, rev_no)
@@ -193,13 +202,67 @@ def test_external_book_caps_assistant_at_read(client_id, monkeypatch):
     test_db = dbconn.DATABASE_PATH
     monkeypatch.setattr(books, "active_book", lambda: test_db)
     monkeypatch.setattr(books, "is_local_book", lambda path: False)
-    set_secret(mcp_server.MCP_KEY_SECRET, dbconn.get_active_key())
-    set_secret(mcp_server.MCP_LEVEL_SECRET, "post")
+    _authorize_current_book(set_secret, level="post")
 
     assert mcp_server._unlock_from_vault() is True
     assert dbconn.ASSISTANT_ACCESS_LEVEL == "read"
     with pytest.raises(ValueError, match="current level is 'read'"):
         mcp_server._require_level("propose")
+
+
+def test_authorization_cannot_follow_or_be_copied_to_another_book(
+    client_id, monkeypatch, tmp_path
+):
+    import mcp_server
+    from database import init_database
+    from utils import books
+    from utils.secure_store import set_secret
+
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL",
+                        dbconn.ASSISTANT_ACCESS_LEVEL)
+    original_path = dbconn.DATABASE_PATH
+    session_key = dbconn.get_active_key()
+    active = [original_path]
+    monkeypatch.setattr(books, "active_book", lambda: active[0])
+    monkeypatch.setattr(books, "is_local_book", lambda path: True)
+
+    names_a = _authorize_current_book(set_secret, level="propose")
+    book_a_id = active_book_id()
+    assert mcp_server._unlock_from_vault() is True
+
+    book_b = tmp_path / "book-b.db"
+    try:
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
+        dbconn.DATABASE_PATH = book_b
+        dbconn.set_active_key(session_key)
+        init_database()
+        book_b_id = active_book_id()
+        assert book_b_id != book_a_id
+        active[0] = book_b
+
+        # Book A's permission does not follow the active-book switch.
+        assert mcp_server._unlock_from_vault() is False
+        assert dbconn.has_active_key() is False
+
+        # Even copying the key/level to Book B's path scope is insufficient:
+        # the encrypted book identity must match the explicit authorization.
+        names_b = credential_names(book_b)
+        set_secret(names_b.key, session_key)
+        set_secret(names_b.level, "propose")
+        set_secret(names_b.book_id, book_a_id)
+        assert mcp_server._unlock_from_vault() is False
+        assert dbconn.has_active_key() is False
+
+        # Explicit consent for Book B makes only Book B available.
+        set_secret(names_b.book_id, book_b_id)
+        assert mcp_server._unlock_from_vault() is True
+        assert dbconn.DATABASE_PATH == book_b
+        assert dbconn.ASSISTANT_ACCESS_LEVEL == "propose"
+        assert names_a != names_b
+    finally:
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
+        dbconn.DATABASE_PATH = original_path
+        dbconn.set_active_key(session_key)
 
 
 def test_assistant_process_actor_carries_ai_suffix(client_id, accounts, monkeypatch):

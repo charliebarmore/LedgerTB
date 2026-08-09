@@ -477,9 +477,9 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
                          out_dir: str) -> dict:
     """Write the close package (branded PDF + Excel workbook) to disk so a
     workpaper tool (e.g. LedgerPDF) can ingest it. Filesystem writes are
-    consent-gated: out_dir must sit inside a folder the user named in the
-    PROBOOKS_MCP_EXPORT_ROOTS environment variable (os.pathsep-separated);
-    unset means all exports are refused."""
+    consent-gated: out_dir must sit inside the book's approved export folder
+    or a folder named by the PROBOOKS_MCP_EXPORT_ROOTS environment variable
+    (os.pathsep-separated); no approved folder means all exports are refused."""
     import os
     import re
     from pathlib import Path
@@ -504,10 +504,13 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
     # Data Safety and stored in the OS vault (outside the assistant's reach,
     # like the access level). The env var remains as a power-user override so
     # config-managed setups keep working.
+    from database import connection as dbconn
     from utils import secure_store
+    from utils.assistant_access import credential_names
 
+    names = credential_names(dbconn.DATABASE_PATH)
     roots_raw = (os.environ.get("PROBOOKS_MCP_EXPORT_ROOTS", "")
-                 or secure_store.get_secret("mcp_export_roots") or "")
+                 or secure_store.get_secret(names.export_roots) or "")
     roots = [Path(p).expanduser().resolve()
              for p in roots_raw.split(os.pathsep) if p.strip()]
     if not roots:

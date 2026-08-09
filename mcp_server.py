@@ -5,9 +5,10 @@ trial balance, statements, general ledger, entry search, integrity checks.
 
 Access model, in order:
 - Opt-in: the user must click "Enable assistant access" on the Data Safety
-  page while unlocked. That stores the derived database KEY (never the
-  passphrase) in the OS credential vault; this server reads it back. Disabling
-  deletes it. No vault entry -> this server refuses to start.
+  page for each book while it is unlocked. That stores the derived database
+  KEY (never the passphrase) and encrypted book identity in the OS credential
+  vault; this server reads them back. Disabling deletes them. No matching
+  vault entry -> this server refuses access.
 - Permissioned by construction: every tool re-reads the enablement and access
   level from the credential vault, and SQLite's authorizer enforces that level
   for each new connection.
@@ -25,26 +26,25 @@ from mcp.server import MCPServer
 
 from database import connection as dbconn
 from services import mcp_tools
+from services.backups import active_book_id
+from utils.assistant_access import credential_names
 from utils import secure_store
 
-MCP_KEY_SECRET = "mcp_db_key"
-MCP_LEVEL_SECRET = "mcp_access_level"
 
-
-def _access_level() -> str:
+def _access_level(names) -> str:
     """The level chosen on Data Safety; stored in the OS vault beside the key
-    so the assistant's own connections can never change it. Setups enabled
-    before levels existed behave as "propose" (their original behavior)."""
+    so the assistant's own connections can never change it. Missing or unknown
+    values fail to the least-privileged read level."""
     from database.connection import ASSISTANT_ACCESS_LEVELS
 
-    if not secure_store.get_secret(MCP_KEY_SECRET):
+    if not secure_store.get_secret(names.key):
         raise PermissionError(
             "ProBooks assistant access is disabled. Enable it in ProBooks -> "
             "Data Safety -> Assistant access."
         )
-    level = secure_store.get_secret(MCP_LEVEL_SECRET)
+    level = secure_store.get_secret(names.level)
     if level is None:
-        return "propose"  # compatibility for installations enabled pre-levels
+        return "read"
     return level if level in ASSISTANT_ACCESS_LEVELS else "read"
 
 
@@ -55,26 +55,45 @@ def _refresh_access() -> str:
     made Data Safety's Disable and Change level controls ineffective until the
     external assistant restarted its server process.
     """
-    key = secure_store.get_secret(MCP_KEY_SECRET)
-    if not key:
+    from utils import books
+    active_book = books.active_book()
+    names = credential_names(active_book)
+    key = secure_store.get_secret(names.key)
+    expected_book_id = secure_store.get_secret(names.book_id)
+    if not key or not expected_book_id:
         dbconn.ASSISTANT_ACCESS_LEVEL = None
         dbconn.clear_active_key()
         raise PermissionError(
-            "ProBooks assistant access was disabled. Re-enable it in "
+            "ProBooks assistant access is not enabled for this book. Enable it in "
             "ProBooks -> Data Safety -> Assistant access."
         )
 
-    level = _access_level()
-    from utils import books
-    active_book = books.active_book()
+    level = _access_level(names)
     # External/custom paths may be SMB/NFS books. The desktop app coordinates
     # one writer with a sidecar lock, but this separate MCP process does not yet
     # join that protocol. Keep those books read-only to avoid a second writer.
     if level != "read" and not books.is_local_book(active_book):
         level = "read"
+    dbconn.ASSISTANT_ACCESS_LEVEL = None
     dbconn.DATABASE_PATH = active_book
-    dbconn.ASSISTANT_ACCESS_LEVEL = level
     dbconn.set_active_key(key)
+    try:
+        actual_book_id = active_book_id()
+    except Exception as exc:
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
+        dbconn.clear_active_key()
+        raise PermissionError(
+            "The authorized ProBooks book could not be opened. Re-enable "
+            "assistant access from that book's Data Safety page."
+        ) from exc
+    if actual_book_id != expected_book_id:
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
+        dbconn.clear_active_key()
+        raise PermissionError(
+            "The book at this path is not the book that authorized assistant "
+            "access. Open it in ProBooks and grant access explicitly."
+        )
+    dbconn.ASSISTANT_ACCESS_LEVEL = level
     return level
 
 
