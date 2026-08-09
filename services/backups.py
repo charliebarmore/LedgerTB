@@ -289,7 +289,16 @@ def backup_health(
     backup_dir: Path = DEFAULT_BACKUP_DIR, *, max_age_hours: int = 24
 ) -> dict:
     backup_root = Path(backup_dir)
-    book_id = active_book_id()
+    try:
+        book_id = active_book_id()
+    except Exception:
+        # The sidebar calls this on every page; a book whose identity can't be
+        # read must surface as "not healthy", never as a crashed page.
+        return {
+            "healthy": False,
+            "reason": "Backup status is unavailable for this book.",
+            "latest": None,
+        }
     book_dir = _book_backup_dir(backup_root, book_id)
     candidates = sorted(book_dir.glob("probooks-*.db"), reverse=True)
     if not candidates:
@@ -343,3 +352,115 @@ def legacy_backup_count(backup_dir: Path = DEFAULT_BACKUP_DIR) -> int:
         if not payload.get("book_id"):
             count += 1
     return count
+
+
+def adopt_legacy_backups(backup_dir: Path = DEFAULT_BACKUP_DIR) -> dict:
+    """Bring pre-book-identity backups under the currently open book.
+
+    ProBooks never guesses which book a legacy backup belongs to; adoption is
+    the user asserting ownership, and the assertion is checked: a backup is
+    adopted only if it verifies against its manifest AND opens intact with
+    THIS book's key. Anything that fails is left exactly where it was.
+    """
+    backup_root = Path(backup_dir)
+    result = {"adopted": [], "skipped": []}
+    if not backup_root.exists():
+        return result
+    book_id = active_book_id()
+    book_dir = _book_backup_dir(backup_root, book_id)
+
+    for path in sorted(backup_root.glob("probooks-*.db")):
+        manifest = path.with_suffix(".json")
+        try:
+            payload = json.loads(manifest.read_text())
+        except Exception:
+            continue  # not a readable backup manifest; not ours to touch
+        if payload.get("book_id"):
+            continue  # already book-scoped, just misplaced; leave it alone
+        try:
+            _adopt_one(path, manifest, payload, book_dir, book_id)
+        except Exception:
+            result["skipped"].append(path.name)
+        else:
+            result["adopted"].append(path.name)
+    return result
+
+
+def _adopt_one(path: Path, manifest: Path, payload: dict,
+               book_dir: Path, book_id: str) -> None:
+    if payload.get("database_file") != path.name:
+        raise ValueError("Backup manifest does not match the database file.")
+    if _sha256(path) != payload.get("sha256"):
+        raise ValueError("Backup checksum verification failed.")
+    # The ownership proof: only this book's key opens its own backups.
+    if not _integrity(path):
+        raise ValueError("Backup database failed SQLite integrity verification.")
+
+    book_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(book_dir, 0o700)
+    final_db = book_dir / path.name
+    final_manifest = final_db.with_suffix(".json")
+    if final_db.exists() or final_manifest.exists():
+        raise ValueError("A backup with this name already exists for the book.")
+
+    # Work on a copy so the original survives any failure below.
+    temp_db = book_dir / f".{path.name}.adopt.tmp"
+    temp_manifest = book_dir / f".{final_manifest.name}.adopt.tmp"
+    shutil.copy2(path, temp_db)
+    try:
+        os.chmod(temp_db, 0o600)
+        _stamp_book_id(temp_db, book_id)
+        if not _integrity(temp_db):
+            raise RuntimeError("Adopted copy failed SQLite integrity verification.")
+        payload = dict(payload)
+        payload["book_id"] = book_id
+        payload["sha256"] = _sha256(temp_db)
+        payload["size_bytes"] = temp_db.stat().st_size
+        payload["schema_versions"] = _schema_versions(temp_db)
+        payload["adopted_at"] = datetime.now(timezone.utc).isoformat()
+        temp_manifest.write_text(json.dumps(payload, indent=2) + "\n")
+        os.chmod(temp_manifest, 0o600)
+        os.replace(temp_db, final_db)
+        os.replace(temp_manifest, final_manifest)
+    except Exception:
+        temp_db.unlink(missing_ok=True)
+        temp_manifest.unlink(missing_ok=True)
+        raise
+    path.unlink(missing_ok=True)
+    manifest.unlink(missing_ok=True)
+
+
+def _stamp_book_id(path: Path, book_id: str) -> None:
+    """Write this book's identity into a pre-016 backup, mirroring migration
+    016's shape, and record that migration as applied — otherwise restoring
+    the backup would re-run 016 into a table-already-exists failure (or worse,
+    assign a fresh random identity and orphan every other recovery point)."""
+    conn = db_connection.open_keyed(path)
+    try:
+        try:
+            row = conn.execute(
+                "SELECT book_id FROM book_identity WHERE id = 1"
+            ).fetchone()
+        except Exception:
+            row = None
+            conn.execute("""
+                CREATE TABLE book_identity (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    book_id TEXT NOT NULL UNIQUE CHECK (length(book_id) = 32),
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        if row and str(row[0]) != book_id:
+            raise ValueError("This backup already belongs to a different book.")
+        if not row:
+            conn.execute(
+                "INSERT INTO book_identity (id, book_id) VALUES (1, ?)",
+                (book_id,),
+            )
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations (version) "
+            "VALUES ('016_book_identity')"
+        )
+        conn.commit()
+    finally:
+        conn.close()

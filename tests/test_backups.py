@@ -128,3 +128,107 @@ def test_legacy_unscoped_backups_are_reported_but_not_offered(db, tmp_path):
 
     assert legacy_backup_count(backup_dir) == 1
     assert list_backups(backup_dir) == []
+
+
+def _fabricate_legacy_backup(record, backup_root):
+    """Recreate what v1.0.0 wrote: a root-level backup with no book identity
+    inside and no book_id in its manifest."""
+    import hashlib
+
+    from database import connection as dbconn
+
+    legacy_db = backup_root / "probooks-20260701T000000000000Z.db"
+    shutil.copy2(record.database_path, legacy_db)
+    conn = dbconn.open_keyed(legacy_db)
+    try:
+        conn.execute("DROP TABLE book_identity")
+        conn.execute("DELETE FROM schema_migrations WHERE version LIKE '016%'")
+        conn.commit()
+    finally:
+        conn.close()
+    payload = json.loads(record.manifest_path.read_text())
+    del payload["book_id"]
+    payload["database_file"] = legacy_db.name
+    payload["sha256"] = hashlib.sha256(legacy_db.read_bytes()).hexdigest()
+    payload["size_bytes"] = legacy_db.stat().st_size
+    legacy_db.with_suffix(".json").write_text(json.dumps(payload))
+    return legacy_db
+
+
+def test_adopted_legacy_backup_becomes_restorable(db, tmp_path):
+    """The v1.0.0 upgrade regression: pre-book-identity backups were invisible
+    and unrestorable. Adoption must make one a first-class recovery point —
+    listed, identity-stamped, and restorable without re-running migration 016."""
+    from services.backups import adopt_legacy_backups
+
+    Client(name="Legacy Era").save(seed_accounts=False)
+    backup_root = tmp_path / "backups"
+    record = create_backup(backup_root)
+    legacy_db = _fabricate_legacy_backup(record, backup_root)
+
+    assert legacy_backup_count(backup_root) == 1
+    assert all(r.database_path.name != legacy_db.name
+               for r in list_backups(backup_root))
+
+    result = adopt_legacy_backups(backup_root)
+    assert result["adopted"] == [legacy_db.name]
+    assert result["skipped"] == []
+    assert not legacy_db.exists()  # moved, not copied
+    assert legacy_backup_count(backup_root) == 0
+
+    adopted = next(r for r in list_backups(backup_root)
+                   if r.database_path.name == legacy_db.name)
+    assert adopted.book_id == active_book_id()
+
+    # Restoring it must keep the stamped identity: migration 016 is recorded
+    # as applied, so init neither collides nor assigns a fresh random id
+    # (which would orphan every other recovery point).
+    book_id = active_book_id()
+    restore_backup(adopted.database_path, backup_root)
+    from database import init_database
+    init_database()
+    assert active_book_id() == book_id
+    assert any(c.name == "Legacy Era" for c in Client.get_all())
+
+
+def test_adoption_refuses_backups_it_cannot_verify(db, tmp_path):
+    """A legacy backup that does not open with this book's key is someone
+    else's book — it must be skipped and left exactly where it was."""
+    import hashlib
+    import sqlite3
+
+    from services.backups import adopt_legacy_backups
+
+    backup_root = tmp_path / "backups"
+    backup_root.mkdir()
+    foreign = backup_root / "probooks-20260601T000000000000Z.db"
+    plain = sqlite3.connect(foreign)  # unreadable under our key, like a
+    plain.execute("CREATE TABLE t (x)")  # backup keyed by another passphrase
+    plain.commit()
+    plain.close()
+    foreign.with_suffix(".json").write_text(json.dumps({
+        "database_file": foreign.name,
+        "sha256": hashlib.sha256(foreign.read_bytes()).hexdigest(),
+        "created_at": "2026-06-01T00:00:00+00:00",
+    }))
+
+    result = adopt_legacy_backups(backup_root)
+    assert result["adopted"] == []
+    assert result["skipped"] == [foreign.name]
+    assert foreign.exists()
+    assert legacy_backup_count(backup_root) == 1
+
+
+def test_backup_health_degrades_instead_of_raising(db, tmp_path, monkeypatch):
+    """backup_health runs in the sidebar on every page; a book whose identity
+    can't be read must report unhealthy, not crash the app."""
+    import services.backups as backups_mod
+
+    def broken_identity():
+        raise ValueError("This backup predates book-specific recovery protection")
+
+    monkeypatch.setattr(backups_mod, "active_book_id", broken_identity)
+    health = backup_health(tmp_path / "backups")
+    assert health["healthy"] is False
+    assert health["latest"] is None
+    assert "unavailable" in health["reason"]

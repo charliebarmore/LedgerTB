@@ -11,6 +11,7 @@ from models.audit_log import AuditLog
 from models.client import Client
 from services.backups import (
     active_book_id,
+    adopt_legacy_backups,
     backup_health,
     create_backup,
     legacy_backup_count,
@@ -169,6 +170,43 @@ if _legacy_backups:
         "book-specific recovery protection. ProBooks will not guess which book "
         "they belong to."
     )
+    st.caption(
+        "If those backups were made from this book, adopt them below. ProBooks "
+        "verifies each one opens intact with this book's passphrase before "
+        "adopting it; any that don't are left exactly where they are."
+    )
+    if st.button("Adopt older backups into this book", key="adopt_legacy_backups"):
+        try:
+            _adoption = adopt_legacy_backups()
+        except Exception as exc:
+            st.error(f"The older backups could not be adopted: {exc}")
+        else:
+            if _adoption["adopted"]:
+                audit_safety_event("BACKUP", "legacy_backup_adoption", {
+                    "adopted": _adoption["adopted"],
+                    "skipped": _adoption["skipped"],
+                    "book_id": active_book_id(),
+                })
+                _message = (
+                    f"Adopted {len(_adoption['adopted'])} backup(s) into this book."
+                )
+                if _adoption["skipped"]:
+                    _message += (
+                        f" {len(_adoption['skipped'])} could not be verified "
+                        "with this book's passphrase and were left untouched."
+                    )
+                st.session_state["legacy_backups_adopted"] = _message
+                st.rerun()
+            else:
+                st.error(
+                    "None of the older backups could be verified with this "
+                    "book's passphrase. They were left untouched — they may "
+                    "belong to a different book."
+                )
+
+_adopted_message = st.session_state.pop("legacy_backups_adopted", None)
+if _adopted_message:
+    st.success(_adopted_message)
 
 if st.button("Create verified backup", type="primary"):
     try:

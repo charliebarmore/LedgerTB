@@ -89,3 +89,27 @@ def test_plaintext_migration_copy_can_be_removed_from_data_safety(db, monkeypatc
     assert not at.exception
     assert not backup.exists()
     assert any("after verifying the encrypted book" in s.value for s in at.success)
+
+
+def test_legacy_backups_can_be_adopted_from_data_safety(db, monkeypatch):
+    """Drive the actual Adopt click — rendering-only assertions can't catch a
+    crash in the handler (the Create-book NameError lesson)."""
+    import services.backups as backups_mod
+
+    _patched(monkeypatch)
+    monkeypatch.setattr(backups_mod, "legacy_backup_count", lambda *a, **k: 2)
+    calls = []
+    monkeypatch.setattr(
+        backups_mod, "adopt_legacy_backups",
+        lambda *a, **k: calls.append(1) or {
+            "adopted": ["probooks-a.db", "probooks-b.db"], "skipped": []})
+
+    at = AppTest.from_file(page_path("pages/9_Data_Safety.py"),
+                           default_timeout=30).run()
+    assert not at.exception
+    assert any("older backup" in i.value for i in at.info)
+
+    at.button(key="adopt_legacy_backups").click().run()
+    assert not at.exception
+    assert calls, "the Adopt button never reached the adoption service"
+    assert any("Adopted 2 backup(s)" in s.value for s in at.success)
