@@ -52,9 +52,15 @@ Requires Python 3.12 (what it's tested on).
 ```bash
 git clone https://github.com/charliebarmore/ProBooks.git
 cd ProBooks
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 streamlit run app.py --server.address=127.0.0.1
 ```
+
+The virtual environment matters: installing into your system Python often fails
+outright on current installs ("externally managed environment") and mixes
+ProBooks' dependencies into everything else you run.
 
 Verified on a clean macOS install (Python 3.12.7, fresh venv, nothing preinstalled): `pip install -r requirements.txt` pulls a prebuilt `sqlcipher3` wheel and needs no Homebrew step. The same is true on Windows x64.
 
@@ -74,10 +80,11 @@ This tool follows the same rule we teach in the Lab: AI drafts, the professional
 ## Tests
 
 ```bash
-python -m pytest
+python -m pytest -q -m "not performance"
 ```
 
-More than 370 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the assistant review checkpoint, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
+(Dropping the marker filter also runs the slower volume baselines described in
+`PERFORMANCE.md`.) More than 370 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the assistant review checkpoint, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
 
 ## More documentation
 
@@ -91,6 +98,16 @@ More than 370 tests cover the ledger math, posting rules, imports, reports, the 
 - `docs/WINDOWS-TESTING.md` — the Windows smoke-test checklist
 - `PERFORMANCE.md` — performance baselines
 - `SECURITY.md` — private vulnerability reporting and supported versions
+
+## What this is — and isn't
+
+ProBooks is software, not accounting advice. It gives you double-entry rails,
+an audit trail, and review workflows, but every judgment in your books —
+categorization, adjustments, what gets posted — is yours, whether you made it
+directly or accepted a suggestion from the AI assistant. Nothing it produces
+is a substitute for professional judgment on questions that matter. Your books
+and their accuracy remain your responsibility, and the software is provided
+as-is, without warranty of any kind (see `LICENSE`).
 
 ## License
 

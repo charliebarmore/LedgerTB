@@ -1,0 +1,36 @@
+# Functional signal on every contribution: the full non-performance suite on
+# the same open-range install a source user gets. Fork PRs run this with a
+# read-only token and no secrets.
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install SQLCipher headers
+        # sqlcipher3 has no Linux wheel, so it builds from source here; without
+        # the library the app would fall back to an unencrypted database and
+        # the encryption tests would not be exercised.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlcipher-dev
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest -q -m "not performance"

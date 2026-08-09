@@ -18,7 +18,7 @@ ProBooks is tested with Python 3.12.
 python3.12 -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 python -m pip install -r requirements-dev.txt
-python -m pytest -q
+python -m pytest -q -m "not performance"
 streamlit run app.py --server.address=127.0.0.1
 ```
 
@@ -30,7 +30,7 @@ operating system. Desktop packaging instructions are in `DESKTOP.md`.
 1. Create a focused branch from the latest `main`.
 2. Keep the change small enough to review and explain why it is needed.
 3. Add or update tests for behavior changes and bug fixes.
-4. Run `python -m pytest -q` and document any skipped or unverified checks.
+4. Run `python -m pytest -q -m "not performance"` and document any skipped or unverified checks.
 5. Update user-facing documentation when behavior or setup changes.
 6. Open a pull request using the repository template.
 
