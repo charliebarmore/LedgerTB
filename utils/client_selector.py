@@ -25,6 +25,9 @@ section[data-testid="stSidebar"] {
     max-width: 260px !important;
 }
 section[data-testid="stSidebar"] > div:first-child { width: 260px !important; }
+/* Streamlit puts a copy-anchor-URL link on every header; in a desktop app
+   the URL is localhost noise, so hide them everywhere. */
+[data-testid="stHeaderActionElements"] { display: none !important; }
 
 /* st.page_link labels were clipping mid-word with no ellipsis. */
 section[data-testid="stSidebar"] [data-testid="stPageLink"] p {
