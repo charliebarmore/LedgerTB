@@ -5,6 +5,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+echo "==> Verifying installed dependencies"
+python -m pip check
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+  python scripts/verify_lock.py requirements-macos-arm64.lock
+fi
+
 # Local signing config (gitignored): sets PROBOOKS_CODESIGN_ID so the bundle
 # signs with a stable Developer ID and Keychain items survive reinstalls.
 if [ -f scripts/signing.env ]; then

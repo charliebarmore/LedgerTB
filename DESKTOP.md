@@ -69,10 +69,18 @@ to hand to a colleague).
 
 ## Build
 
+On Apple Silicon, use the committed Python 3.12 lock for a repeatable build:
+
 ```bash
-pip install -r requirements-desktop.txt      # includes pyinstaller
-pyinstaller ProBooks.spec --noconfirm
+python3.12 -m venv .macos-venv
+.macos-venv/bin/pip install -r requirements-macos-arm64.lock
+.macos-venv/bin/python scripts/build_release.sh
 ```
+
+`requirements-macos-arm64.lock` is architecture-specific because the desktop
+bundle includes native PyObjC, NumPy, SQLCipher, and PyInstaller components.
+The build script verifies the installed versions before running tests and
+packaging. Intel Macs need a separately generated lock.
 
 For a tested, repeatable local release, use the wrapper instead:
 

@@ -64,7 +64,7 @@ The app runs fully without any API key. To turn on AI categorization, either set
 
 ## Desktop builds
 
-- **macOS**: a signed standalone `ProBooks.app` — build with `./scripts/build_release.sh` (see `DESKTOP.md`; signing is configured via a local `scripts/signing.env`). Not yet automated in CI, so no macOS release asset is published.
+- **macOS**: a standalone `ProBooks.app` — on Apple Silicon, create a clean Python 3.12 environment, install `requirements-macos-arm64.lock`, and run `./scripts/build_release.sh`. The build verifies the lock before packaging. Signing is configured via a local `scripts/signing.env`; no macOS release asset is published yet.
 - **Windows**: an Inno Setup installer built by CI (`.github/workflows/release.yml`, tag-triggered) from `scripts/probooks.iss`. The release pipeline refuses to ship a build whose encryption is unavailable, installs the pinned set in `requirements-windows.lock`, and will not publish a build that cannot serve a page (`scripts/smoke_serve.ps1`).
 
 ## The posture
