@@ -188,6 +188,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+          # This job deliberately has no checkout (it only needs the verified
+          # artifact), so gh cannot infer the repository from a git remote and
+          # fails with "not a git repository". Name it explicitly.
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$RELEASE_TAG" release-assets/* \
             --draft \
