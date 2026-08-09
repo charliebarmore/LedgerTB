@@ -17,6 +17,7 @@ read-only or takeover. See utils/books.py and utils/book_lock.py.
 """
 
 import atexit
+from pathlib import Path
 
 import streamlit as st
 

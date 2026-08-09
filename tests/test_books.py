@@ -170,3 +170,43 @@ def test_switch_book_flag_suppresses_auto_unlock(db, monkeypatch):
         assert not any("Unlock" in b.label for b in at.button)
     finally:
         dbconn.set_active_key(key)
+
+
+def test_create_book_by_name_actually_creates(db, monkeypatch, tmp_path):
+    """Clicking 'Create this book' must run to completion — the first ship
+    of this screen raised NameError on the click, which rendering-only
+    assertions couldn't catch."""
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+
+    import utils.books as books
+    import utils.client_selector as selector
+    from tests.conftest import page_path
+
+    monkeypatch.setattr(selector, "render_client_selector", lambda: None)
+    monkeypatch.setattr(st, "page_link", lambda *a, **k: None)
+    monkeypatch.setattr("utils.unlock.try_saved_key", lambda: False)
+    monkeypatch.setattr(books, "USER_DATA_DIR", tmp_path)
+    monkeypatch.setattr(books, "SETTINGS_PATH", tmp_path / "books.json")
+    monkeypatch.setattr(books, "active_book", lambda: dbconn.DATABASE_PATH)
+
+    chosen = []
+    monkeypatch.setattr(books, "set_active_book",
+                        lambda p: chosen.append(str(p)))
+
+    key = dbconn.get_active_key()
+    dbconn.clear_active_key()
+    try:
+        at = AppTest.from_file(page_path("pages/9_Data_Safety.py"),
+                               default_timeout=30)
+        at.session_state["_switch_book"] = True
+        at.run()
+        next(ti for ti in at.text_input
+             if ti.key == "book_new_name").input("Demo").run()
+        next(b for b in at.button if b.key == "book_create_named").click().run()
+        assert not at.exception
+        assert chosen and chosen[0].endswith("Demo.probooks")
+        assert (tmp_path / "Books").is_dir()
+        assert "_switch_book" not in at.session_state
+    finally:
+        dbconn.set_active_key(key)
