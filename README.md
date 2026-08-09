@@ -87,6 +87,7 @@ More than 340 tests cover the ledger math, posting rules, imports, reports, the 
 - `docs/FIRM-MODE.md` — shared-drive book files and the in-use lock
 - `docs/WINDOWS-TESTING.md` — the Windows smoke-test checklist
 - `PERFORMANCE.md` — performance baselines
+- `SECURITY.md` — private vulnerability reporting and supported versions
 
 ## License
 
