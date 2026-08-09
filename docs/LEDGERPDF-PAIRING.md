@@ -44,8 +44,8 @@ claude mcp add ledgerpdf -e WPT_MCP_ROOTS=/path/to/engagements \
   -- node <ledgerpdf>/app/out/mcp-server.cjs
 ```
 
-Then choose ProBooks' export folder on **Data Safety → Assistant
-access** (no config editing — it's stored with the access level) and
+Then choose ProBooks' per-book export folder on **Data Safety → Assistant
+access** (no config editing — it's stored with that book's access level) and
 point it at the same engagement folder as LedgerPDF's `WPT_MCP_ROOTS`:
 ProBooks may write exports there, LedgerPDF may read sources from
 there, and neither can touch anything outside it.

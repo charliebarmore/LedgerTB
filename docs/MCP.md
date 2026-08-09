@@ -3,7 +3,8 @@
 ProBooks can act as a local, permissioned MCP server for an AI assistant on
 the same computer (Claude Desktop, Claude Code). Depending on the level you
 choose, it can query the books, file proposals for human review, or append new
-balanced journal entries.
+balanced journal entries. Access is granted separately for each book; opening
+a different book never carries the previous book's permission with it.
 
 ## Access levels — you choose how much your assistant can do
 
@@ -26,10 +27,13 @@ from an already-running MCP process.
 
 ## Security model
 
-- **Opt-in.** Off until you click **Enable assistant access** on the Data
-  Safety page while unlocked. That stores the *derived database key* —
-  never your passphrase — in the operating system's credential vault
-  (macOS Keychain / Windows Credential Manager). **Disable** deletes it.
+- **Opt-in per book.** Off until you click **Enable assistant access** on the
+  Data Safety page while that book is unlocked. That stores the *derived
+  database key* — never your passphrase — plus the book's encrypted identity
+  in an opaque, path-scoped entry in the operating system's credential vault
+  (macOS Keychain / Windows Credential Manager). A different path or a
+  different book at the same path does not inherit access. **Disable** revokes
+  this book's key, level, identity, and export folder.
 - **The selected ceiling is enforced by the database.** Every connection
   carries a SQLite authorizer. Read permits queries (and append-only export
   audit records); propose additionally permits inserts into the draft and
@@ -60,7 +64,10 @@ from an already-running MCP process.
 
 ## Setup
 
-1. ProBooks → **Data Safety → Enable assistant access**.
+1. Open the intended book, then go to ProBooks → **Data Safety → Enable
+   assistant access**. Repeat this explicit step for each book the assistant
+   should use. If a book file moves, open it at the new path and enable access
+   again.
 2. The page then shows the exact JSON for your machine. In Claude
    Desktop: Settings → Developer → Edit Config, add it under
    `mcpServers`; in Claude Code: `claude mcp add probooks -- <command>`.
@@ -87,8 +94,9 @@ from an already-running MCP process.
 ## Pairing with LedgerPDF
 
 `export_close_package` writes the close package (PDF + Excel) into the
-**export folder you choose on Data Safety** (stored in the credential
-vault, outside the assistant's reach; blank = file export off). The
+**export folder you choose for this book on Data Safety** (stored in the
+credential vault, outside the assistant's reach; blank = file export off).
+Another book has no export permission until you choose its folder. The
 `PROBOOKS_MCP_EXPORT_ROOTS` environment variable remains as an override
 for config-managed setups. See `LEDGERPDF-PAIRING.md` for the full
 books-to-binder workflow with both MCP servers in one session.
