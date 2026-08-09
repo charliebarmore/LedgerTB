@@ -291,3 +291,47 @@ def test_assistant_process_actor_carries_ai_suffix(client_id, accounts, monkeypa
         cursor.execute("SELECT created_by FROM imported_transactions WHERE id = ?",
                        (staged[0].id,))
         assert cursor.fetchone()["created_by"].endswith("(AI)")
+
+
+def test_verification_window_never_drops_the_authorizer(client_id, monkeypatch):
+    """_refresh_access must park the level at "read" while it verifies book
+    identity, never at None. None means "not an assistant process" — the ONE
+    value that installs no authorizer — and MCP runs tool calls on parallel
+    threads, so a concurrent call can open a connection inside that window."""
+    import mcp_server
+    from utils import books
+    from utils.secure_store import set_secret
+
+    test_db = dbconn.DATABASE_PATH
+    session_key = dbconn.get_active_key()
+    monkeypatch.setattr(books, "active_book", lambda: test_db)
+    monkeypatch.setattr(books, "is_local_book", lambda path: True)
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL",
+                        dbconn.ASSISTANT_ACCESS_LEVEL)
+    _authorize_current_book(set_secret, level="post")
+
+    real_active_book_id = mcp_server.active_book_id
+    seen = {}
+
+    def concurrent_call_lands_mid_verification():
+        # What a parallel tool call observes while this one is verifying:
+        # the parked level, and the connection it would get.
+        seen["level"] = dbconn.ASSISTANT_ACCESS_LEVEL
+        try:
+            with get_cursor(commit=True) as cursor:
+                cursor.execute("UPDATE clients SET name = name")
+            seen["update_allowed"] = True
+        except Exception:
+            seen["update_allowed"] = False
+        return real_active_book_id()
+
+    monkeypatch.setattr(mcp_server, "active_book_id",
+                        concurrent_call_lands_mid_verification)
+
+    try:
+        assert mcp_server._refresh_access() == "post"
+    finally:
+        dbconn.set_active_key(session_key)
+
+    assert seen["level"] == "read"
+    assert seen["update_allowed"] is False

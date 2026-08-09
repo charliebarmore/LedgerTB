@@ -61,8 +61,11 @@ def _refresh_access() -> str:
     key = secure_store.get_secret(names.key)
     expected_book_id = secure_store.get_secret(names.book_id)
     if not key or not expected_book_id:
-        dbconn.ASSISTANT_ACCESS_LEVEL = None
+        # Key first, level second: the level may only read None while no key
+        # is set, because None installs no authorizer at all on a connection
+        # a concurrent tool call opens in between.
         dbconn.clear_active_key()
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
         raise PermissionError(
             "ProBooks assistant access is not enabled for this book. Enable it in "
             "ProBooks -> Data Safety -> Assistant access."
@@ -74,21 +77,27 @@ def _refresh_access() -> str:
     # join that protocol. Keep those books read-only to avoid a second writer.
     if level != "read" and not books.is_local_book(active_book):
         level = "read"
-    dbconn.ASSISTANT_ACCESS_LEVEL = None
+    # Park at the least-privileged real level while the key is live. None is
+    # NOT a deny value here — it means "not an assistant process" and installs
+    # no authorizer, so a concurrent tool call opening a connection during the
+    # identity check below would get an unrestricted one. MCP dispatches tool
+    # calls to parallel worker threads against this process-global, so that
+    # window is reachable in practice.
+    dbconn.ASSISTANT_ACCESS_LEVEL = "read"
     dbconn.DATABASE_PATH = active_book
     dbconn.set_active_key(key)
     try:
         actual_book_id = active_book_id()
     except Exception as exc:
-        dbconn.ASSISTANT_ACCESS_LEVEL = None
         dbconn.clear_active_key()
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
         raise PermissionError(
             "The authorized ProBooks book could not be opened. Re-enable "
             "assistant access from that book's Data Safety page."
         ) from exc
     if actual_book_id != expected_book_id:
-        dbconn.ASSISTANT_ACCESS_LEVEL = None
         dbconn.clear_active_key()
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
         raise PermissionError(
             "The book at this path is not the book that authorized assistant "
             "access. Open it in ProBooks and grant access explicitly."
