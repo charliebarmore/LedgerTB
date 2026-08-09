@@ -50,7 +50,7 @@ folder, so upgrading keeps your data and uninstalling does not delete it.
 Requires Python 3.12 (what it's tested on).
 
 ```bash
-git clone <this repo>
+git clone https://github.com/charliebarmore/ProBooks.git
 cd ProBooks
 pip install -r requirements.txt
 streamlit run app.py --server.address=127.0.0.1
@@ -77,7 +77,7 @@ This tool follows the same rule we teach in the Lab: AI drafts, the professional
 python -m pytest
 ```
 
-More than 340 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the assistant review checkpoint, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
+More than 370 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the assistant review checkpoint, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
 
 ## More documentation
 

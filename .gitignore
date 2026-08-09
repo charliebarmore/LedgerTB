@@ -9,7 +9,12 @@ __pycache__/
 *.so
 .Python
 venv/
+.venv/
+env/
 ENV/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
 
 # Database (contains client data)
 data/
@@ -30,6 +35,8 @@ data/
 
 # Test artifacts
 .pytest_cache/
+.coverage
+htmlcov/
 
 # Test/sample data
 *.csv
