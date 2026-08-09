@@ -12,14 +12,24 @@ name: Windows build spike
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   windows:
+    name: Build and validate Windows package
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -85,6 +95,8 @@ jobs:
         id: installer
         if: steps.build.outcome == 'success'
         continue-on-error: true
+        env:
+          APP_VERSION: ${{ steps.ver.outputs.value }}
         shell: pwsh
         run: |
           choco install innosetup --no-progress -y
@@ -96,7 +108,7 @@ jobs:
           } | Select-Object -First 1 -ExpandProperty FullName
           if (-not $iscc) { Write-Error "ISCC.exe not found after installing Inno Setup"; exit 1 }
           Write-Host "using $iscc"
-          & $iscc "/DAppVersion=${{ steps.ver.outputs.value }}" scripts\probooks.iss
+          & $iscc "/DAppVersion=$env:APP_VERSION" scripts\probooks.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem installer
 
@@ -107,7 +119,7 @@ jobs:
         # quota can block them (recalculated slowly after deletions), and
         # that must not mask six green signals or skip the scorecard.
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ProBooks-windows-installer
           path: installer/*.exe
@@ -117,7 +129,7 @@ jobs:
         id: upload_bundle
         if: steps.build.outcome == 'success'
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ProBooks-windows
           path: dist/ProBooks/
@@ -128,6 +140,15 @@ jobs:
 
       - name: Scorecard
         if: always()
+        env:
+          SQLCIPHER_OUTCOME: ${{ steps.sqlcipher.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          SELFCHECK_OUTCOME: ${{ steps.selfcheck.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          INSTALLER_OUTCOME: ${{ steps.installer.outcome }}
+          UPLOAD_INSTALLER_OUTCOME: ${{ steps.upload_installer.outcome }}
+          UPLOAD_BUNDLE_OUTCOME: ${{ steps.upload_bundle.outcome }}
         shell: pwsh
         # continue-on-error above exists to gather ALL signals in one run —
         # but the JOB must still go red if any signal failed. A green run
@@ -135,18 +156,18 @@ jobs:
         # shipped unnoticed. Upload outcomes are REPORTED, never gated:
         # a quota-blocked artifact is an inconvenience, not a broken build.
         run: |
-          Write-Host "deps + encryption: ${{ steps.sqlcipher.outcome }}"
-          Write-Host "test suite:        ${{ steps.tests.outcome }}"
-          Write-Host "pyinstaller:       ${{ steps.build.outcome }}"
-          Write-Host "selfcheck:         ${{ steps.selfcheck.outcome }}"
-          Write-Host "serves a page:     ${{ steps.smoke.outcome }}"
-          Write-Host "installer:         ${{ steps.installer.outcome }}"
-          Write-Host "artifact uploads:  installer=${{ steps.upload_installer.outcome }} bundle=${{ steps.upload_bundle.outcome }} (informational)"
-          if ("${{ steps.upload_installer.outcome }}" -eq "failure" -or "${{ steps.upload_bundle.outcome }}" -eq "failure") {
+          Write-Host "deps + encryption: $env:SQLCIPHER_OUTCOME"
+          Write-Host "test suite:        $env:TESTS_OUTCOME"
+          Write-Host "pyinstaller:       $env:BUILD_OUTCOME"
+          Write-Host "selfcheck:         $env:SELFCHECK_OUTCOME"
+          Write-Host "serves a page:     $env:SMOKE_OUTCOME"
+          Write-Host "installer:         $env:INSTALLER_OUTCOME"
+          Write-Host "artifact uploads:  installer=$env:UPLOAD_INSTALLER_OUTCOME bundle=$env:UPLOAD_BUNDLE_OUTCOME (informational)"
+          if ($env:UPLOAD_INSTALLER_OUTCOME -eq "failure" -or $env:UPLOAD_BUNDLE_OUTCOME -eq "failure") {
             Write-Warning "artifact upload failed (storage quota?) - build validated but no downloadable artifact on this run"
           }
-          $bad = @("${{ steps.sqlcipher.outcome }}", "${{ steps.tests.outcome }}",
-                   "${{ steps.build.outcome }}", "${{ steps.selfcheck.outcome }}",
-                   "${{ steps.smoke.outcome }}", "${{ steps.installer.outcome }}") |
+          $bad = @($env:SQLCIPHER_OUTCOME, $env:TESTS_OUTCOME,
+                   $env:BUILD_OUTCOME, $env:SELFCHECK_OUTCOME,
+                   $env:SMOKE_OUTCOME, $env:INSTALLER_OUTCOME) |
                  Where-Object { $_ -eq "failure" }
           if ($bad) { Write-Error "one or more signals failed"; exit 1 }

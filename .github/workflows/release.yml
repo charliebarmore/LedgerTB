@@ -11,30 +11,38 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # required to create the Release
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   windows:
+    name: Build and verify Windows release
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Verify release tag matches app version
         if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_REF_NAME: ${{ github.ref_name }}
         shell: pwsh
         run: |
           $appVersion = python -c "from version import APP_VERSION; print(APP_VERSION)"
-          $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
+          $tagVersion = $env:RELEASE_REF_NAME -replace '^v', ''
           if ($tagVersion -ne $appVersion) {
-            Write-Error "Release tag ${{ github.ref_name }} does not match APP_VERSION $appVersion"
+            Write-Error "Release tag $env:RELEASE_REF_NAME does not match APP_VERSION $appVersion"
             exit 1
           }
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
-          cache: pip
 
       - name: Install dependencies (pinned)
         shell: pwsh
@@ -101,6 +109,8 @@ jobs:
         run: choco install innosetup --no-progress -y
 
       - name: Build installer
+        env:
+          APP_VERSION: ${{ steps.ver.outputs.value }}
         shell: pwsh
         # The installer is the supported download. A zip extracted by Explorer
         # carries mark-of-the-web on every file, which stops .NET loading the
@@ -114,38 +124,72 @@ jobs:
           } | Select-Object -First 1 -ExpandProperty FullName
           if (-not $iscc) { Write-Error "ISCC.exe not found after installing Inno Setup"; exit 1 }
           Write-Host "using $iscc"
-          & $iscc "/DAppVersion=${{ steps.ver.outputs.value }}" scripts\probooks.iss
+          & $iscc "/DAppVersion=$env:APP_VERSION" scripts\probooks.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem installer
 
       - name: Name the installer assets
+        env:
+          APP_VERSION: ${{ steps.ver.outputs.value }}
         shell: pwsh
         # Two names for the same bytes: the versioned file for the archive, and
         # a stable name so releases/latest/download/ProBooks-windows-x64-setup.exe
         # is an evergreen link that always serves the newest release.
         run: |
-          $src = "installer\ProBooks-${{ steps.ver.outputs.value }}-windows-x64-setup.exe"
+          $src = "installer\ProBooks-$env:APP_VERSION-windows-x64-setup.exe"
           if (-not (Test-Path $src)) { Write-Error "installer not found at $src"; exit 1 }
-          Copy-Item $src "ProBooks-${{ steps.ver.outputs.value }}-windows-x64-setup.exe"
+          Copy-Item $src "ProBooks-$env:APP_VERSION-windows-x64-setup.exe"
           Copy-Item $src "ProBooks-windows-x64-setup.exe"
 
       - name: Package the zip (secondary)
+        env:
+          APP_VERSION: ${{ steps.ver.outputs.value }}
         shell: pwsh
         # Kept for anyone deploying without an installer. NOTE: files extracted
         # from this zip by Explorer carry mark-of-the-web and the app will not
         # start until they are unblocked — see the README. The installer is the
         # supported path.
         run: |
-          Compress-Archive -Path dist/ProBooks/* -DestinationPath ProBooks-${{ steps.ver.outputs.value }}-windows-x64.zip
-          Copy-Item ProBooks-${{ steps.ver.outputs.value }}-windows-x64.zip ProBooks-windows-x64.zip
+          Compress-Archive -Path dist/ProBooks/* -DestinationPath "ProBooks-$env:APP_VERSION-windows-x64.zip"
+          Copy-Item "ProBooks-$env:APP_VERSION-windows-x64.zip" ProBooks-windows-x64.zip
 
-      - uses: softprops/action-gh-release@v2
+      # Pass only the finished release files to a separate least-privilege job.
+      # The long-running build and all of its dependencies keep read-only access
+      # to repository contents; only the tiny publication job receives write.
+      - name: Stage release assets
         if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          files: |
+          name: probooks-release-assets-${{ github.run_id }}
+          path: |
             ProBooks-${{ steps.ver.outputs.value }}-windows-x64-setup.exe
             ProBooks-windows-x64-setup.exe
             ProBooks-${{ steps.ver.outputs.value }}-windows-x64.zip
             ProBooks-windows-x64.zip
-          draft: true # review before it goes live
-          generate_release_notes: true
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish draft release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # Required to create the draft release and upload assets.
+    steps:
+      - name: Download verified release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: probooks-release-assets-${{ github.run_id }}
+          path: release-assets
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --draft \
+            --generate-notes \
+            --verify-tag
