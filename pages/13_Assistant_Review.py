@@ -79,10 +79,17 @@ _LABELS = {
     ("EXPORT", "audit_log"): "Exported files",
 }
 
+unreviewed_total = assistant_review.unreviewed_count(client_id)
 actions = assistant_review.unreviewed_actions(client_id)
 if not actions:
     st.info("No unreviewed assistant activity.")
 else:
+    if unreviewed_total > len(actions):
+        st.info(
+            f"Showing the oldest {len(actions)} of {unreviewed_total} "
+            "unreviewed actions. Signing off below covers only the actions "
+            "shown on this page; the rest will remain for your next review."
+        )
     for a in actions:
         label = _LABELS.get((a.action, a.table_name),
                             f"{a.action.title()} · {a.table_name}")
@@ -103,11 +110,21 @@ else:
         "it does not change any entry. Pending drafts and staged imports "
         "above still need their own decisions."
     )
-    if st.button(f"Mark all {len(actions)} action(s) reviewed", type="primary"):
-        through = assistant_review.mark_reviewed(client_id)
-        st.session_state.ar_marked_msg = (
-            f"Reviewed through audit #{through}.")
-        st.rerun()
+    action_word = "action" if len(actions) == 1 else "actions"
+    if st.button(
+        f"Mark these {len(actions)} displayed {action_word} reviewed",
+        type="primary",
+    ):
+        try:
+            through = assistant_review.mark_reviewed(
+                client_id, actions[-1].audit_id
+            )
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.session_state.ar_marked_msg = (
+                f"Reviewed through audit #{through}.")
+            st.rerun()
 
 _marked = st.session_state.pop("ar_marked_msg", None)
 if _marked:

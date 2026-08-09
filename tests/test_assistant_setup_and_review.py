@@ -84,7 +84,7 @@ def test_review_queue_counts_ai_work_and_signoff_drains_it(
     actions = assistant_review.unreviewed_actions(client_id)
     assert all(a.actor.endswith("(AI)") for a in actions)
 
-    through = assistant_review.mark_reviewed(client_id)
+    through = assistant_review.mark_reviewed(client_id, actions[-1].audit_id)
     assert through == max(a.audit_id for a in actions)
     assert assistant_review.unreviewed_count(client_id) == 0
     mark = assistant_review.latest_mark(client_id)
@@ -101,6 +101,86 @@ def test_review_queue_counts_ai_work_and_signoff_drains_it(
     monkeypatch.setattr(actor_mod, "_ASSISTANT", False)
     monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", None)
     assert assistant_review.unreviewed_count(client_id) >= 1
+
+
+def test_review_checkpoint_covers_only_the_displayed_page(client_id, monkeypatch):
+    from models.audit_log import AuditLog
+    from utils import actor as actor_mod
+
+    _as_assistant(monkeypatch)
+    with get_cursor(commit=True) as cursor:
+        for number in range(205):
+            AuditLog.write(
+                cursor=cursor,
+                client_id=client_id,
+                table_name="draft_entries",
+                record_id=number + 1,
+                action="INSERT",
+                new_values={"sequence": number + 1},
+            )
+    monkeypatch.setattr(actor_mod, "_ASSISTANT", False)
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", None)
+
+    displayed = assistant_review.unreviewed_actions(client_id)
+    assert len(displayed) == 200
+    assert assistant_review.unreviewed_count(client_id) == 205
+
+    through = assistant_review.mark_reviewed(
+        client_id, displayed[-1].audit_id
+    )
+    remaining = assistant_review.unreviewed_actions(client_id)
+    assert through == displayed[-1].audit_id
+    assert len(remaining) == 5
+    assert all(action.audit_id > through for action in remaining)
+
+
+def test_review_checkpoint_rejects_stale_or_foreign_target(
+    client_id, monkeypatch
+):
+    from models.audit_log import AuditLog
+    from models.client import Client
+    from utils import actor as actor_mod
+
+    _as_assistant(monkeypatch)
+    own_id = AuditLog.log_event(client_id, "EXPORT", "own_assistant_event")
+    other_client = Client(name="Other Review Client")
+    other_client.save(seed_accounts=False)
+    foreign_id = AuditLog.log_event(
+        other_client.id, "EXPORT", "foreign_assistant_event"
+    )
+    monkeypatch.setattr(actor_mod, "_ASSISTANT", False)
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", None)
+
+    with pytest.raises(ValueError, match="no longer available"):
+        assistant_review.mark_reviewed(client_id, foreign_id)
+
+    assert assistant_review.mark_reviewed(client_id, own_id) == own_id
+    with pytest.raises(ValueError, match="no longer available"):
+        assistant_review.mark_reviewed(client_id, own_id)
+
+
+def test_review_checkpoint_rolls_back_when_audit_write_fails(
+    client_id, monkeypatch
+):
+    from models.audit_log import AuditLog
+    from utils import actor as actor_mod
+
+    _as_assistant(monkeypatch)
+    assistant_id = AuditLog.log_event(
+        client_id, "EXPORT", "assistant_event_before_failed_review"
+    )
+    monkeypatch.setattr(actor_mod, "_ASSISTANT", False)
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", None)
+
+    def fail_audit(*args, **kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(AuditLog, "write", fail_audit)
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        assistant_review.mark_reviewed(client_id, assistant_id)
+
+    assert assistant_review.latest_mark(client_id) is None
+    assert assistant_review.unreviewed_count(client_id) == 1
 
 
 def test_review_audit_events_actually_write(client_id):

@@ -74,25 +74,40 @@ def latest_mark(client_id: int) -> Optional[dict]:
             "reviewed_by": row["reviewed_by"]}
 
 
-def mark_reviewed(client_id: int) -> int:
-    """Record sign-off through the newest assistant audit row. Returns the
-    audit id the mark covers. The sign-off itself is audit-logged."""
+def mark_reviewed(client_id: int, through_audit_id: int) -> int:
+    """Record sign-off through one explicitly displayed assistant audit row.
+
+    The target must still be unreviewed and belong to this client. Newer
+    assistant work remains queued. The checkpoint and its audit event commit
+    atomically so a sign-off can never exist without its audit record.
+    """
     from models.audit_log import AuditLog
     from utils.actor import current_actor
 
+    through = int(through_audit_id)
     with get_cursor(commit=True) as cursor:
+        current_mark = _latest_mark_id(cursor, client_id)
         cursor.execute(
-            "SELECT COALESCE(MAX(id), 0) AS m FROM audit_log "
-            "WHERE client_id = ? AND performed_by LIKE '%(AI)'", (client_id,))
-        through = cursor.fetchone()["m"]
+            "SELECT id FROM audit_log WHERE id = ? AND client_id = ? "
+            "AND id > ? AND performed_by LIKE '%(AI)'",
+            (through, client_id, current_mark),
+        )
+        if cursor.fetchone() is None:
+            raise ValueError(
+                "The selected assistant action is no longer available for review."
+            )
         cursor.execute(
             """INSERT INTO assistant_review_marks
                (client_id, through_audit_id, reviewed_by) VALUES (?, ?, ?)""",
             (client_id, through, current_actor()),
         )
-    # REVIEW lives in the event-level audit stream (the row-level table's
-    # CHECK constraint predates the action). The mark row above is the durable
-    # record; this makes the sign-off visible in the activity feed.
-    AuditLog.log_event(client_id, "REVIEW", "assistant_activity_reviewed",
-                       {"through_audit_id": through})
+        mark_id = cursor.lastrowid
+        AuditLog.write(
+            cursor=cursor,
+            client_id=client_id,
+            table_name="assistant_activity_reviewed",
+            record_id=mark_id,
+            action="REVIEW",
+            new_values={"through_audit_id": through},
+        )
     return through
