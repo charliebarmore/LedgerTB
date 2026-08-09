@@ -1,8 +1,9 @@
 from datetime import date
+from io import BytesIO
 from types import SimpleNamespace
 
-import fitz
 import pytest
+from reportlab.pdfgen import canvas
 
 from services import document_import
 from services.document_import import (
@@ -10,6 +11,16 @@ from services.document_import import (
     parse_statement_text,
     parse_statement_with_ai,
 )
+
+
+def _make_pdf(text: str = "", *, password: str = "") -> bytes:
+    buffer = BytesIO()
+    document = canvas.Canvas(buffer, encrypt=password or None)
+    if text:
+        document.drawString(72, 720, text)
+    document.showPage()
+    document.save()
+    return buffer.getvalue()
 
 
 def test_local_parser_handles_signed_amounts_running_balances_and_continuations():
@@ -39,11 +50,9 @@ def test_local_parser_can_choose_last_amount_and_reports_unparsed_rows():
 
 
 def test_native_pdf_text_is_extracted_without_ocr(monkeypatch):
-    pdf = fitz.open()
-    page = pdf.new_page()
-    page.insert_text((72, 72), "01/15/2026 OFFICE DEPOT -123.45 Statement transaction text")
-    content = pdf.tobytes()
-    pdf.close()
+    content = _make_pdf(
+        "01/15/2026 OFFICE DEPOT -123.45 Statement transaction text"
+    )
     monkeypatch.setattr(
         document_import, "_vision_ocr",
         lambda _: (_ for _ in ()).throw(AssertionError("OCR should not run")),
@@ -59,17 +68,18 @@ def test_native_pdf_text_is_extracted_without_ocr(monkeypatch):
 
 def test_image_and_scanned_pdf_use_local_ocr(monkeypatch):
     recognized = "01/15/2026 OFFICE DEPOT -123.45"
-    monkeypatch.setattr(document_import, "_vision_ocr", lambda _: recognized)
+
+    def recognize_png(content):
+        assert content.startswith(b"\x89PNG\r\n\x1a\n")
+        return recognized
+
+    monkeypatch.setattr(document_import, "_vision_ocr", recognize_png)
 
     image_result = extract_document("statement.png", b"\x89PNG\r\n\x1a\nplaceholder")
     assert image_result.text == recognized
     assert image_result.ocr_pages == 1
 
-    pdf = fitz.open()
-    pdf.new_page()
-    content = pdf.tobytes()
-    pdf.close()
-    pdf_result = extract_document("scan.pdf", content)
+    pdf_result = extract_document("scan.pdf", _make_pdf())
     assert pdf_result.ocr_pages == 1
     assert recognized in pdf_result.text
 
@@ -79,6 +89,8 @@ def test_document_validation_rejects_mismatched_or_protected_inputs():
         extract_document("statement.pdf", b"not a pdf")
     with pytest.raises(ValueError, match="Supported"):
         extract_document("statement.docx", b"data")
+    with pytest.raises(ValueError, match="Password-protected"):
+        extract_document("protected.pdf", _make_pdf("Private", password="secret"))
 
 
 def test_ai_parser_uses_structured_output_and_normalized_amounts(monkeypatch):

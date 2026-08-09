@@ -2,8 +2,8 @@
 from datetime import date
 from io import BytesIO
 
-import fitz
 import openpyxl
+import pypdfium2 as pdfium
 import pytest
 
 from models.reports import ReportGenerator
@@ -64,11 +64,29 @@ def test_close_package_carries_the_brand(client_id, accounts):
     tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *period)
 
     pdf = build_close_package_pdf(client_id, "Test Co", *period, tb_rows)
-    doc = fitz.open(stream=pdf.read(), filetype="pdf")
-    text = "\n".join(page.get_text() for page in doc)
-    assert "Charles J Barmore CPA PC" in text
-    assert "cbarmorecpa.com" in text
-    assert len(doc[0].get_images()) >= 1  # the logo made the masthead
+    doc = pdfium.PdfDocument(pdf.read())
+    try:
+        pages = []
+        image_count = 0
+        for page_index in range(len(doc)):
+            page = doc[page_index]
+            try:
+                text_page = page.get_textpage()
+                try:
+                    pages.append(text_page.get_text_range())
+                finally:
+                    text_page.close()
+                image_count += len(list(page.get_objects(
+                    filter=[pdfium.raw.FPDF_PAGEOBJ_IMAGE]
+                )))
+            finally:
+                page.close()
+        text = "\n".join(pages)
+        assert "Charles J Barmore CPA PC" in text
+        assert "cbarmorecpa.com" in text
+        assert image_count >= 1  # the logo made the masthead
+    finally:
+        doc.close()
 
     wb = openpyxl.load_workbook(BytesIO(build_close_package(
         client_id, "Test Co", *period, tb_rows).read()))

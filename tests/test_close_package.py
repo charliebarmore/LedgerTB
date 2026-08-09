@@ -5,7 +5,7 @@ from io import BytesIO
 import openpyxl
 import pytest
 
-import fitz
+import pypdfium2 as pdfium
 
 from models.reports import ReportGenerator
 from models.journal_entry import JournalEntry, JournalEntryLine
@@ -148,17 +148,31 @@ def test_pdf_package_contains_every_section(booked_period, accounts):
     raw = pdf.read()
     assert raw.startswith(b"%PDF")
 
-    doc = fitz.open(stream=raw, filetype="pdf")
-    text = "\n".join(page.get_text() for page in doc)
-    for heading in ["Close Package", "Summary", "Cash Activity",
-                    "Final Trial Balance", "Transactions",
-                    "Adjusting Journal Entries"]:
-        assert heading in text, f"missing section {heading!r}"
-    # tie-outs appear in print: cash walk and the AJE reference
-    assert "AJE-1" in text
-    assert "690.00" in text          # ending cash
-    assert "TOTALS" in text
-    assert doc.page_count >= 4
+    doc = pdfium.PdfDocument(raw)
+    try:
+        pages = []
+        for page_index in range(len(doc)):
+            page = doc[page_index]
+            try:
+                text_page = page.get_textpage()
+                try:
+                    pages.append(text_page.get_text_range())
+                finally:
+                    text_page.close()
+            finally:
+                page.close()
+        text = "\n".join(pages)
+        for heading in ["Close Package", "Summary", "Cash Activity",
+                        "Final Trial Balance", "Transactions",
+                        "Adjusting Journal Entries"]:
+            assert heading in text, f"missing section {heading!r}"
+        # tie-outs appear in print: cash walk and the AJE reference
+        assert "AJE-1" in text
+        assert "690.00" in text          # ending cash
+        assert "TOTALS" in text
+        assert len(doc) >= 4
+    finally:
+        doc.close()
 
 
 def test_pdf_and_excel_can_share_one_captured_snapshot(

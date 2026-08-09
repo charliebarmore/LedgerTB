@@ -1,5 +1,10 @@
 # ProBooks visual theme — clean, professional, navy-accented light UI.
 # Flip base to "dark" if you prefer the original dark slate look.
+[server]
+# A book's unlock key is shared by the local Streamlit process. Never expose
+# that process to the LAN: every supported launch path must remain loopback-only.
+address = "127.0.0.1"
+
 [theme]
 base = "light"
 primaryColor = "#1f3a5f"            # navy — buttons, accents, active nav

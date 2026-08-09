@@ -53,7 +53,7 @@ Requires Python 3.12 (what it's tested on).
 git clone <this repo>
 cd ProBooks
 pip install -r requirements.txt
-streamlit run app.py
+streamlit run app.py --server.address=127.0.0.1
 ```
 
 Verified on a clean macOS install (Python 3.12.7, fresh venv, nothing preinstalled): `pip install -r requirements.txt` pulls a prebuilt `sqlcipher3` wheel and needs no Homebrew step. The same is true on Windows x64.
@@ -90,4 +90,5 @@ More than 340 tests cover the ledger math, posting rules, imports, reports, the 
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See `LICENSE`. Third-party components retain their own terms; see
+`THIRD_PARTY_NOTICES.md`.

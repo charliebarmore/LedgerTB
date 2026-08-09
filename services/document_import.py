@@ -5,6 +5,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
@@ -104,42 +105,62 @@ def extract_document(filename: str, content: bytes) -> DocumentExtraction:
             raise ValueError("No readable text was found in the statement image.")
         return DocumentExtraction(text=text, page_count=1, ocr_pages=1)
 
-    import fitz
+    import pypdfium2 as pdfium
 
     try:
-        document = fitz.open(stream=content, filetype="pdf")
+        document = pdfium.PdfDocument(content)
+    except pdfium.PdfiumError as exc:
+        if exc.err_code == pdfium.raw.FPDF_ERR_PASSWORD:
+            raise ValueError(
+                "Password-protected PDFs must be unlocked before import."
+            ) from exc
+        raise ValueError(f"The PDF could not be opened: {exc}") from exc
     except Exception as exc:
         raise ValueError(f"The PDF could not be opened: {exc}") from exc
     try:
-        if document.needs_pass:
-            raise ValueError("Password-protected PDFs must be unlocked before import.")
-        if document.page_count > MAX_PDF_PAGES:
+        page_count = len(document)
+        if page_count > MAX_PDF_PAGES:
             raise ValueError(f"The PDF has more than {MAX_PDF_PAGES} pages.")
 
         page_text = []
         ocr_pages = 0
         native_pages = 0
         warnings = []
-        for page_number, page in enumerate(document, start=1):
-            text = page.get_text("text", sort=True).strip()
-            if len(re.sub(r"\W", "", text)) >= 30:
-                native_pages += 1
-            else:
-                scale = 2.2
-                estimated_pixels = page.rect.width * page.rect.height * scale * scale
-                if estimated_pixels > MAX_IMAGE_PIXELS:
-                    scale = math.sqrt(MAX_IMAGE_PIXELS / (page.rect.width * page.rect.height))
-                pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-                text = _vision_ocr(pixmap.tobytes("png")).strip()
-                ocr_pages += 1
-                if not text:
-                    warnings.append(f"Page {page_number}: no readable text found.")
-            page_text.append(f"--- Page {page_number} ---\n{text}")
+        for page_index in range(page_count):
+            page_number = page_index + 1
+            page = document[page_index]
+            try:
+                text_page = page.get_textpage()
+                try:
+                    text = text_page.get_text_range().strip()
+                finally:
+                    text_page.close()
+                if len(re.sub(r"\W", "", text)) >= 30:
+                    native_pages += 1
+                else:
+                    width, height = page.get_size()
+                    scale = 2.2
+                    estimated_pixels = width * height * scale * scale
+                    if estimated_pixels > MAX_IMAGE_PIXELS:
+                        scale = math.sqrt(MAX_IMAGE_PIXELS / (width * height))
+                    bitmap = page.render(scale=scale)
+                    try:
+                        encoded = BytesIO()
+                        bitmap.to_pil().save(encoded, format="PNG")
+                    finally:
+                        bitmap.close()
+                    text = _vision_ocr(encoded.getvalue()).strip()
+                    ocr_pages += 1
+                    if not text:
+                        warnings.append(f"Page {page_number}: no readable text found.")
+                page_text.append(f"--- Page {page_number} ---\n{text}")
+            finally:
+                page.close()
         combined = "\n".join(page_text).strip()
         if not re.search(r"[A-Za-z0-9]", combined):
             raise ValueError("No readable text was found in this PDF.")
         return DocumentExtraction(
-            text=combined, page_count=document.page_count, ocr_pages=ocr_pages,
+            text=combined, page_count=page_count, ocr_pages=ocr_pages,
             native_text_pages=native_pages, warnings=warnings,
         )
     finally:

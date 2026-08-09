@@ -38,7 +38,7 @@ import dotenv          # noqa: F401
 import platformdirs    # noqa: F401
 import keyring         # noqa: F401
 import altair          # noqa: F401  (streamlit dependency used for charts)
-import fitz             # noqa: F401  (PDF text extraction and page rendering)
+import pypdfium2        # noqa: F401  (PDF text extraction and page rendering)
 import PIL              # noqa: F401  (image metadata/packaging support)
 if sys.platform == "darwin":
     import Quartz       # noqa: F401  (native image decoding for Apple Vision OCR)
@@ -206,7 +206,7 @@ def _selfcheck() -> int:
             "anthropic", "pydantic", "pydantic_core", "dotenv", "platformdirs",
             "mcp", "mcp.server", "mcp.server.stdio",
             "config", "constants", "money", "models.journal_entry", "models.reconciliation",
-            "services.categorization", "services.document_import", "fitz", "PIL",
+            "services.categorization", "services.document_import", "pypdfium2", "PIL",
             "keyring", "version"]
     failed = []
     for m in mods:

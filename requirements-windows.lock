@@ -84,7 +84,7 @@ Pygments==2.20.0
 pyinstaller==6.21.0
 pyinstaller-hooks-contrib==2026.6
 PyJWT==2.13.0
-pymupdf==1.28.0
+pypdfium2==5.4.0
 pytest==9.1.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2

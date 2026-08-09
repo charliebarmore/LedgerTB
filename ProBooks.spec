@@ -54,6 +54,8 @@ app_datas = [
     ("constants.py", "."),
     ("money.py", "."),
     ("version.py", "."),
+    ("LICENSE", "."),
+    ("THIRD_PARTY_NOTICES.md", "."),
     (".streamlit", ".streamlit"),
     ("assets", "assets"),
     ("pages", "pages"),
@@ -72,7 +74,7 @@ for pkg in (
     "streamlit", "pandas", "numpy", "pyarrow", "altair", "anthropic",
     "openpyxl", "pillow", "tornado", "click", "rich", "platformdirs",
     "python-dotenv", "gitpython", "packaging", "keyring",
-    "pymupdf", "Pillow", "pyobjc-framework-Quartz",
+    "pypdfium2", "Pillow", "pyobjc-framework-Quartz",
 ):
     try:
         metadatas += copy_metadata(pkg)
@@ -84,7 +86,7 @@ hiddenimports = st_hiddenimports + [
     # Both credential-vault backends: the frozen app must reach the OS vault
     # on each platform (API key + MCP enablement live there).
     "keyring", "keyring.backends.macOS", "keyring.backends.Windows",
-    "fitz", "PIL", "Quartz", "objc",
+    "pypdfium2", "pypdfium2_raw", "PIL", "Quartz", "objc",
     "sqlcipher3", "sqlcipher3.dbapi2",  # encrypted database driver (native ext)
 ] + collect_submodules("openpyxl") + collect_submodules("reportlab") \
   + collect_submodules("mcp", filter=lambda name: "mcp.cli" not in name)
