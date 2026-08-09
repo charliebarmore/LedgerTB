@@ -90,7 +90,10 @@ def test_document_validation_rejects_mismatched_or_protected_inputs():
     with pytest.raises(ValueError, match="Supported"):
         extract_document("statement.docx", b"data")
     with pytest.raises(ValueError, match="Password-protected"):
-        extract_document("protected.pdf", _make_pdf("Private", password="secret"))
+        extract_document(
+            "protected.pdf",
+            _make_pdf("Private", password="secret"),  # pragma: allowlist secret
+        )
 
 
 def test_ai_parser_uses_structured_output_and_normalized_amounts(monkeypatch):
@@ -109,11 +112,16 @@ def test_ai_parser_uses_structured_output_and_normalized_amounts(monkeypatch):
 
     class FakeAnthropic:
         def __init__(self, api_key):
-            assert api_key == "secret"
+            assert api_key == "secret"  # pragma: allowlist secret
             self.messages = FakeMessages()
 
     monkeypatch.setattr("anthropic.Anthropic", FakeAnthropic)
-    transactions = parse_statement_with_ai("statement text", "Liability", "secret", "model")
+    transactions = parse_statement_with_ai(
+        "statement text",
+        "Liability",
+        "secret",  # pragma: allowlist secret
+        "model",
+    )
 
     assert transactions[0]["date"] == date(2026, 1, 15)
     assert transactions[0]["amount"] == -123.45
