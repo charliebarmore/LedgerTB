@@ -18,6 +18,10 @@ from services.backups import (
     restore_backup,
 )
 from services.production_readiness import get_safety_checks, overall_status
+from services.migration_safety import (
+    active_plaintext_backup,
+    remove_active_plaintext_backup,
+)
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import books, icons
@@ -99,6 +103,49 @@ st.subheader("Safety checklist")
 for check in _checks:
     st.markdown(f"**{check.label}** · {check.status_label}")
     st.caption(check.detail)
+
+_plaintext_copy = active_plaintext_backup()
+if _plaintext_copy.exists() or _plaintext_copy.is_symlink():
+    st.warning(
+        f"Unencrypted migration copy found: `{_plaintext_copy.name}`. This "
+        "file can expose all client data without the book passphrase."
+    )
+    st.caption(
+        "ProBooks will re-check the encrypted live book before deleting this "
+        "specific adjacent copy. Deletion removes the local file, but copies "
+        "in cloud version history, system backups, or snapshots may remain."
+    )
+    _plaintext_confirm = st.text_input(
+        "Type DELETE PLAINTEXT to remove the unencrypted copy",
+        key="plaintext_backup_delete_confirm",
+    )
+    if st.button(
+        "Delete unencrypted migration copy",
+        disabled=_plaintext_confirm != "DELETE PLAINTEXT",
+        key="delete_plaintext_migration_backup",
+    ):
+        try:
+            _removed = remove_active_plaintext_backup()
+            audit_safety_event(
+                "DELETE",
+                "plaintext_migration_backup",
+                {
+                    "file": _removed.path.name,
+                    "size_bytes": _removed.size_bytes,
+                    "encrypted_book_integrity_verified": True,
+                },
+            )
+        except Exception as exc:
+            st.error(f"The unencrypted copy was not removed: {exc}")
+        else:
+            st.session_state["plaintext_backup_removed"] = (
+                f"Removed {_removed.path.name} after verifying the encrypted book."
+            )
+            st.rerun()
+
+_plaintext_removed = st.session_state.pop("plaintext_backup_removed", None)
+if _plaintext_removed:
+    st.success(_plaintext_removed)
 
 st.divider()
 st.subheader("Verified backups")

@@ -15,6 +15,7 @@ from database.crypto import (
     database_state,
     derive_key,
     encrypt_plaintext_db,
+    plaintext_backup_path,
     verify_passphrase,
 )
 from database.schema import create_tables
@@ -91,6 +92,7 @@ def test_plaintext_database_migrates_in_place(tmp_path, monkeypatch):
     assert database_state(path) == "plaintext"
 
     backup = encrypt_plaintext_db(path, PASSPHRASE)
+    assert backup == plaintext_backup_path(path)
     assert database_state(path) == "encrypted"
     assert backup.exists()
     assert backup.read_bytes()[:16] == b"SQLite format 3\x00"  # backup stays plaintext
@@ -103,3 +105,39 @@ def test_plaintext_database_migrates_in_place(tmp_path, monkeypatch):
         assert names == ["Legacy LLC"]
     finally:
         dbconn.clear_active_key()
+
+
+def test_migration_refuses_to_overwrite_an_existing_plaintext_copy(
+    tmp_path, monkeypatch
+):
+    path = _use(tmp_path, monkeypatch, name="legacy.db")
+    conn = sqlite3.connect(path)
+    create_tables(conn)
+    conn.close()
+    original = path.read_bytes()
+
+    backup = plaintext_backup_path(path)
+    backup.write_bytes(b"existing recovery copy")
+    with pytest.raises(RuntimeError, match="already exists"):
+        encrypt_plaintext_db(path, PASSPHRASE)
+
+    assert path.read_bytes() == original
+    assert backup.read_bytes() == b"existing recovery copy"
+
+
+def test_migration_refuses_a_symlinked_plaintext_source(tmp_path, monkeypatch):
+    actual = tmp_path / "actual.db"
+    conn = sqlite3.connect(actual)
+    create_tables(conn)
+    conn.close()
+    linked = _use(tmp_path, monkeypatch, name="linked.db")
+    try:
+        linked.symlink_to(actual)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are unavailable on this platform")
+
+    with pytest.raises(RuntimeError, match="symlinks"):
+        encrypt_plaintext_db(linked, PASSPHRASE)
+
+    assert linked.is_symlink()
+    assert database_state(actual) == "plaintext"

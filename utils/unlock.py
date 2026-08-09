@@ -27,6 +27,7 @@ from database.crypto import (
     database_state,
     derive_key,
     encrypt_plaintext_db,
+    plaintext_backup_path,
     verify_passphrase,
 )
 from utils import book_lock, books, secure_store
@@ -99,6 +100,14 @@ def require_unlock():
         )
         return
     if dbconn.has_active_key():
+        migration_copy = plaintext_backup_path(dbconn.DATABASE_PATH)
+        if migration_copy.exists() or migration_copy.is_symlink():
+            st.warning(
+                "An unencrypted migration copy is still stored beside this "
+                "book. Remove it from Data Safety after confirming the "
+                "encrypted book works.",
+                icon="⚠️",
+            )
         if dbconn.READ_ONLY:
             holder = book_lock.read_lock(dbconn.DATABASE_PATH)
             who = f" — in use by {book_lock.describe(holder)}" if holder else ""
@@ -356,6 +365,9 @@ def _migrate_form():
         confirm = st.text_input("Confirm passphrase", type="password")
         if st.form_submit_button("Encrypt existing database", type="primary"):
             if _valid_new_passphrase(passphrase, confirm):
-                backup = encrypt_plaintext_db(dbconn.DATABASE_PATH, passphrase)
-                st.session_state["_migration_backup_name"] = backup.name
-                _finish_unlock(derive_key(passphrase))
+                try:
+                    encrypt_plaintext_db(dbconn.DATABASE_PATH, passphrase)
+                except Exception as exc:
+                    st.error(f"The database was not changed: {exc}")
+                else:
+                    _finish_unlock(derive_key(passphrase))

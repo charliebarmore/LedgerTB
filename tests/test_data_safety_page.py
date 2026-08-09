@@ -60,3 +60,32 @@ def test_api_key_setup_lives_on_firm_settings_not_data_safety(db, monkeypatch):
     assert not firm.exception
     assert any(ti.key == "firm_settings_api_key" for ti in firm.text_input)
     assert any("AI categorization" in s.value for s in firm.subheader)
+
+
+def test_plaintext_migration_copy_can_be_removed_from_data_safety(db, monkeypatch):
+    import sqlite3
+
+    from database import connection as dbconn
+    from database.crypto import plaintext_backup_path
+
+    _patched(monkeypatch)
+    backup = plaintext_backup_path(dbconn.DATABASE_PATH)
+    conn = sqlite3.connect(backup)
+    conn.execute("CREATE TABLE sensitive (value TEXT)")
+    conn.commit()
+    conn.close()
+
+    at = AppTest.from_file(
+        page_path("pages/9_Data_Safety.py"), default_timeout=30
+    ).run()
+    assert not at.exception
+    assert any("Unencrypted migration copy found" in w.value for w in at.warning)
+
+    at.text_input(key="plaintext_backup_delete_confirm").input(
+        "DELETE PLAINTEXT"
+    )
+    at.button(key="delete_plaintext_migration_backup").click().run()
+
+    assert not at.exception
+    assert not backup.exists()
+    assert any("after verifying the encrypted book" in s.value for s in at.success)

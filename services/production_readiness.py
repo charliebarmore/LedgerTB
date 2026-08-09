@@ -155,6 +155,24 @@ def _book_encrypted_check() -> SafetyCheck:
                        "putting client work in it.")
 
 
+def _plaintext_backup_check() -> SafetyCheck:
+    from database.crypto import plaintext_backup_path
+
+    label = "Unencrypted migration copy removed"
+    backup = plaintext_backup_path(_book_path())
+    if not backup.exists() and not backup.is_symlink():
+        return SafetyCheck(
+            "plaintext_backup", label, True,
+            "No readable migration copy is sitting beside the encrypted book.",
+        )
+    return SafetyCheck(
+        "plaintext_backup", label, False,
+        "A readable migration copy may still be beside this book. Remove it "
+        "with the guarded control below after confirming the encrypted book "
+        "is working.",
+    )
+
+
 def _api_key_check() -> SafetyCheck:
     label = "API key kept out of plain files"
     if not API_KEY_FILE.exists():
@@ -176,6 +194,7 @@ def get_safety_checks() -> list[SafetyCheck]:
         _file_access_check(),
         _file_intact_check(),
         _book_encrypted_check(),
+        _plaintext_backup_check(),
         _api_key_check(),
         SafetyCheck("backup", "Recent verified backup", bool(health["healthy"]),
                     health["reason"] if not health["healthy"] else

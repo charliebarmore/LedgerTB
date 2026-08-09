@@ -10,7 +10,7 @@ the OS keychain.
 """
 
 import hashlib
-import shutil
+import os
 from pathlib import Path
 
 # Optional: when SQLCipher isn't installed the app runs unencrypted (see
@@ -77,6 +77,18 @@ def database_state(path: Path) -> str:
     return "plaintext" if _has_sqlite_header(path) else "encrypted"
 
 
+def plaintext_backup_path(path: Path) -> Path:
+    """The one reserved backup path used by plaintext-to-encrypted migration."""
+    path = Path(path)
+    return path.with_suffix(path.suffix + ".plaintext.bak")
+
+
+def is_plaintext_sqlite(path: Path) -> bool:
+    """True only for a regular, non-symlink SQLite file with a clear header."""
+    path = Path(path)
+    return path.is_file() and not path.is_symlink() and _has_sqlite_header(path)
+
+
 def verify_passphrase(path: Path, passphrase: str) -> bool:
     """True if ``passphrase`` opens the encrypted database at ``path``."""
     if sqlcipher3 is None:
@@ -104,20 +116,59 @@ def encrypt_plaintext_db(path: Path, passphrase: str) -> Path:
     if sqlcipher3 is None:
         raise RuntimeError("SQLCipher (sqlcipher3) is not installed; cannot encrypt the database.")
     path = Path(path)
+    if not is_plaintext_sqlite(path):
+        raise RuntimeError(
+            "Only an ordinary plaintext SQLite book file can be migrated; "
+            "symlinks and unexpected files are left untouched."
+        )
+    backup = plaintext_backup_path(path)
+    if backup.exists() or backup.is_symlink():
+        raise RuntimeError(
+            f"Migration backup already exists: {backup}. Move or remove it "
+            "before trying the migration again."
+        )
     tmp_enc = path.with_suffix(path.suffix + ".enc.tmp")
-    if tmp_enc.exists():
+    if tmp_enc.exists() or tmp_enc.is_symlink():
         tmp_enc.unlink()
 
     key = key_pragma(derive_key(passphrase))
-    src = sqlcipher3.connect(str(path))  # opened without a key -> read as plaintext
     try:
-        src.execute(f"ATTACH DATABASE {_sql_str(str(tmp_enc))} AS enc KEY {key}")
-        src.execute("SELECT sqlcipher_export('enc')")
-        src.execute("DETACH DATABASE enc")
-    finally:
-        src.close()
+        src = sqlcipher3.connect(str(path))  # no key: source is plaintext
+        try:
+            src.execute(f"ATTACH DATABASE {_sql_str(str(tmp_enc))} AS enc KEY {key}")
+            src.execute("SELECT sqlcipher_export('enc')")
+            src.execute("DETACH DATABASE enc")
+        finally:
+            src.close()
 
-    backup = path.with_suffix(path.suffix + ".plaintext.bak")
-    shutil.move(str(path), str(backup))
-    shutil.move(str(tmp_enc), str(path))
+        # Never replace the only live copy until the encrypted export opens
+        # with the chosen key and reads back cleanly.
+        check = sqlcipher3.connect(str(tmp_enc))
+        try:
+            check.execute(f"PRAGMA key = {key}")
+            result = check.execute("PRAGMA integrity_check").fetchone()[0]
+        finally:
+            check.close()
+        if result != "ok":
+            raise RuntimeError("The encrypted migration copy failed its integrity check.")
+
+        path.replace(backup)
+        try:
+            tmp_enc.replace(path)
+        except Exception:
+            # Best effort rollback: put the original plaintext book back at
+            # its original path if the second rename fails.
+            if not path.exists() and backup.exists():
+                backup.replace(path)
+            raise
+        try:
+            os.chmod(path, 0o600)
+            os.chmod(backup, 0o600)
+        except OSError:
+            pass
+    except Exception:
+        if tmp_enc.exists():
+            tmp_enc.unlink()
+        raise
+
     return backup

@@ -76,3 +76,17 @@ def test_checks_inspect_the_active_book_not_the_default(db, monkeypatch, tmp_pat
     they inspected the wrong file."""
     from database import connection as dbconn
     assert pr._book_path() == dbconn.DATABASE_PATH
+
+
+def test_plaintext_migration_copy_is_a_required_failure(db):
+    from database import connection as dbconn
+    from database.crypto import plaintext_backup_path
+
+    backup = plaintext_backup_path(dbconn.DATABASE_PATH)
+    backup.write_bytes(b"SQLite format 3\x00sensitive")
+
+    check = pr._plaintext_backup_check()
+    assert check.passed is False
+    assert check.required is True
+    assert check.status_label == "Action needed"
+    assert overall_status([check]) == "at_risk"
