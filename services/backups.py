@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,6 +15,11 @@ from config import APP_VERSION, BACKUP_DIR
 from database import connection as db_connection
 
 DEFAULT_BACKUP_DIR = BACKUP_DIR
+_BOOK_ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+class BackupBookMismatch(ValueError):
+    """A valid backup belongs to a different book than the one now open."""
 
 
 def _sha256(path: Path) -> str:
@@ -46,6 +52,47 @@ class BackupRecord:
     sha256: str
     size_bytes: int
     integrity_ok: bool
+    book_id: str
+    book_name: str
+
+
+def _read_book_id(conn) -> str:
+    try:
+        row = conn.execute(
+            "SELECT book_id FROM book_identity WHERE id = 1"
+        ).fetchone()
+    except Exception as exc:
+        raise ValueError(
+            "This backup predates book-specific recovery protection and cannot "
+            "be restored automatically."
+        ) from exc
+    book_id = str(row[0]) if row else ""
+    if not _BOOK_ID.fullmatch(book_id):
+        raise ValueError("The database has an invalid book identity.")
+    return book_id
+
+
+def active_book_id() -> str:
+    """Stable identity stored inside the currently open encrypted book."""
+    conn = db_connection.get_connection()
+    try:
+        return _read_book_id(conn)
+    finally:
+        conn.close()
+
+
+def _database_book_id(path: Path) -> str:
+    conn = db_connection.open_keyed(path)
+    try:
+        return _read_book_id(conn)
+    finally:
+        conn.close()
+
+
+def _book_backup_dir(backup_dir: Path, book_id: str) -> Path:
+    if not _BOOK_ID.fullmatch(book_id):
+        raise ValueError("The database has an invalid book identity.")
+    return Path(backup_dir) / book_id
 
 
 def create_backup(
@@ -54,23 +101,32 @@ def create_backup(
     reason: str = "manual",
     apply_retention: bool = True,
 ) -> BackupRecord:
-    backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(backup_dir, 0o700)
-    stamp = _timestamp()
-    final_db = backup_dir / f"probooks-{stamp}.db"
-    temp_db = backup_dir / f".{final_db.name}.tmp"
-    manifest = final_db.with_suffix(".json")
-    temp_manifest = backup_dir / f".{manifest.name}.tmp"
+    backup_root = Path(backup_dir)
+    backup_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(backup_root, 0o700)
 
     source = db_connection.get_connection()
-    # Key the backup target with the same passphrase so the backup file is
-    # itself encrypted (SQLCipher's online backup writes encrypted pages when
-    # the target connection is keyed).
-    target = db_connection.open_keyed(temp_db)
     try:
-        source.backup(target)
+        book_id = _read_book_id(source)
+        book_name = Path(db_connection.DATABASE_PATH).stem
+        book_dir = _book_backup_dir(backup_root, book_id)
+        book_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(book_dir, 0o700)
+        stamp = _timestamp()
+        final_db = book_dir / f"probooks-{book_id[:12]}-{stamp}.db"
+        temp_db = book_dir / f".{final_db.name}.tmp"
+        manifest = final_db.with_suffix(".json")
+        temp_manifest = book_dir / f".{manifest.name}.tmp"
+
+        # Key the backup target with the same passphrase so the backup file is
+        # itself encrypted (SQLCipher's online backup writes encrypted pages
+        # when the target connection is keyed).
+        target = db_connection.open_keyed(temp_db)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
     finally:
-        target.close()
         source.close()
 
     os.chmod(temp_db, 0o600)
@@ -85,6 +141,8 @@ def create_backup(
         "schema_versions": _schema_versions(temp_db),
         "created_at": created_at.isoformat(),
         "reason": reason,
+        "book_id": book_id,
+        "book_name": book_name,
         "database_file": final_db.name,
         "size_bytes": temp_db.stat().st_size,
         "sha256": digest,
@@ -96,9 +154,10 @@ def create_backup(
     os.replace(temp_manifest, manifest)
 
     if apply_retention:
-        prune_backups(backup_dir)
+        prune_backups(backup_root)
     return BackupRecord(
-        final_db, manifest, created_at, digest, final_db.stat().st_size, True
+        final_db, manifest, created_at, digest, final_db.stat().st_size, True,
+        book_id, book_name,
     )
 
 
@@ -117,7 +176,9 @@ def _schema_versions(path: Path) -> list[str]:
         conn.close()
 
 
-def load_record(database_path: Path) -> BackupRecord:
+def load_record(
+    database_path: Path, *, expected_book_id: Optional[str] = None
+) -> BackupRecord:
     database_path = Path(database_path)
     manifest = database_path.with_suffix(".json")
     if not database_path.is_file() or not manifest.is_file():
@@ -125,11 +186,25 @@ def load_record(database_path: Path) -> BackupRecord:
     payload = json.loads(manifest.read_text())
     if payload.get("database_file") != database_path.name:
         raise ValueError("Backup manifest does not match the database file.")
+    manifest_book_id = str(payload.get("book_id") or "")
+    if not _BOOK_ID.fullmatch(manifest_book_id):
+        raise ValueError(
+            "This backup predates book-specific recovery protection and cannot "
+            "be restored automatically."
+        )
     digest = _sha256(database_path)
     if digest != payload.get("sha256"):
         raise ValueError("Backup checksum verification failed.")
     if not _integrity(database_path):
         raise ValueError("Backup database failed SQLite integrity verification.")
+    database_book_id = _database_book_id(database_path)
+    if database_book_id != manifest_book_id:
+        raise ValueError("Backup manifest identity does not match its database.")
+    if expected_book_id and database_book_id != expected_book_id:
+        raise BackupBookMismatch(
+            "That recovery point belongs to a different book and cannot replace "
+            "the book currently open."
+        )
     return BackupRecord(
         database_path=database_path,
         manifest_path=manifest,
@@ -137,23 +212,33 @@ def load_record(database_path: Path) -> BackupRecord:
         sha256=digest,
         size_bytes=database_path.stat().st_size,
         integrity_ok=True,
+        book_id=database_book_id,
+        book_name=str(payload.get("book_name") or "Book"),
     )
 
 
 def list_backups(backup_dir: Path = DEFAULT_BACKUP_DIR) -> list[BackupRecord]:
-    if not backup_dir.exists():
+    backup_root = Path(backup_dir)
+    if not backup_root.exists():
         return []
+    book_id = active_book_id()
+    book_dir = _book_backup_dir(backup_root, book_id)
     records = []
-    for path in backup_dir.glob("probooks-*.db"):
+    for path in book_dir.glob("probooks-*.db"):
         try:
-            records.append(load_record(path))
+            manifest = path.with_suffix(".json")
+            records.append(_cached_record(
+                str(path), path.stat().st_mtime_ns,
+                manifest.stat().st_mtime_ns, book_id,
+            ))
         except Exception:
             continue
     return sorted(records, key=lambda r: r.created_at, reverse=True)
 
 
 def restore_backup(database_path: Path, backup_dir: Path = DEFAULT_BACKUP_DIR) -> Path:
-    record = load_record(Path(database_path))
+    book_id = active_book_id()
+    record = load_record(Path(database_path), expected_book_id=book_id)
     # A verified pre-restore snapshot gives recovery even if replacement is
     # interrupted after this point.
     pre_restore = create_backup(
@@ -203,15 +288,29 @@ def prune_backups(
 def backup_health(
     backup_dir: Path = DEFAULT_BACKUP_DIR, *, max_age_hours: int = 24
 ) -> dict:
-    backup_dir = Path(backup_dir)
-    candidates = sorted(backup_dir.glob("probooks-*.db"), reverse=True) if backup_dir.exists() else []
+    backup_root = Path(backup_dir)
+    book_id = active_book_id()
+    book_dir = _book_backup_dir(backup_root, book_id)
+    candidates = sorted(book_dir.glob("probooks-*.db"), reverse=True)
     if not candidates:
-        return {"healthy": False, "reason": "No verified backup exists.", "latest": None}
+        return {
+            "healthy": False,
+            "reason": "No verified backup exists for this book.",
+            "latest": None,
+        }
     path = candidates[0]
     try:
-        latest = _cached_record(str(path), path.stat().st_mtime_ns)
+        manifest = path.with_suffix(".json")
+        latest = _cached_record(
+            str(path), path.stat().st_mtime_ns,
+            manifest.stat().st_mtime_ns, book_id,
+        )
     except Exception as exc:
-        return {"healthy": False, "reason": f"Latest backup is invalid: {exc}", "latest": None}
+        return {
+            "healthy": False,
+            "reason": f"Latest backup for this book is invalid: {exc}",
+            "latest": None,
+        }
     age = datetime.now(timezone.utc) - latest.created_at
     healthy = age.total_seconds() <= max_age_hours * 3600
     return {
@@ -222,7 +321,25 @@ def backup_health(
     }
 
 
-@lru_cache(maxsize=8)
-def _cached_record(path: str, _mtime_ns: int) -> BackupRecord:
+@lru_cache(maxsize=32)
+def _cached_record(
+    path: str, _mtime_ns: int, _manifest_mtime_ns: int, expected_book_id: str
+) -> BackupRecord:
     """Verify an unchanged backup once rather than hashing it on every rerun."""
-    return load_record(Path(path))
+    return load_record(Path(path), expected_book_id=expected_book_id)
+
+
+def legacy_backup_count(backup_dir: Path = DEFAULT_BACKUP_DIR) -> int:
+    """Older root-level backups that cannot safely be assigned to a book."""
+    backup_root = Path(backup_dir)
+    if not backup_root.exists():
+        return 0
+    count = 0
+    for path in backup_root.glob("probooks-*.db"):
+        try:
+            payload = json.loads(path.with_suffix(".json").read_text())
+        except Exception:
+            continue
+        if not payload.get("book_id"):
+            count += 1
+    return count

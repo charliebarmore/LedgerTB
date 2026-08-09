@@ -9,7 +9,13 @@ from database import init_database
 from database import connection as dbconn
 from models.audit_log import AuditLog
 from models.client import Client
-from services.backups import backup_health, create_backup, list_backups, restore_backup
+from services.backups import (
+    backup_health,
+    create_backup,
+    legacy_backup_count,
+    list_backups,
+    restore_backup,
+)
 from services.production_readiness import get_safety_checks, overall_status
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
@@ -94,6 +100,7 @@ for check in _checks:
 
 st.divider()
 st.subheader("Verified backups")
+st.caption("Only recovery points belonging to this encrypted book are shown.")
 if dbconn.ENCRYPTION_AVAILABLE:
     st.caption("Backups are written encrypted under the same passphrase as the database.")
 else:
@@ -106,13 +113,21 @@ if health["latest"]:
 else:
     st.warning(health["reason"])
 
+_legacy_backups = legacy_backup_count()
+if _legacy_backups:
+    st.info(
+        f"{_legacy_backups} older backup(s) are not shown because they predate "
+        "book-specific recovery protection. ProBooks will not guess which book "
+        "they belong to."
+    )
+
 if st.button("Create verified backup", type="primary"):
     try:
         record = create_backup()
         audit_safety_event("BACKUP", "database_backup", {
             "reason": "manual", "backup_file": record.database_path.name,
             "sha256": record.sha256, "size_bytes": record.size_bytes,
-            "integrity_verified": record.integrity_ok,
+            "integrity_verified": record.integrity_ok, "book_id": record.book_id,
         })
         st.success(f"Backup created: {record.database_path.name}")
         st.rerun()
@@ -133,13 +148,16 @@ if backups:
     )
     if st.button("Restore selected backup", disabled=confirm != "RESTORE"):
         try:
+            selected_record = next(
+                record for record in backups if record.database_path == selected
+            )
             safety_copy = restore_backup(selected)
             # The restored database may contain a different client set, so the
             # helper resolves the audit client again after replacement.
             audit_safety_event("RESTORE", "database_restore", {
                 "restored_from": selected.name,
                 "pre_restore_backup": safety_copy.name,
-                "integrity_verified": True,
+                "integrity_verified": True, "book_id": selected_record.book_id,
             })
             st.success(f"Restore complete. Pre-restore safety copy: {safety_copy.name}")
             st.rerun()

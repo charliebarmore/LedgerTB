@@ -16,6 +16,7 @@ def test_create_tables_builds_full_schema(db):
         "journal_entry_lines", "schema_migrations", "vendors",
         "bank_reconciliations", "bank_reconciliation_items",
         "import_profiles", "review_policies", "firm_branding",
+        "book_identity",
     }
     assert expected.issubset(tables)
 
@@ -29,7 +30,8 @@ def test_create_tables_records_migrations(db):
         "004_bank_reconciliation", "005_audit_events", "006_import_idempotency",
         "007_import_profiles", "008_multiple_import_profiles",
         "009_activity_actor", "010_review_policies",
-        "011_firm_branding", "012_draft_entries", "013_import_dismissal", "014_assistant_review", "015_review_action"]
+        "011_firm_branding", "012_draft_entries", "013_import_dismissal",
+        "014_assistant_review", "015_review_action", "016_book_identity"]
     conn.close()
 
 
@@ -42,8 +44,26 @@ def test_create_tables_is_idempotent(db):
 
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM schema_migrations")
-    assert cur.fetchone()[0] == 15
+    assert cur.fetchone()[0] == 16
     conn.close()
+
+
+def test_book_identity_is_stable_across_schema_initialization(db):
+    conn = get_connection()
+    before = conn.execute(
+        "SELECT book_id FROM book_identity WHERE id = 1"
+    ).fetchone()[0]
+    conn.close()
+
+    conn = get_connection()
+    create_tables(conn)
+    after = conn.execute(
+        "SELECT book_id FROM book_identity WHERE id = 1"
+    ).fetchone()[0]
+    conn.close()
+
+    assert before == after
+    assert len(before) == 32
 
 
 def test_actor_columns_exist(db):
