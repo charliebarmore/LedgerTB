@@ -34,7 +34,7 @@ def test_existing_book_key_derivation_never_changes():
     # The digest fixes the legacy salt and iteration count as a release
     # invariant. Changing branding must never make encrypted books unreadable.
     assert derive_key("LedgerTB rename regression") == (
-        "5116e5ab747aab25b33ae22249b0585a6c585072e8eaefc1ba6b2aa67caa8a84"
+        "5116e5ab747aab25b33ae22249b0585a6c585072e8eaefc1ba6b2aa67caa8a84"  # pragma: allowlist secret
     )
 
 
