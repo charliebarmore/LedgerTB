@@ -335,3 +335,40 @@ def test_verification_window_never_drops_the_authorizer(client_id, monkeypatch):
 
     assert seen["level"] == "read"
     assert seen["update_allowed"] is False
+
+
+def test_schema_altering_sql_is_denied_at_every_assistant_level(client_id, monkeypatch):
+    """Documented but previously untested: the authorizer's default-deny must
+    cover the statements that would dismantle it. A future edit to the
+    allowlist would otherwise break this silently."""
+    hostile = [
+        "ATTACH DATABASE '/tmp/steal.db' AS steal",
+        "PRAGMA journal_mode = WAL",
+        "CREATE TABLE sneaky (x)",
+        "DROP TABLE clients",
+        "ALTER TABLE clients ADD COLUMN sneaky TEXT",
+        "CREATE TRIGGER t AFTER INSERT ON clients BEGIN DELETE FROM clients; END",
+        "CREATE VIEW v AS SELECT * FROM clients",
+        "UPDATE clients SET name = 'x'",
+        "DELETE FROM clients",
+    ]
+    for level in ("read", "propose", "post"):
+        monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", level)
+        for sql in hostile:
+            with pytest.raises(Exception):
+                with get_cursor(commit=True) as cursor:
+                    cursor.execute(sql)
+
+
+def test_assistant_cannot_sign_off_its_own_work(client_id, monkeypatch):
+    """The human sign-off is the whole point of the Assistant Review page.
+    Every existing review test runs as the human process, so nothing pinned
+    that the ENGINE refuses this to an assistant."""
+    for level in ("read", "propose", "post"):
+        monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", level)
+        with pytest.raises(Exception):
+            with get_cursor(commit=True) as cursor:
+                cursor.execute(
+                    "INSERT INTO assistant_review_marks "
+                    "(client_id, reviewed_through_audit_id, reviewed_by) "
+                    "VALUES (?, ?, ?)", (client_id, 1, "assistant"))

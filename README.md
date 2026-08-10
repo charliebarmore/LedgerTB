@@ -37,9 +37,10 @@ part of LedgerTB loading — the app will refuse to start and tell you so. To us
 the zip, right-click it → **Properties** → tick **Unblock** → **OK**, *then*
 extract. The installer has none of this friction and is the supported path.
 
-**macOS** — no packaged Mac download yet; the release pipeline currently builds
-Windows only. Build it locally with `./scripts/build_release.sh` (see
-`DESKTOP.md`), or run from source as below.
+**macOS** — download `LedgerTB-mac.zip`, unzip, and drag LedgerTB to
+Applications. It is signed and notarized by Apple, so it opens with no
+warnings. (Apple Silicon; the Mac build is produced and notarized locally
+rather than by CI — see `DESKTOP.md`.)
 
 The app is self-contained — no Python and no dependencies to install. Your books
 live in an encrypted database under your user profile, never inside the app

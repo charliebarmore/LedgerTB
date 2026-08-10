@@ -18,6 +18,7 @@ from services.book_review import (
 from utils.client_selector import render_client_selector
 from utils.fiscal_dates import fiscal_year_bounds
 from utils.unlock import require_unlock
+from utils.untrusted import defang_markdown
 from utils import icons
 
 st.set_page_config(page_title="Book Review", page_icon=icons.REVIEW, layout="wide")
@@ -82,7 +83,7 @@ def render_findings(findings, allow_jump=False):
                               f"{finding.suggested_account_name or ''}**".rstrip())
                 detail = f"{detail}  \n{suggestion}" if detail else suggestion
             if detail:
-                st.markdown(detail)
+                st.markdown(defang_markdown(detail))
         if allow_jump and finding.entry_id:
             with cols[1]:
                 if st.button("Review entry", key=f"review_jump_{finding.skill}_{i}"):
@@ -184,7 +185,7 @@ if book_review_service.is_available():
     if stored_memo:
         memo, memo_label = stored_memo
         st.markdown(f"**Analytical review memo** · {memo_label}")
-        st.markdown(memo)
+        st.markdown(defang_markdown(memo))
         st.download_button(
             "Download memo",
             data=f"# Analytical review — {client.name}\n{memo_label}\n\n{memo}\n",

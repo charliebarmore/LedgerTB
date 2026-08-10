@@ -388,7 +388,9 @@ class BookReviewService:
             )
 
         summary = (
-            f"Figures for {client_name}, {period_label} "
+            # The client's name adds nothing to an analytical review and would
+            # be one more identifying detail leaving the machine.
+            f"Figures for the period {period_label} "
             "(all computed from the ledger, not estimated):\n"
             f"Revenue {analytics['revenue']:,.2f} · Expenses {analytics['expenses']:,.2f} "
             f"· Net income {analytics['net_income']:,.2f} "

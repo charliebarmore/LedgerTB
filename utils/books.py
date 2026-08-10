@@ -10,6 +10,7 @@ LEDGERTB_DB_PATH still overrides everything (dev and tests), with the legacy
 PROBOOKS_DB_PATH name accepted for compatibility.
 """
 import json
+import os
 from pathlib import Path
 
 from config import DATABASE_PATH as DEFAULT_BOOK
@@ -30,8 +31,27 @@ def _load() -> dict:
 
 
 def _save(data: dict) -> None:
+    """Write the registry privately and atomically.
+
+    Book files are named after clients ("Smith & Co.ledgertb"), so this list
+    of paths is a list of who the firm works for — it should not be readable
+    by other accounts on the machine. And a crash midway through a plain write
+    truncates it, losing which book was open and the recent list, so the
+    replace is atomic.
+    """
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(data, indent=2) + "\n")
+    try:
+        os.chmod(SETTINGS_PATH.parent, 0o700)
+    except OSError:
+        pass
+    payload = json.dumps(data, indent=2) + "\n"
+    temp = SETTINGS_PATH.with_name(f".{SETTINGS_PATH.name}.tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, payload.encode("utf-8"))
+    finally:
+        os.close(fd)
+    os.replace(temp, SETTINGS_PATH)
 
 
 def active_book() -> Path:

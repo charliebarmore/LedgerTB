@@ -120,6 +120,27 @@ def get_active_key():
     return _active_key
 
 
+def _tighten_permissions(path) -> None:
+    """Keep a locally managed book private to its owner.
+
+    Deliberately skipped for books on a shared drive. Firm mode exists so
+    colleagues can open the same folder, and 0700 on it locks them out — the
+    opposite of the point. On SMB the chmod usually raises and is swallowed,
+    so the protection was never really in force there anyway; the safety
+    checklist reports shared books honestly instead of pretending otherwise.
+    """
+    from utils.books import is_local_book
+
+    try:
+        if not is_local_book(path):
+            return
+        os.chmod(path.parent, 0o700)
+        if path.exists():
+            os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
 def get_connection():
     """Open a database connection, keyed with the active passphrase when the
     SQLCipher driver is present.
@@ -132,21 +153,26 @@ def get_connection():
     if ENCRYPTION_AVAILABLE and _active_key is None:
         raise DatabaseLocked("Database is locked; unlock with the passphrase first.")
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(DATABASE_PATH.parent, 0o700)
-    except OSError:
-        pass
+    _tighten_permissions(DATABASE_PATH)
     conn = _driver.connect(DATABASE_PATH, check_same_thread=False)
+    # Again now the file exists: on a book's first run there was nothing to
+    # chmod a moment ago.
+    _tighten_permissions(DATABASE_PATH)
     if ENCRYPTION_AVAILABLE:
         # The key must be applied before touching any table, so this is the
         # first statement on the connection.
         conn.execute(f"PRAGMA key = {key_pragma(_active_key)}")
-    try:
-        os.chmod(DATABASE_PATH, 0o600)
-    except OSError:
-        pass
     conn.row_factory = _driver.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Wait rather than fail when another connection holds the write lock. A
+    # close-package export holds one for the length of the render, and the
+    # driver's 5-second default meant the person working in the app got
+    # "database is locked" while their assistant was busy.
+    conn.execute("PRAGMA busy_timeout = 30000")
+    # Query spills must never land beside an encrypted book as cleartext. The
+    # shipped driver is compiled TEMP_STORE=2 already; saying so explicitly
+    # means a rebuilt wheel cannot change it silently.
+    conn.execute("PRAGMA temp_store = MEMORY")
     if READ_ONLY:
         conn.execute("PRAGMA query_only = ON")
     elif ASSISTANT_ACCESS_LEVEL:

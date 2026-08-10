@@ -245,7 +245,11 @@
     <div class="grid">
       <div class="card"><span class="m">SQLCipher</span><h3>Encrypted at rest</h3>
         <p>The book file is encrypted behind a launch passphrase only you hold.
-        Backups are encrypted the same way, and verified before they count.</p></div>
+        Backups are encrypted the same way, and verified before they count.
+        Two things you can turn on — "remember on this computer" and assistant
+        access — store the unlock key in your operating system's credential
+        vault, so anyone who can sign in to that computer account opens the
+        book without the passphrase. Both are off unless you choose them.</p></div>
       <div class="card"><span class="m">127.0.0.1</span><h3>Nothing listens</h3>
         <p>The app binds to your machine only. The one outbound call is Anthropic
         categorization, and only if you enable it. No telemetry.</p></div>

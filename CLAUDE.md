@@ -34,7 +34,10 @@ custody of anyone's data. Built and maintained with Claude Code.
   authorizer on every connection. read: SELECT + audit_log INSERT.
   propose: + INSERT on the inboxes (`draft_entries`,
   `imported_transactions`) and setup tables (`clients`, `accounts` —
-  scaffold, never alter), UPDATE on `draft_entries` only. post: + INSERT
+  scaffold, never alter). **No UPDATE is granted at any level** — an
+  earlier version of this line claimed propose could UPDATE
+  `draft_entries`; it never could, and nothing should "restore" that.
+  post: + INSERT
   on `journal_entries`/`journal_entry_lines` — **append-only; UPDATE and
   DELETE are never grantable at any level.** The level and export folder
   live in the OS vault, outside the assistant's reach. Read-only book

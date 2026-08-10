@@ -30,10 +30,19 @@ from an already-running MCP process.
 - **Opt-in per book.** Off until you click **Enable assistant access** on the
   Data Safety page while that book is unlocked. That stores the *derived
   database key* — never your passphrase — plus the book's encrypted identity
-  in an opaque, path-scoped entry in the operating system's credential vault
-  (macOS Keychain / Windows Credential Manager). A different path or a
-  different book at the same path does not inherit access. **Disable** revokes
-  this book's key, level, identity, and export folder.
+  in an opaque, path-scoped entry in the operating system's credential vault.
+  A different path or a different book at the same path does not inherit
+  access. **Disable** revokes this book's key, level, identity, and export
+  folder.
+
+  The two vaults are not equally protective, and it matters here. macOS
+  Keychain binds each item to the creating application's code signature, so
+  another program reading LedgerTB's entry triggers a system prompt — the
+  signed build is doing real work. **Windows Credential Manager has no
+  per-application control**: any program running under your Windows account
+  can read the stored key without prompting anyone. On Windows, treat
+  enabling assistant access (and "remember on this computer") as trusting
+  every program that runs as you.
 - **The selected ceiling is enforced by the database.** Every connection
   carries a SQLite authorizer. Read permits queries (and append-only export
   audit records); propose additionally permits inserts into the draft and
@@ -97,9 +106,23 @@ from an already-running MCP process.
 **export folder you choose for this book on Data Safety** (stored in the
 credential vault, outside the assistant's reach; blank = file export off).
 Another book has no export permission until you choose its folder. The
-`LEDGERTB_MCP_EXPORT_ROOTS` environment variable remains as an override
-for config-managed setups. See `LEDGERPDF-PAIRING.md` for the full
-books-to-binder workflow with both MCP servers in one session.
+`LEDGERTB_MCP_EXPORT_ROOTS` environment variable is a fallback for
+config-managed setups where nothing was chosen in the app; it can no longer
+override your choice. It used to, and that was wrong: an MCP server's
+environment comes from the client's own config file, which an assistant with
+filesystem tools can edit — so the boundary you set was one the assistant
+could move.
+
+One honest caveat about that boundary. It holds against the assistant's
+LedgerTB tools. It does not turn an assistant that *also* has shell and file
+access to your machine (Claude Code does; Claude Desktop does not) into a
+sandboxed one — such an assistant can read and copy files generally, and
+LedgerTB cannot prevent that from inside. Every export is audit-logged either
+way. If that distinction matters for a client, use Claude Desktop for books
+work.
+
+See `LEDGERPDF-PAIRING.md` for the full books-to-binder workflow with both
+MCP servers in one session.
 
 ## What to expect
 
