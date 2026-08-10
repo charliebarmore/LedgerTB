@@ -7,12 +7,14 @@ a calc engine.
 """
 from datetime import date
 from io import BytesIO
+from pathlib import Path
 
 import openpyxl
 import pytest
 
 from database import connection as dbconn
 from models.audit_log import AuditLog
+from models.client import Client
 from services import mcp_tools
 from tests.conftest import post_entry
 
@@ -81,10 +83,13 @@ def test_export_writes_both_files_at_read_level(client_id, accounts, tmp_path,
     assert counts["total"] > 0
 
 
-def test_vault_export_root_works_and_env_overrides(client_id, accounts, tmp_path,
-                                                   monkeypatch):
-    """Members choose the export folder in-app (vault); the env var stays as a
-    power-user override that wins when both exist."""
+def test_the_folder_chosen_in_the_app_beats_the_environment(client_id, accounts,
+                                                            tmp_path,
+                                                            monkeypatch):
+    """The user's in-app consent must win. An MCP server's environment comes
+    from the client's config file, which a shell-capable assistant can edit —
+    if the env var overrode the vault, the assistant could rewrite the very
+    boundary the user set for it."""
     from utils.secure_store import set_secret
     from utils.assistant_access import credential_names
 
@@ -100,12 +105,70 @@ def test_vault_export_root_works_and_env_overrides(client_id, accounts, tmp_path
         client_id, "2026-01-01", "2026-03-31", str(vault_root / "julyco"))
     assert result["pdf"].startswith(str(vault_root))
 
+    # An attacker-set environment root does not widen the boundary...
     env_root = tmp_path / "env-root"
     env_root.mkdir()
     monkeypatch.setenv("LEDGERTB_MCP_EXPORT_ROOTS", str(env_root))
     with pytest.raises(ValueError, match="outside"):
         mcp_tools.export_close_package(
-            client_id, "2026-01-01", "2026-03-31", str(vault_root / "again"))
+            client_id, "2026-01-01", "2026-03-31", str(env_root / "escaped"))
+    # ...and the chosen folder keeps working while it is set.
+    again = mcp_tools.export_close_package(
+        client_id, "2026-01-01", "2026-03-31", str(vault_root / "again"))
+    assert again["pdf"].startswith(str(vault_root))
+
+
+def test_export_refuses_to_write_through_a_planted_symlink(client_id, accounts,
+                                                           tmp_path, monkeypatch):
+    """The filename is predictable from client and period, so on a shared
+    engagement folder a colleague could pre-place a symlink to catch the
+    close package. Containment checks the directory; this checks the file."""
+    from utils.secure_store import set_secret
+    from utils.assistant_access import credential_names
+
+    _seed(client_id, accounts)
+    monkeypatch.delenv("LEDGERTB_MCP_EXPORT_ROOTS", raising=False)
+    monkeypatch.delenv("PROBOOKS_MCP_EXPORT_ROOTS", raising=False)
+
+    root = tmp_path / "engagement"
+    root.mkdir()
+    names = credential_names(dbconn.DATABASE_PATH)
+    set_secret(names.export_roots, str(root))
+
+    client = Client.get_by_id(client_id)
+    stem = f"{client.name} close package 2026-01-01 to 2026-03-31"
+    elsewhere = tmp_path / "colleague-copy.pdf"
+    (root / f"{stem}.pdf").symlink_to(elsewhere)
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        mcp_tools.export_close_package(
+            client_id, "2026-01-01", "2026-03-31", str(root))
+    assert not elsewhere.exists(), "export was written through the symlink"
+
+
+def test_exports_are_not_world_readable(client_id, accounts, tmp_path,
+                                        monkeypatch):
+    """The book is 0600; the unencrypted close package of that same book
+    must not be looser."""
+    import stat
+
+    from utils.secure_store import set_secret
+    from utils.assistant_access import credential_names
+
+    _seed(client_id, accounts)
+    monkeypatch.delenv("LEDGERTB_MCP_EXPORT_ROOTS", raising=False)
+    monkeypatch.delenv("PROBOOKS_MCP_EXPORT_ROOTS", raising=False)
+
+    root = tmp_path / "exports"
+    root.mkdir()
+    names = credential_names(dbconn.DATABASE_PATH)
+    set_secret(names.export_roots, str(root))
+
+    result = mcp_tools.export_close_package(
+        client_id, "2026-01-01", "2026-03-31", str(root / "q1"))
+    for path in (result["pdf"], result["xlsx"]):
+        mode = stat.S_IMODE(Path(path).stat().st_mode)
+        assert mode == 0o600, f"{path} is {oct(mode)}"
 
 
 def test_probooks_export_root_env_alias_remains_supported(client_id, accounts,

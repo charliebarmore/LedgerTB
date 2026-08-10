@@ -14,7 +14,15 @@ _DANGEROUS_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 def sanitize_cell(value):
     """Prefix a leading formula trigger with a single quote; pass other values
     (numbers, safe strings, None) through unchanged."""
-    if isinstance(value, str) and value and value[0] in _DANGEROUS_PREFIXES:
+    if not isinstance(value, str) or not value:
+        return value
+    # Two ways in. The first character being a trigger is the obvious one. The
+    # second is padding: Excel ignores leading whitespace when deciding whether
+    # a cell is a formula, so " =1+1" is the same threat as "=1+1" but slips a
+    # check that only inspects value[0].
+    if value[0] in _DANGEROUS_PREFIXES:
+        return "'" + value
+    if value.lstrip(" \t\r\n\v\f\xa0")[:1] in ("=", "+", "-", "@"):
         return "'" + value
     return value
 

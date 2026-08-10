@@ -9,7 +9,9 @@ corresponding append-only write surface. Updates and deletes are always denied.
 Amounts are dollars (floats) — presentation values for an assistant, not
 ledger arithmetic (the ledger itself stores integer cents).
 """
+import os
 from datetime import date
+from pathlib import Path
 from typing import Optional
 
 from constants import EntryType
@@ -18,6 +20,30 @@ from models.client import Client
 from models.journal_entry import JournalEntry
 from models.reports import ReportGenerator
 from services.book_review import run_integrity_sweep
+
+
+def _write_private(path: Path, payload: bytes) -> None:
+    """Write an export without following a symlink and without exposing it.
+
+    Containment checks the DIRECTORY, but the filename is predictable from the
+    client name and period, so on a shared engagement folder a colleague could
+    pre-place a symlink under that exact name and catch the export. O_NOFOLLOW
+    refuses that; O_EXCL means an existing file is replaced deliberately rather
+    than written through. 0600 because this is the whole close package —
+    trial balance, every journal line — in the clear.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    if path.is_symlink():
+        raise ValueError(
+            f"{path.name} already exists as a symbolic link; refusing to write "
+            "the export through it. Remove it and try again."
+        )
+    fd = os.open(path, flags, 0o600)
+    try:
+        os.write(fd, payload)
+    finally:
+        os.close(fd)
+    os.chmod(path, 0o600)
 
 
 def _parse_date(value: Optional[str], name: str) -> Optional[date]:
@@ -508,10 +534,16 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
     from utils import secure_store
     from utils.assistant_access import credential_names
 
+    # The folder chosen in the app WINS. It used to be possible to override it
+    # from the environment, but an MCP server's environment comes from the
+    # client's own config file — which a shell-capable assistant (Claude Code
+    # has Write and Bash) can edit. That turned a user's consent decision into
+    # something the assistant could rewrite for itself, so the override is gone
+    # and the env var is only a fallback when nothing was chosen in the app.
     names = credential_names(dbconn.DATABASE_PATH)
-    roots_raw = (os.environ.get("LEDGERTB_MCP_EXPORT_ROOTS", "")
-                 or os.environ.get("PROBOOKS_MCP_EXPORT_ROOTS", "")
-                 or secure_store.get_secret(names.export_roots) or "")
+    roots_raw = (secure_store.get_secret(names.export_roots)
+                 or os.environ.get("LEDGERTB_MCP_EXPORT_ROOTS", "")
+                 or os.environ.get("PROBOOKS_MCP_EXPORT_ROOTS", "") or "")
     roots = [Path(p).expanduser().resolve()
              for p in roots_raw.split(os.pathsep) if p.strip()]
     if not roots:
@@ -526,7 +558,7 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
             f"{out_dir} is outside LEDGERTB_MCP_EXPORT_ROOTS; exports are "
             "only written inside the folders the user approved."
         )
-    target.mkdir(parents=True, exist_ok=True)
+    target.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     safe_client = re.sub(r"[^A-Za-z0-9 ._-]", "_", client.name).strip() or "client"
     stem = f"{safe_client} close package {start.isoformat()} to {end.isoformat()}"
@@ -535,15 +567,17 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
     with consistent_export_window():
         tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, start, end)
         snapshot = load_close_package_snapshot(client_id, start, end)
-        pdf_path.write_bytes(
+        _write_private(
+            pdf_path,
             build_close_package_pdf(
                 client_id, client.name, start, end, tb_rows, snapshot=snapshot
-            ).read()
+            ).read(),
         )
-        xlsx_path.write_bytes(
+        _write_private(
+            xlsx_path,
             build_close_package(
                 client_id, client.name, start, end, tb_rows, snapshot=snapshot
-            ).read()
+            ).read(),
         )
 
     AuditLog.log_event(client_id, "EXPORT", "close_package_mcp", {

@@ -14,6 +14,84 @@ SIGN_CONVENTIONS = {
 }
 
 
+# A real bank statement is kilobytes. These bounds exist because the parse
+# runs the moment a file is chosen, before any confirmation: a one-line file
+# of a million empty columns costs pandas minutes and hundreds of megabytes,
+# which in a single-process desktop app means the window simply stops
+# responding. document_import.py has had bounds like these all along.
+MAX_CSV_BYTES = 25 * 1024 * 1024
+MAX_CSV_COLUMNS = 512
+
+
+class CsvTooLarge(ValueError):
+    """An upload outside the bounds a bank statement could plausibly have."""
+
+
+class AmbiguousAmount(ValueError):
+    """An amount whose decimal separator cannot be determined."""
+
+
+def _reject_absurd_shape(file_content: str, header_row: int = 0) -> None:
+    """Check the header line BEFORE handing the file to pandas.
+
+    Checking the parsed DataFrame is too late: the cost being guarded against
+    is the parse itself, which is quadratic in column count and takes minutes
+    on a file with a million of them.
+    """
+    lines = file_content.split("\n", header_row + 1)
+    if len(lines) <= header_row:
+        return
+    columns = lines[header_row].count(",") + 1
+    if columns > MAX_CSV_COLUMNS:
+        raise CsvTooLarge(
+            f"That file has about {columns:,} columns. A bank statement has a "
+            "handful — this looks like the wrong file, or one saved in an "
+            "unexpected format."
+        )
+
+
+def parse_amount(raw) -> float:
+    """Parse one amount cell, refusing anything genuinely ambiguous.
+
+    Stripping commas unconditionally is wrong outside US formatting: a
+    European statement writing 1,23 for one euro twenty-three became 123.00,
+    and 1.234,56 became 1.23. Both legs of the entry took the same wrong
+    figure, so the entry balanced, the trial balance tied, and every integrity
+    check passed — a hundredfold error with nothing anywhere to catch it.
+    Refusing the row surfaces the problem; guessing buries it.
+    """
+    text = str(raw).strip().replace("$", "").replace(" ", "").replace(" ", "")
+    if not text:
+        raise ValueError("empty amount")
+
+    negative = False
+    if text.startswith("(") and text.endswith(")"):
+        negative, text = True, text[1:-1]
+    elif text.endswith("-"):
+        negative, text = True, text[:-1]
+    elif text.startswith("-"):
+        negative, text = True, text[1:]
+    elif text.startswith("+"):
+        text = text[1:]
+
+    has_comma, has_dot = "," in text, "." in text
+    if has_comma and has_dot:
+        # Whichever separator comes last is the decimal point.
+        decimal_sep = "," if text.rfind(",") > text.rfind(".") else "."
+        thousands_sep = "." if decimal_sep == "," else ","
+        text = text.replace(thousands_sep, "").replace(decimal_sep, ".")
+    elif has_comma:
+        _, _, after = text.rpartition(",")
+        # A trailing group of exactly three digits is a thousands separator
+        # ("1,234" is a thousand-odd dollars on every US statement). One or two
+        # digits cannot be — "1,23" is a European decimal, and reading it as
+        # US formatting was the hundredfold error.
+        text = text.replace(",", "") if len(after) == 3 else text.replace(",", ".")
+
+    value = float(text)
+    return -abs(value) if negative else value
+
+
 def apply_sign_convention(amount: float, sign_convention: str) -> float:
     """Normalize a statement amount so negative means money out.
 
@@ -92,15 +170,28 @@ class CSVImporter:
 
     @staticmethod
     def decode_upload(content: bytes) -> str:
-        """Decode common bank-export encodings into text."""
+        """Decode common bank-export encodings into text.
+
+        Never raises on odd bytes: a statement that will not decode should say
+        so in the page, not surface a UnicodeDecodeError traceback.
+        """
+        if len(content) > MAX_CSV_BYTES:
+            raise CsvTooLarge(
+                f"That file is {len(content) / 1_048_576:.0f} MB. Statement "
+                f"exports are normally well under {MAX_CSV_BYTES // 1_048_576} "
+                "MB — check you picked the right file."
+            )
         if content.startswith((b"\xff\xfe", b"\xfe\xff")):
-            return content.decode("utf-16")
+            try:
+                return content.decode("utf-16")
+            except UnicodeDecodeError:
+                pass
         try:
             return content.decode("utf-8-sig")
         except UnicodeDecodeError:
             # Many older financial exports use Windows-1252 for smart quotes
             # and accented merchant names.
-            return content.decode("cp1252")
+            return content.decode("cp1252", errors="replace")
 
     @staticmethod
     def preview_csv(file_content: str, num_rows: Optional[int] = 10, header_row: int = 0) -> Tuple[pd.DataFrame, List[str]]:
@@ -118,6 +209,7 @@ class CSVImporter:
         Returns:
             Tuple of (DataFrame with sample rows, list of column names)
         """
+        _reject_absurd_shape(file_content, header_row)
         df = pd.read_csv(StringIO(file_content), header=header_row)
         return (df if num_rows is None else df.head(num_rows)), list(df.columns)
 
@@ -192,6 +284,7 @@ class CSVImporter:
         Returns:
             List of dicts with keys: date, description, amount, batch_id, and optionally source_account
         """
+        _reject_absurd_shape(file_content, header_row)
         df = pd.read_csv(StringIO(file_content), header=header_row)
 
         transactions = []
@@ -210,15 +303,7 @@ class CSVImporter:
             if amount_column:
                 # Single amount column
                 try:
-                    amount_str = str(row[amount_column]).replace(',', '').replace('$', '').strip()
-                    # Handle parentheses for negative numbers: (100.00) -> -100.00
-                    if amount_str.startswith('(') and amount_str.endswith(')'):
-                        amount = -abs(float(amount_str[1:-1]))
-                    # Handle trailing minus sign: 100.00- -> -100.00
-                    elif amount_str.endswith('-'):
-                        amount = -abs(float(amount_str[:-1]))
-                    else:
-                        amount = float(amount_str)
+                    amount = parse_amount(row[amount_column])
                 except (ValueError, TypeError):
                     continue
             else:
@@ -228,13 +313,13 @@ class CSVImporter:
 
                 if debit_column and pd.notna(row.get(debit_column)):
                     try:
-                        debit = abs(float(str(row[debit_column]).replace(',', '').replace('$', '').replace('(', '').replace(')', '')))
+                        debit = abs(parse_amount(row[debit_column]))
                     except (ValueError, TypeError):
                         pass
 
                 if credit_column and pd.notna(row.get(credit_column)):
                     try:
-                        credit = abs(float(str(row[credit_column]).replace(',', '').replace('$', '').replace('(', '').replace(')', '')))
+                        credit = abs(parse_amount(row[credit_column]))
                     except (ValueError, TypeError):
                         pass
 

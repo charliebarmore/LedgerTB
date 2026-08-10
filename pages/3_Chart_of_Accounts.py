@@ -216,7 +216,11 @@ with tab3:
     uploaded = st.file_uploader("Chart of accounts CSV", type=["csv"], key="coa_upload")
     if uploaded is not None:
         content = uploaded.getvalue().decode("utf-8-sig", "ignore")
-        parsed, errors = parse_coa_csv(content)
+        try:
+            parsed, errors = parse_coa_csv(content)
+        except Exception as exc:
+            st.error(f"That chart of accounts could not be read: {exc}")
+            st.stop()
 
         for e in errors[:15]:
             st.error(e)

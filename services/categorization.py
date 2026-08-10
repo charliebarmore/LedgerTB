@@ -3,6 +3,7 @@ from anthropic import Anthropic
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 from constants import DEFAULT_MISC_EXPENSE_ACCOUNT, DEFAULT_OTHER_INCOME_ACCOUNT
 from models.account import Account
+from utils.untrusted import flatten_untrusted, untrusted_block
 
 
 # Forces the model to return structured, schema-valid output instead of free
@@ -140,9 +141,12 @@ class CategorizationService:
             if a.is_active
         ])
 
-        # Build transaction list for prompt
+        # Build transaction list for prompt. Descriptions are written by
+        # whoever produced the statement, so they are flattened to one line
+        # and fenced -- see utils/untrusted.
         transaction_text = "\n".join([
-            f"{i+1}. [{t['date']}] {t['description']} | ${t['amount']:,.2f}"
+            f"{i+1}. [{t['date']}] {flatten_untrusted(t['description'])} "
+            f"| ${t['amount']:,.2f}"
             for i, t in enumerate(transactions)
         ])
 
@@ -152,7 +156,7 @@ Available accounts:
 {account_list}
 
 Transactions to categorize:
-{transaction_text}
+{untrusted_block(transaction_text, "transactions")}
 
 For each transaction, determine the most appropriate expense or revenue account.
 - Negative amounts are expenses/withdrawals - match to an Expense account

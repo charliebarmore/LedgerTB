@@ -300,7 +300,11 @@ if selected_tab == "Upload CSV":
         # Handle new file upload
         if uploaded_file:
             uploaded_bytes = uploaded_file.getvalue()
-            raw_content = CSVImporter.decode_upload(uploaded_bytes)
+            try:
+                raw_content = CSVImporter.decode_upload(uploaded_bytes)
+            except Exception as exc:
+                st.error(f"That file could not be read: {exc}")
+                st.stop()
             source_id = hash_source(uploaded_bytes)
 
             # Banks commonly reuse generic filenames (for example,
@@ -1883,7 +1887,19 @@ elif selected_tab == "Review & Categorize":
                 st.text(str(t['date']))
 
             with col2:
-                st.text(t['description'][:35])
+                # Show the whole description, not the first 35 characters.
+                # Truncating here meant a padded description could hide text
+                # from the reviewer that the categorization model still read —
+                # the reviewer must see exactly what the suggestion was based
+                # on. Long ones collapse behind an expander rather than
+                # vanishing.
+                _desc = str(t['description'])
+                if len(_desc) <= 35:
+                    st.text(_desc)
+                else:
+                    st.text(_desc[:35] + "…")
+                    with st.expander("Full description"):
+                        st.text(_desc)
                 # Show source account if from multi-account import
                 if t.get('source_account'):
                     source_acct = Account.get_by_id(t.get('bank_account_id'), client_id=client_id)

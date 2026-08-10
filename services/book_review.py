@@ -25,6 +25,7 @@ from models.reports import ReportGenerator
 from models.transaction import ImportedTransaction
 from money import to_dollars
 from services.import_verification import check_row_continuity
+from utils.untrusted import flatten_untrusted, untrusted_block
 
 
 @dataclass
@@ -296,8 +297,12 @@ class BookReviewService:
         account_lines = "\n".join(
             f"{a.account_number} - {a.name} ({a.type})" for a in accounts
         )
+        # Descriptions come from the client's bank file. A review that only
+        # reports what it flags is especially worth attacking: text claiming a
+        # row was "already approved by the controller" would buy silence on the
+        # one transaction that deserved a look.
         txn_lines = "\n".join(
-            f"{i}. {t['transaction_date']} | {t['description']} | "
+            f"{i}. {t['transaction_date']} | {flatten_untrusted(t['description'])} | "
             f"{to_dollars(t['amount']):,.2f} | from {t['bank_number']} {t['bank_name']} "
             f"| coded to {t['category_number']} - {t['category_name']}"
             for i, t in enumerate(transactions, start=1)
@@ -315,7 +320,8 @@ class BookReviewService:
             "codings that are defensible.\n"
             f"{policy_block}\n"
             f"CHART OF ACCOUNTS:\n{account_lines}\n\n"
-            f"TRANSACTIONS (amounts negative = money out of the bank account):\n{txn_lines}"
+            "TRANSACTIONS (amounts negative = money out of the bank account):\n"
+            + untrusted_block(txn_lines, "transactions")
         )
 
         try:
@@ -374,7 +380,12 @@ class BookReviewService:
         self.last_error = None
 
         def money_lines(rows):
-            return "\n".join(f"  {r['label']}: {r['value']:,.2f}" for r in rows)
+            # Labels are "<number> - <name>", and account names arrive from
+            # client-supplied QuickBooks chart exports.
+            return "\n".join(
+                f"  {flatten_untrusted(r['label'], 120)}: {r['value']:,.2f}"
+                for r in rows
+            )
 
         summary = (
             f"Figures for {client_name}, {period_label} "

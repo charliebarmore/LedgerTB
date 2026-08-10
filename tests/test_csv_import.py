@@ -1,3 +1,5 @@
+import pytest
+
 from services.csv_import import CSVImporter
 
 
@@ -131,3 +133,51 @@ def test_net_equals_the_sum_of_normalized_amounts():
     summary = summarize_import_amounts(CARD_ROWS, "credit_card", "Liability")
     expected = round(sum(apply_sign_convention(a, "credit_card") for a in CARD_ROWS), 2)
     assert summary["net"] == expected
+
+
+def test_european_amounts_no_longer_post_at_a_hundred_times_their_value():
+    """The worst find in the pre-launch audit: "1,23" (one euro twenty-three)
+    posted as $123.00. Both legs took the same wrong figure, so the entry
+    balanced, the trial balance tied, and nothing anywhere flagged it."""
+    from services.csv_import import parse_amount
+
+    assert parse_amount("1,23") == 1.23
+    assert parse_amount("1.234,56") == 1234.56
+    assert parse_amount("0,05") == 0.05
+    # US formatting must keep working exactly as before.
+    assert parse_amount("1,234") == 1234.0
+    assert parse_amount("1,234.56") == 1234.56
+    assert parse_amount("1,234,567.89") == 1234567.89
+    # Signs, currency marks and padding survive the rewrite.
+    assert parse_amount("(100.00)") == -100.0
+    assert parse_amount("100.00-") == -100.0
+    assert parse_amount("$1,234.56") == 1234.56
+    assert parse_amount("  12.50 ") == 12.5
+
+
+def test_absurd_csv_shapes_are_refused_before_pandas_sees_them():
+    """A one-line file of a million columns used to wedge the whole desktop
+    app for minutes — and the parse runs on file selection, before any
+    confirmation. The check must beat the parse, not follow it."""
+    import time
+
+    from services.csv_import import CSVImporter, CsvTooLarge
+
+    wide = ",".join(f"c{i}" for i in range(200_000)) + "\n"
+    started = time.monotonic()
+    with pytest.raises(CsvTooLarge):
+        CSVImporter.preview_csv(wide)
+    assert time.monotonic() - started < 5, "the guard ran after the parse"
+
+    with pytest.raises(CsvTooLarge):
+        CSVImporter.decode_upload(b"x" * (26 * 1024 * 1024))
+
+
+def test_undecodable_statement_bytes_do_not_raise():
+    """A stray cp1252 byte used to surface a raw UnicodeDecodeError."""
+    from services.csv_import import CSVImporter
+
+    text = CSVImporter.decode_upload(b"Date,Description,Amount\n01/01/2026,AC\x81ME,-1.00\n")
+    assert "AC" in text
+    # A truncated UTF-16 BOM file must fall back rather than explode.
+    assert CSVImporter.decode_upload(b"\xff\xfeAB\x41") is not None

@@ -67,3 +67,13 @@ def test_find_match_still_matches_real_pattern(client_id, accounts):
     match = PatternLearner.find_match(client_id, "STARBUCKS STORE 456")
     assert match is not None
     assert match["account_id"] == accounts["expense"]
+
+
+def test_leading_whitespace_does_not_smuggle_a_formula_past_the_filter():
+    """Excel ignores padding when deciding whether a cell is a formula, so a
+    check on value[0] alone let " =1+1" through into CSV exports."""
+    for bad in (" =1+1", "  @cmd|'/c calc'!A1", "\xa0-2+3", "\t\t=HYPERLINK(\"x\")"):
+        assert sanitize_cell(bad).startswith("'"), repr(bad)
+    # Ordinary values are still untouched.
+    for good in ("ACME LLC", "Payment received", "", None, 42, 3.14):
+        assert sanitize_cell(good) == good
