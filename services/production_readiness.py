@@ -75,7 +75,7 @@ def _disk_encryption_check() -> SafetyCheck:
     if sys.platform.startswith("win"):
         return SafetyCheck(
             "disk_encryption", "This computer's disk is encrypted", False,
-            "ProBooks can't check BitLocker without administrator rights. "
+            "LedgerTB can't check BitLocker without administrator rights. "
             "Check it yourself: Settings → Privacy & security → Device "
             "encryption (or search Windows for \"BitLocker\"). The book file "
             "is encrypted either way, but reports and exports you save from "
@@ -84,7 +84,7 @@ def _disk_encryption_check() -> SafetyCheck:
         )
     return SafetyCheck(
         "disk_encryption", "This computer's disk is encrypted", False,
-        "ProBooks can't check full-disk encryption on this system. If the "
+        "LedgerTB can't check full-disk encryption on this system. If the "
         "computer holds client work, confirm disk encryption is on.",
         required=False,
     )
@@ -115,7 +115,7 @@ def _file_access_check() -> SafetyCheck:
         detail = "Only your user account can open the book file."
     else:
         detail = ("Other accounts on this computer could open the book file. "
-                  "Reopen the book in ProBooks to tighten this, and keep the "
+                  "Reopen the book in LedgerTB to tighten this, and keep the "
                   "file in your own user folder — not a shared or public one.")
     return SafetyCheck("file_access", label, mode & 0o077 == 0, detail)
 
@@ -180,8 +180,8 @@ def _api_key_check() -> SafetyCheck:
                            "No API key is sitting in a readable file. (Keys are "
                            "kept in the system credential vault.)")
     return SafetyCheck("api_key_file", label, False,
-                       "An old version of ProBooks left your API key in a "
-                       "plain file. ProBooks moves it into the system "
+                       "An earlier installation left your API key in a "
+                       "plain file. LedgerTB moves it into the system "
                        "credential vault automatically — if this message "
                        "doesn't clear after using AI categorization once, the "
                        "vault on this computer is refusing to store it.")

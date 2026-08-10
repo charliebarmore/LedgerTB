@@ -3,7 +3,7 @@ name: Windows build spike
 # Answers the questions a Windows release depends on, in one run:
 #   1. Does the pinned dependency set install and give encryption at rest?
 #   2. Does the test suite pass on Windows?
-#   3. Does PyInstaller produce a runnable ProBooks.exe (frozen selfcheck)?
+#   3. Does PyInstaller produce a runnable LedgerTB.exe (frozen selfcheck)?
 #   4. Does the built app actually SERVE A PAGE? (selfcheck alone missed a
 #      starlette break that 500'd every request)
 #   5. Does the Inno Setup installer build?
@@ -59,7 +59,7 @@ jobs:
         id: build
         continue-on-error: true
         shell: pwsh
-        run: pyinstaller ProBooks.spec --noconfirm
+        run: pyinstaller LedgerTB.spec --noconfirm
 
       - name: "Signal 3b: frozen selfcheck"
         id: selfcheck
@@ -69,8 +69,8 @@ jobs:
         # The exe is a GUI-subsystem binary: "&" would not wait for it and its
         # stdout is detached, so run via Start-Process and trust the exit code.
         run: |
-          $env:PROBOOKS_MODE = "selfcheck"
-          $p = Start-Process -FilePath dist/ProBooks/ProBooks.exe -Wait -PassThru
+          $env:LEDGERTB_MODE = "selfcheck"
+          $p = Start-Process -FilePath dist/LedgerTB/LedgerTB.exe -Wait -PassThru
           if ($p.ExitCode -ne 0) { exit $p.ExitCode }
 
       - name: "Signal 4: the built app serves a page"
@@ -81,7 +81,7 @@ jobs:
         # selfcheck imports modules; this starts the server and fetches a page
         # with gzip requested. Build 31013372986 passed selfcheck and returned
         # HTTP 500 on every request.
-        run: pwsh scripts/smoke_serve.ps1 -ExePath dist/ProBooks/ProBooks.exe
+        run: pwsh scripts/smoke_serve.ps1 -ExePath dist/LedgerTB/LedgerTB.exe
 
       - name: Read app version
         id: ver
@@ -108,7 +108,7 @@ jobs:
           } | Select-Object -First 1 -ExpandProperty FullName
           if (-not $iscc) { Write-Error "ISCC.exe not found after installing Inno Setup"; exit 1 }
           Write-Host "using $iscc"
-          & $iscc "/DAppVersion=$env:APP_VERSION" scripts\probooks.iss
+          & $iscc "/DAppVersion=$env:APP_VERSION" scripts\ledgertb.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem installer
 
@@ -121,7 +121,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ProBooks-windows-installer
+          name: LedgerTB-windows-installer
           path: installer/*.exe
           retention-days: 3
 
@@ -131,8 +131,8 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ProBooks-windows
-          path: dist/ProBooks/
+          name: LedgerTB-windows
+          path: dist/LedgerTB/
           retention-days: 3
           # .streamlit/ is dot-prefixed; without this the artifact silently
           # ships without the theme/product-chrome config (found the hard way).

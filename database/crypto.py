@@ -1,6 +1,6 @@
 """Passphrase-keyed SQLCipher helpers: key derivation, state detection, migration.
 
-ProBooks encrypts its SQLite database at rest with SQLCipher. A launch passphrase
+LedgerTB encrypts its SQLite database at rest with SQLCipher. A launch passphrase
 is turned into a 32-byte key ONCE via PBKDF2-HMAC-SHA512 (derive_key); every
 database connection then opens with that raw key, which skips SQLCipher's own
 per-connection PBKDF2 (~40 ms/open) in favour of the raw-key fast path
@@ -27,6 +27,8 @@ except ImportError:
 # that, if lost, would render the data unrecoverable -- a real hazard for a CPA's
 # records. Brute-forcing still costs a full 256k-iteration PBKDF2 per guess for
 # anyone who obtains the encrypted file.
+# Compatibility invariant: this legacy-branded value is part of every existing
+# book's key derivation. Renaming it would make those encrypted books unreadable.
 _KDF_SALT = b"ProBooks/SQLCipher/v1/kdf-salt"
 _KDF_ITERATIONS = 256_000
 _KEY_BYTES = 32

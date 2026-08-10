@@ -1,6 +1,6 @@
-"""ProBooks MCP server — locally authorized assistant access to the books.
+"""LedgerTB MCP server — locally authorized assistant access to the books.
 
-Lets an MCP client (Claude Desktop, Claude Code) query a ProBooks database:
+Lets an MCP client (Claude Desktop, Claude Code) query a LedgerTB database:
 trial balance, statements, general ledger, entry search, integrity checks.
 
 Access model, in order:
@@ -15,7 +15,7 @@ Access model, in order:
 - Local: stdio transport only. Nothing listens on a network port.
 
 Run from source:      python mcp_server.py
-Run from the bundle:  PROBOOKS_MODE=mcp <ProBooks binary>
+Run from the bundle:  LEDGERTB_MODE=mcp <LedgerTB binary>
 """
 import sys
 from pathlib import Path
@@ -39,7 +39,7 @@ def _access_level(names) -> str:
 
     if not secure_store.get_secret(names.key):
         raise PermissionError(
-            "ProBooks assistant access is disabled. Enable it in ProBooks -> "
+            "LedgerTB assistant access is disabled. Enable it in LedgerTB -> "
             "Data Safety -> Assistant access."
         )
     level = secure_store.get_secret(names.level)
@@ -67,8 +67,8 @@ def _refresh_access() -> str:
         dbconn.clear_active_key()
         dbconn.ASSISTANT_ACCESS_LEVEL = None
         raise PermissionError(
-            "ProBooks assistant access is not enabled for this book. Enable it in "
-            "ProBooks -> Data Safety -> Assistant access."
+            "LedgerTB assistant access is not enabled for this book. Enable it in "
+            "LedgerTB -> Data Safety -> Assistant access."
         )
 
     level = _access_level(names)
@@ -92,7 +92,7 @@ def _refresh_access() -> str:
         dbconn.clear_active_key()
         dbconn.ASSISTANT_ACCESS_LEVEL = None
         raise PermissionError(
-            "The authorized ProBooks book could not be opened. Re-enable "
+            "The authorized LedgerTB book could not be opened. Re-enable "
             "assistant access from that book's Data Safety page."
         ) from exc
     if actual_book_id != expected_book_id:
@@ -100,7 +100,7 @@ def _refresh_access() -> str:
         dbconn.ASSISTANT_ACCESS_LEVEL = None
         raise PermissionError(
             "The book at this path is not the book that authorized assistant "
-            "access. Open it in ProBooks and grant access explicitly."
+            "access. Open it in LedgerTB and grant access explicitly."
         )
     dbconn.ASSISTANT_ACCESS_LEVEL = level
     return level
@@ -112,14 +112,14 @@ def _require_level(minimum: str):
     if order.index(current) < order.index(minimum):
         raise ValueError(
             f"This tool needs assistant access level '{minimum}'; the current "
-            f"level is '{current}'. Change it in ProBooks -> Data Safety -> "
+            f"level is '{current}'. Change it in LedgerTB -> Data Safety -> "
             "Assistant access."
         )
 
 server = MCPServer(
-    "probooks",
+    "ledgertb",
     instructions=(
-        "Access to ProBooks bookkeeping data. Start with list_clients to "
+        "Access to LedgerTB bookkeeping data. Start with list_clients to "
         "find the client_id; amounts are US dollars. What you may do is set "
         "by the user's chosen access level (Data Safety): read only; "
         "propose (file draft entries and stage imports for human review); "
@@ -218,7 +218,7 @@ def entry_detail(client_id: int, entry_id: int) -> dict:
 def propose_entry(client_id: int, entry_date: str, description: str,
                   lines: list, rationale: str = "",
                   entry_type: str = "Regular") -> dict:
-    """File a DRAFT journal entry for human review in ProBooks. It does NOT
+    """File a DRAFT journal entry for human review in LedgerTB. It does NOT
     touch the ledger — a person approves or rejects it in the app. lines:
     [{"account_number": "7300", "debit": 24.00}, {"account_number": "2000",
     "credit": 24.00}] (dollars; optional "memo"). Explain WHY in rationale.
@@ -240,7 +240,7 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
 @server.tool()
 def propose_import(client_id: int, bank_account_number: str, rows: list,
                    source_label: str = "Assistant import") -> dict:
-    """Stage bank/card transactions for human review in ProBooks' import
+    """Stage bank/card transactions for human review in LedgerTB's import
     flow — use this after normalizing ANY statement format (CSV, PDF, OFX,
     a pasted table). rows: [{"date": "2026-07-03", "description": "...",
     "amount": -12.50}] — positive = money in, negative = money out, from the
@@ -280,7 +280,7 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
     (Summary, Trial Balance, Transactions, Adjusting Entries, Receipts &
     Disbursements) — into out_dir, so a workpaper tool such as LedgerPDF can
     ingest it. Works at every access level, but ONLY into folders the user
-    listed in PROBOOKS_MCP_EXPORT_ROOTS; anywhere else is refused. The export
+    listed in LEDGERTB_MCP_EXPORT_ROOTS; anywhere else is refused. The export
     is audit-logged."""
     _require_level("read")
     return mcp_tools.export_close_package(client_id, period_start, period_end,
@@ -322,7 +322,7 @@ def integrity_sweep(client_id: int, start: str, end: str) -> list:
 def main() -> int:
     if not _unlock_from_vault():
         print(
-            "ProBooks MCP: assistant access is not enabled. Open ProBooks -> "
+            "LedgerTB MCP: assistant access is not enabled. Open LedgerTB -> "
             "Data Safety -> Enable assistant access, then restart this server.",
             file=sys.stderr,
         )

@@ -12,6 +12,7 @@ from utils import book_lock, books
 def settings(tmp_path, monkeypatch):
     monkeypatch.setattr(books, "SETTINGS_PATH", tmp_path / "books.json")
     monkeypatch.setattr(books, "DEFAULT_BOOK", tmp_path / "default.db")
+    monkeypatch.delenv("LEDGERTB_DB_PATH", raising=False)
     monkeypatch.delenv("PROBOOKS_DB_PATH", raising=False)
     return tmp_path
 
@@ -30,9 +31,25 @@ def test_registry_round_trip_and_recents(settings, tmp_path):
     assert recents.count("SmithCo.db") == 1  # deduped
 
     # The env override (dev/tests) beats the saved choice.
-    os.environ["PROBOOKS_DB_PATH"] = str(tmp_path / "env.db")
+    os.environ["LEDGERTB_DB_PATH"] = str(tmp_path / "env.db")
     try:
         assert books.active_book() == tmp_path / "default.db"
+    finally:
+        del os.environ["LEDGERTB_DB_PATH"]
+
+
+def test_legacy_env_override_and_book_extension_remain_supported(settings,
+                                                                 tmp_path):
+    """Renaming must not strand config-managed installs or existing books."""
+    legacy_book = tmp_path / "Existing Client.probooks"
+    books.set_active_book(legacy_book)
+    assert books.active_book() == legacy_book
+
+    os.environ["PROBOOKS_DB_PATH"] = str(tmp_path / "managed.db")
+    try:
+        # DEFAULT_BOOK was resolved from the environment at process startup;
+        # seeing the legacy variable here must still suppress a saved choice.
+        assert books.active_book() == books.DEFAULT_BOOK
     finally:
         del os.environ["PROBOOKS_DB_PATH"]
 
@@ -40,9 +57,9 @@ def test_registry_round_trip_and_recents(settings, tmp_path):
 def test_local_book_detection_is_conservative(settings, tmp_path, monkeypatch):
     managed = tmp_path / "managed"
     monkeypatch.setattr(books, "USER_DATA_DIR", managed)
-    monkeypatch.setattr(books, "DEFAULT_BOOK", managed / "probooks.db")
+    monkeypatch.setattr(books, "DEFAULT_BOOK", managed / "ledgertb.db")
 
-    assert books.is_local_book(managed / "probooks.db")
+    assert books.is_local_book(managed / "ledgertb.db")
     assert books.is_local_book(managed / "client-books" / "Smith.db")
     assert not books.is_local_book(tmp_path / "shared" / "Smith.db")
 
@@ -205,7 +222,7 @@ def test_create_book_by_name_actually_creates(db, monkeypatch, tmp_path):
              if ti.key == "book_new_name").input("Demo").run()
         next(b for b in at.button if b.key == "book_create_named").click().run()
         assert not at.exception
-        assert chosen and chosen[0].endswith("Demo.probooks")
+        assert chosen and chosen[0].endswith("Demo.ledgertb")
         assert (tmp_path / "Books").is_dir()
         assert "_switch_book" not in at.session_state
     finally:

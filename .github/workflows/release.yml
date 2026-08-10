@@ -70,13 +70,13 @@ jobs:
 
       - name: Build
         shell: pwsh
-        run: pyinstaller ProBooks.spec --noconfirm
+        run: pyinstaller LedgerTB.spec --noconfirm
 
       - name: Frozen selfcheck
         shell: pwsh
         run: |
-          $env:PROBOOKS_MODE = "selfcheck"
-          $p = Start-Process -FilePath dist/ProBooks/ProBooks.exe -Wait -PassThru
+          $env:LEDGERTB_MODE = "selfcheck"
+          $p = Start-Process -FilePath dist/LedgerTB/LedgerTB.exe -Wait -PassThru
           if ($p.ExitCode -ne 0) { exit $p.ExitCode }
 
       - name: Smoke test — the built app must serve a page
@@ -84,14 +84,14 @@ jobs:
         # selfcheck proves the parts are in the box; this proves the machine
         # runs. The starlette 1.4.0 breakage passed selfcheck and 500'd on
         # every request.
-        run: pwsh scripts/smoke_serve.ps1 -ExePath dist/ProBooks/ProBooks.exe
+        run: pwsh scripts/smoke_serve.ps1 -ExePath dist/LedgerTB/LedgerTB.exe
 
       - name: Bundle sanity
         shell: pwsh
         # The config folder is dot-prefixed and has been lost in transit
         # before; a release without it ships the wrong UI.
         run: |
-          if (-not (Test-Path "dist/ProBooks/_internal/.streamlit/config.toml")) {
+          if (-not (Test-Path "dist/LedgerTB/_internal/.streamlit/config.toml")) {
             Write-Error "bundle is missing .streamlit/config.toml"
             exit 1
           }
@@ -124,7 +124,7 @@ jobs:
           } | Select-Object -First 1 -ExpandProperty FullName
           if (-not $iscc) { Write-Error "ISCC.exe not found after installing Inno Setup"; exit 1 }
           Write-Host "using $iscc"
-          & $iscc "/DAppVersion=$env:APP_VERSION" scripts\probooks.iss
+          & $iscc "/DAppVersion=$env:APP_VERSION" scripts\ledgertb.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem installer
 
@@ -133,13 +133,13 @@ jobs:
           APP_VERSION: ${{ steps.ver.outputs.value }}
         shell: pwsh
         # Two names for the same bytes: the versioned file for the archive, and
-        # a stable name so releases/latest/download/ProBooks-windows-x64-setup.exe
+        # a stable name so releases/latest/download/LedgerTB-windows-x64-setup.exe
         # is an evergreen link that always serves the newest release.
         run: |
-          $src = "installer\ProBooks-$env:APP_VERSION-windows-x64-setup.exe"
+          $src = "installer\LedgerTB-$env:APP_VERSION-windows-x64-setup.exe"
           if (-not (Test-Path $src)) { Write-Error "installer not found at $src"; exit 1 }
-          Copy-Item $src "ProBooks-$env:APP_VERSION-windows-x64-setup.exe"
-          Copy-Item $src "ProBooks-windows-x64-setup.exe"
+          Copy-Item $src "LedgerTB-$env:APP_VERSION-windows-x64-setup.exe"
+          Copy-Item $src "LedgerTB-windows-x64-setup.exe"
 
       - name: Package the zip (secondary)
         env:
@@ -150,8 +150,8 @@ jobs:
         # start until they are unblocked — see the README. The installer is the
         # supported path.
         run: |
-          Compress-Archive -Path dist/ProBooks/* -DestinationPath "ProBooks-$env:APP_VERSION-windows-x64.zip"
-          Copy-Item "ProBooks-$env:APP_VERSION-windows-x64.zip" ProBooks-windows-x64.zip
+          Compress-Archive -Path dist/LedgerTB/* -DestinationPath "LedgerTB-$env:APP_VERSION-windows-x64.zip"
+          Copy-Item "LedgerTB-$env:APP_VERSION-windows-x64.zip" LedgerTB-windows-x64.zip
 
       # Pass only the finished release files to a separate least-privilege job.
       # The long-running build and all of its dependencies keep read-only access
@@ -160,12 +160,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: probooks-release-assets-${{ github.run_id }}
+          name: ledgertb-release-assets-${{ github.run_id }}
           path: |
-            ProBooks-${{ steps.ver.outputs.value }}-windows-x64-setup.exe
-            ProBooks-windows-x64-setup.exe
-            ProBooks-${{ steps.ver.outputs.value }}-windows-x64.zip
-            ProBooks-windows-x64.zip
+            LedgerTB-${{ steps.ver.outputs.value }}-windows-x64-setup.exe
+            LedgerTB-windows-x64-setup.exe
+            LedgerTB-${{ steps.ver.outputs.value }}-windows-x64.zip
+            LedgerTB-windows-x64.zip
           if-no-files-found: error
           retention-days: 1
 
@@ -181,7 +181,7 @@ jobs:
       - name: Download verified release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: probooks-release-assets-${{ github.run_id }}
+          name: ledgertb-release-assets-${{ github.run_id }}
           path: release-assets
 
       - name: Create draft release

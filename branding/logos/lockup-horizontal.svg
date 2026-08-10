@@ -1,0 +1,18 @@
+<svg viewBox="0 0 700 160" xmlns="http://www.w3.org/2000/svg">
+  <!-- Horizontal lockup: mark + wordmark. Web contexts only (text-based). -->
+  <g transform="translate(0, 8) scale(0.5625)">
+    <rect width="256" height="256" rx="56" fill="#1D434E"/>
+    <rect x="48" y="54" width="160" height="20" rx="3" fill="#E8913A"/>
+    <rect x="118" y="54" width="20" height="118" rx="3" fill="#E8913A"/>
+    <rect x="60" y="92" width="46" height="12" rx="3" fill="#FDFCEA"/>
+    <rect x="60" y="116" width="34" height="12" rx="3" fill="#FDFCEA"/>
+    <rect x="60" y="140" width="42" height="12" rx="3" fill="#FDFCEA"/>
+    <rect x="150" y="92" width="38" height="12" rx="3" fill="#FDFCEA"/>
+    <rect x="150" y="116" width="46" height="12" rx="3" fill="#FDFCEA"/>
+    <rect x="150" y="140" width="30" height="12" rx="3" fill="#FDFCEA"/>
+    <rect x="60" y="186" width="136" height="6" rx="2" fill="#FDFCEA"/>
+    <rect x="60" y="198" width="136" height="6" rx="2" fill="#FDFCEA"/>
+  </g>
+  <text x="176" y="108" font-family="&quot;Playfair Display&quot;, serif" font-weight="600"
+        font-size="84" fill="#FDFCEA" letter-spacing="-1.5">Ledger<tspan fill="#E8913A">TB</tspan></text>
+</svg>

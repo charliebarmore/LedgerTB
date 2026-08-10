@@ -39,7 +39,7 @@ def remove_active_plaintext_backup() -> PlaintextBackupRemoval:
     if not is_plaintext_sqlite(backup):
         raise PlaintextBackupRemovalError(
             "The adjacent migration-copy path is not an ordinary plaintext "
-            "SQLite file. ProBooks left it untouched for manual inspection."
+            "SQLite file. LedgerTB left it untouched for manual inspection."
         )
     if database_state(book) != "encrypted":
         raise PlaintextBackupRemovalError(

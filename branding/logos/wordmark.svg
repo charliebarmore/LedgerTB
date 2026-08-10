@@ -1,0 +1,7 @@
+<svg viewBox="0 0 560 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- Text-based like the studio wordmark: renders correctly wherever
+       Playfair Display is available (the web). For contexts without the
+       font, use the mark plus HTML/native text instead. -->
+  <text x="0" y="86" font-family="&quot;Playfair Display&quot;, serif" font-weight="600"
+        font-size="96" fill="#FDFCEA" letter-spacing="-2">Ledger<tspan fill="#E8913A">TB</tspan></text>
+</svg>

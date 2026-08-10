@@ -1,6 +1,6 @@
 # Assistant access (MCP)
 
-ProBooks can act as a local, permissioned MCP server for an AI assistant on
+LedgerTB can act as a local, permissioned MCP server for an AI assistant on
 the same computer (Claude Desktop, Claude Code). Depending on the level you
 choose, it can query the books, file proposals for human review, or append new
 balanced journal entries. Access is granted separately for each book; opening
@@ -47,14 +47,14 @@ from an already-running MCP process.
 - **Imports, normalized by the assistant.** Drop ANY statement — a weird
   CSV, a PDF, a pasted table — into the assistant and ask it to stage the
   transactions (`propose_import`). No column mapping, no format rules:
-  the assistant normalizes, ProBooks stages with full duplicate
+  the assistant normalizes, LedgerTB stages with full duplicate
   protection, and you categorize and post in **Import Transactions →
   Review & Categorize** exactly as with a CSV upload. Re-proposing the
   same statement stages nothing twice. A person can dismiss unwanted staged
   rows; their identity and audit history remain, but they leave the queue.
 - **Shared/custom book files are read-only.** The separate MCP process does
   not yet participate in firm mode's one-writer sidecar lock, so books outside
-  ProBooks' local managed-data folder are capped at read access even if the
+  LedgerTB's local managed-data folder are capped at read access even if the
   stored dial says propose or post.
 - **Local only.** The server speaks over stdio to the assistant that
   launched it. Nothing listens on a network port. Your MCP client may send tool
@@ -64,28 +64,28 @@ from an already-running MCP process.
 
 ## Setup
 
-1. Open the intended book, then go to ProBooks → **Data Safety → Enable
+1. Open the intended book, then go to LedgerTB → **Data Safety → Enable
    assistant access**. Repeat this explicit step for each book the assistant
    should use. If a book file moves, open it at the new path and enable access
    again.
 2. The page then shows the exact JSON for your machine. In Claude
    Desktop: Settings → Developer → Edit Config, add it under
-   `mcpServers`; in Claude Code: `claude mcp add probooks -- <command>`.
+   `mcpServers`; in Claude Code: `claude mcp add ledgertb -- <command>`.
    Installed-app form:
 
    ```json
    {
      "mcpServers": {
-       "probooks": {
-         "command": "/Applications/ProBooks.app/Contents/MacOS/ProBooks",
+       "ledgertb": {
+         "command": "/Applications/LedgerTB.app/Contents/MacOS/LedgerTB",
          "args": [],
-         "env": { "PROBOOKS_MODE": "mcp" }
+         "env": { "LEDGERTB_MODE": "mcp" }
        }
      }
    }
    ```
 
-   (On Windows, `command` is the path to `ProBooks.exe`. Running from
+   (On Windows, `command` is the path to `LedgerTB.exe`. Running from
    source: `command` is your Python, `args` is the path to
    `mcp_server.py`, no env needed.)
 3. Restart the assistant. Ask it something real: *"Run the integrity
@@ -97,7 +97,7 @@ from an already-running MCP process.
 **export folder you choose for this book on Data Safety** (stored in the
 credential vault, outside the assistant's reach; blank = file export off).
 Another book has no export permission until you choose its folder. The
-`PROBOOKS_MCP_EXPORT_ROOTS` environment variable remains as an override
+`LEDGERTB_MCP_EXPORT_ROOTS` environment variable remains as an override
 for config-managed setups. See `LEDGERPDF-PAIRING.md` for the full
 books-to-binder workflow with both MCP servers in one session.
 

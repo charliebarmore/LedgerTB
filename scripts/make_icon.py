@@ -1,70 +1,33 @@
-"""Generate ProBooks.icns (macOS) and ProBooks.ico (Windows) app icons.
+"""Generate LedgerTB.icns (macOS) and LedgerTB.ico (Windows) app icons.
 
-Draws a navy rounded-square mark with a white "PB" wordmark matching the app
-theme (#1f3a5f), then builds a multi-resolution .icns via the macOS iconutil
-and a multi-resolution .ico via Pillow (repo root, referenced by the spec's
-Windows EXE). Reproducible: re-run `python scripts/make_icon.py`.
+Draws the LedgerTB brand mark — the T-account that ties, per
+branding/BRAND.md — via the shared geometry in make_brand_assets.py.
+The .icns uses the full mark (Dock sizes); the .ico uses the simplified
+variant (T + double rule), which stays legible at taskbar sizes where the
+column entries would blur. Reproducible: re-run `python scripts/make_icon.py`.
 """
 
-import subprocess
-import tempfile
+import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-NAVY = (31, 58, 95)        # #1f3a5f — app primaryColor
-WHITE = (255, 255, 255)
+from make_brand_assets import draw_mark
+
 ROOT = Path(__file__).resolve().parent.parent
-ICNS_OUT = ROOT / "ProBooks.app" / "Contents" / "Resources" / "ProBooks.icns"
-ICO_OUT = ROOT / "ProBooks.ico"
-
-_FONT_CANDIDATES = [
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-    "/Library/Fonts/Arial Bold.ttf",
-]
-
-
-def _load_font(size: int) -> ImageFont.FreeTypeFont:
-    for path in _FONT_CANDIDATES:
-        if Path(path).exists():
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                continue
-    return ImageFont.load_default()
-
-
-def _base_png(px: int = 1024) -> Image.Image:
-    img = Image.new("RGBA", (px, px), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    pad = int(px * 0.08)
-    radius = int(px * 0.22)
-    d.rounded_rectangle([pad, pad, px - pad, px - pad], radius=radius, fill=NAVY)
-
-    text = "PB"
-    font = _load_font(int(px * 0.42))
-    box = d.textbbox((0, 0), text, font=font)
-    tw, th = box[2] - box[0], box[3] - box[1]
-    d.text(((px - tw) / 2 - box[0], (px - th) / 2 - box[1]), text, font=font, fill=WHITE)
-    return img
+ICNS_OUT = ROOT / "LedgerTB.app" / "Contents" / "Resources" / "LedgerTB.icns"
+ICO_OUT = ROOT / "LedgerTB.ico"
 
 
 def main() -> None:
     ICNS_OUT.parent.mkdir(parents=True, exist_ok=True)
-    base = _base_png(1024)
-
-    with tempfile.TemporaryDirectory() as tmp:
-        iconset = Path(tmp) / "ProBooks.iconset"
-        iconset.mkdir()
-        # macOS iconset requires these exact names/sizes.
-        for size in (16, 32, 128, 256, 512):
-            base.resize((size, size), Image.LANCZOS).save(iconset / f"icon_{size}x{size}.png")
-            base.resize((size * 2, size * 2), Image.LANCZOS).save(iconset / f"icon_{size}x{size}@2x.png")
-        subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(ICNS_OUT)], check=True)
-
-    base.save(ICO_OUT, sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-
+    # Pillow writes the complete modern ICNS size set. This is also portable;
+    # macOS 26's iconutil rejects even iconsets it just extracted itself.
+    draw_mark(1024).save(ICNS_OUT, format="ICNS")
+    draw_mark(256, simplified=True).save(
+        ICO_OUT,
+        sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+    )
     print(f"Wrote {ICNS_OUT}")
     print(f"Wrote {ICO_OUT}")
 

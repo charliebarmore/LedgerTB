@@ -1,0 +1,9 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Simplified mark for tiny sizes: just the T-account and the double rule.
+       The column entries blur below 32px, so they are omitted here. -->
+  <rect width="256" height="256" rx="56" fill="#1D434E"/>
+  <rect x="44" y="52" width="168" height="28" rx="4" fill="#E8913A"/>
+  <rect x="114" y="52" width="28" height="116" rx="4" fill="#E8913A"/>
+  <rect x="56" y="188" width="144" height="10" rx="3" fill="#FDFCEA"/>
+  <rect x="56" y="206" width="144" height="10" rx="3" fill="#FDFCEA"/>
+</svg>

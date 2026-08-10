@@ -242,7 +242,7 @@ def propose_entry(client_id: int, entry_date: str, description: str,
                   lines: list, rationale: str = "",
                   entry_type: str = "Regular") -> dict:
     """File a DRAFT journal entry for human review. Never touches the ledger:
-    a person approves or rejects it in ProBooks. lines: dicts with
+    a person approves or rejects it in LedgerTB. lines: dicts with
     account_number and debit or credit in dollars (optional memo)."""
     from models.draft_entry import DraftEntry, DraftLine
     from money import to_cents
@@ -268,7 +268,7 @@ def propose_entry(client_id: int, entry_date: str, description: str,
         "draft_id": draft_id,
         "status": "pending",
         "note": ("Filed for human review — it posts only if approved in "
-                 "ProBooks (Journal Entries → Drafts)."),
+                 "LedgerTB (Journal Entries → Drafts)."),
     }
 
 
@@ -309,7 +309,7 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
 
 def propose_import(client_id: int, bank_account_number: str, rows: list,
                    source_label: str = "Assistant import") -> dict:
-    """Stage normalized bank/card rows for human review in ProBooks' import
+    """Stage normalized bank/card rows for human review in LedgerTB's import
     flow. Rows never post from here: a person categorizes and posts them in
     the app, with the same duplicate protection as a CSV import."""
     import json as _json
@@ -403,7 +403,7 @@ def propose_import(client_id: int, bank_account_number: str, rows: list,
         "staged": len(fresh),
         "skipped_already_known": len(staged_dicts) - len(fresh),
         "flagged_as_possible_duplicates": duplicate_count,
-        "note": ("Staged for human review — ProBooks -> Import Transactions "
+        "note": ("Staged for human review — LedgerTB -> Import Transactions "
                  "-> Review & Categorize. Nothing posts until a person "
                  "categorizes and posts it there."),
     }
@@ -478,7 +478,7 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
     """Write the close package (branded PDF + Excel workbook) to disk so a
     workpaper tool (e.g. LedgerPDF) can ingest it. Filesystem writes are
     consent-gated: out_dir must sit inside the book's approved export folder
-    or a folder named by the PROBOOKS_MCP_EXPORT_ROOTS environment variable
+    or a folder named by the LEDGERTB_MCP_EXPORT_ROOTS environment variable
     (os.pathsep-separated); no approved folder means all exports are refused."""
     import os
     import re
@@ -509,20 +509,21 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
     from utils.assistant_access import credential_names
 
     names = credential_names(dbconn.DATABASE_PATH)
-    roots_raw = (os.environ.get("PROBOOKS_MCP_EXPORT_ROOTS", "")
+    roots_raw = (os.environ.get("LEDGERTB_MCP_EXPORT_ROOTS", "")
+                 or os.environ.get("PROBOOKS_MCP_EXPORT_ROOTS", "")
                  or secure_store.get_secret(names.export_roots) or "")
     roots = [Path(p).expanduser().resolve()
              for p in roots_raw.split(os.pathsep) if p.strip()]
     if not roots:
         raise ValueError(
-            "File export is off: choose an export folder on ProBooks -> "
+            "File export is off: choose an export folder on LedgerTB -> "
             "Data Safety -> Assistant access (or set the "
-            "PROBOOKS_MCP_EXPORT_ROOTS environment variable)."
+            "LEDGERTB_MCP_EXPORT_ROOTS environment variable)."
         )
     target = Path(out_dir).resolve()
     if not any(target == root or root in target.parents for root in roots):
         raise ValueError(
-            f"{out_dir} is outside PROBOOKS_MCP_EXPORT_ROOTS; exports are "
+            f"{out_dir} is outside LEDGERTB_MCP_EXPORT_ROOTS; exports are "
             "only written inside the folders the user approved."
         )
     target.mkdir(parents=True, exist_ok=True)

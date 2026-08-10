@@ -1,22 +1,25 @@
 """Book files: which database the app opens, ProSystem-style.
 
-A "book" is one encrypted ProBooks database file. The default book lives in
+A "book" is one encrypted LedgerTB database file. The default book lives in
 the user data directory; a firm can instead keep book files on a shared drive
 and open whichever one they're working on — the app stays installed locally,
 the data travels by path. The active choice and a recent list persist in
 books.json in the user data directory (never inside a book).
 
-PROBOOKS_DB_PATH still overrides everything (dev and tests).
+LEDGERTB_DB_PATH still overrides everything (dev and tests), with the legacy
+PROBOOKS_DB_PATH name accepted for compatibility.
 """
 import json
-import os
 from pathlib import Path
 
 from config import DATABASE_PATH as DEFAULT_BOOK
-from config import USER_DATA_DIR
+from config import USER_DATA_DIR, app_env
 
 SETTINGS_PATH = USER_DATA_DIR / "books.json"
 MAX_RECENT = 8
+BOOK_EXTENSION = ".ledgertb"
+# ProBooks-era ".probooks" files keep working with no special handling: book
+# selection is entirely path-based, so no legacy-extension code path exists.
 
 
 def _load() -> dict:
@@ -34,14 +37,14 @@ def _save(data: dict) -> None:
 def active_book() -> Path:
     """The book the app should open: env override, else the saved choice,
     else the default."""
-    if os.getenv("PROBOOKS_DB_PATH"):
+    if app_env("DB_PATH"):
         return DEFAULT_BOOK
     saved = _load().get("active")
     return Path(saved) if saved else DEFAULT_BOOK
 
 
 def is_local_book(path) -> bool:
-    """Whether a book is in ProBooks' local managed-data area.
+    """Whether a book is in LedgerTB's local managed-data area.
 
     Custom/external paths are treated conservatively as shared-drive books.
     MCP writes are disabled for those paths because the MCP process does not

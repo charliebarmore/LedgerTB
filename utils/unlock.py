@@ -1,6 +1,6 @@
 """Passphrase gate for the encrypted database, and the book-file chooser.
 
-ProBooks encrypts its SQLite database with SQLCipher. The key is derived from a
+LedgerTB encrypts its SQLite database with SQLCipher. The key is derived from a
 passphrase entered at launch and held only in this process -- never written to
 disk or the OS keychain (see database/connection). Every page calls
 require_unlock() right after st.set_page_config; until the passphrase is set the
@@ -231,12 +231,12 @@ def _render_switch_screen():
         placeholder="e.g. Northline Digital, or Smith & Co",
         key="book_new_name",
     )
-    st.caption("Created in ProBooks' data folder on this computer; "
+    st.caption("Created in LedgerTB's data folder on this computer; "
                "you set its passphrase on the next screen.")
     if new_name.strip() and st.button("Create this book", type="primary",
                                       key="book_create_named"):
         safe = "".join(ch for ch in new_name.strip() if ch not in "/\\:")
-        target = Path(books.USER_DATA_DIR) / "Books" / f"{safe}.probooks"
+        target = Path(books.USER_DATA_DIR) / "Books" / f"{safe}{books.BOOK_EXTENSION}"
         target.parent.mkdir(parents=True, exist_ok=True)
         books.set_active_book(target)
         st.session_state.pop("_switch_book", None)
@@ -246,7 +246,7 @@ def _render_switch_screen():
                      "(shared-drive books)"):
         other = st.text_input(
             "Full path to the book file",
-            placeholder=r"e.g. /Volumes/Shared/Books/SmithCo.probooks",
+            placeholder=r"e.g. /Volumes/Shared/Books/SmithCo.ledgertb",
             key="book_other_path",
         )
         if other and st.button("Open this path", key="book_open_other"):
@@ -277,7 +277,7 @@ def _render_book_chooser():
                 st.rerun()
         other = st.text_input(
             "Open or create another book by path",
-            placeholder=r"e.g. /Volumes/Shared/Books/SmithCo.probooks",
+            placeholder=r"e.g. /Volumes/Shared/Books/SmithCo.ledgertb",
             key="book_other_path",
         )
         if other and st.button("Open this path", key="book_open_other"):

@@ -1,24 +1,24 @@
-# ProBooks on Windows — smoke test
+# LedgerTB on Windows — smoke test
 
 The Windows bundle is built by the `Windows build spike` GitHub Actions
-workflow and attached to the run as the `ProBooks-windows` artifact. This
+workflow and attached to the run as the `LedgerTB-windows` artifact. This
 checklist is the part CI cannot do: a human confirming the app runs and
 works on real Windows.
 
 ## Getting the build onto the PC
 
-1. On the Windows PC, sign in to GitHub in a browser → the ProBooks repo →
+1. On the Windows PC, sign in to GitHub in a browser → the LedgerTB repo →
    **Actions** → latest **Windows build spike** run → **Artifacts** →
-   download `ProBooks-windows-installer`.
+   download `LedgerTB-windows-installer`.
 2. **Download through the browser**, not a scripting tool — that applies
    mark-of-the-web, so SmartScreen behaves the way it will for a real
    member. A file fetched with `gh run download` carries no such mark and
    tells you nothing about what a member sees.
 3. Run the installer. It installs per-user under
-   `%LOCALAPPDATA%\Programs\ProBooks`, needs no administrator password, and
+   `%LOCALAPPDATA%\Programs\LedgerTB`, needs no administrator password, and
    adds a Start Menu entry.
 
-> The `ProBooks-windows` artifact is the raw folder, not the installer. It is
+> The `LedgerTB-windows` artifact is the raw folder, not the installer. It is
 > useful for inspecting a bundle, but **extracting it with Explorer marks every
 > file as internet-downloaded and the app will refuse to start** — see the
 > mark-of-the-web section below. Test the installer; that is what members get.
@@ -30,7 +30,7 @@ works on real Windows.
 
   **Both wordings observed on the same machine** (Windows 11 Pro 26200):
 
-  | Launched | 2026-08-05 (bare `ProBooks.exe` from a zip) | 2026-08-07 (the installer) |
+  | Launched | 2026-08-05 (bare `LedgerTB.exe` from a zip) | 2026-08-07 (the installer) |
   |---|---|---|
   | Second button | **"open anyway"** | **"Run anyway"** |
 
@@ -57,7 +57,7 @@ app dies before its window appears. Found on a clean Windows 11 machine on
 
 The installer writes its own files, so nothing is tagged and the app just runs
 (verified: 0 of 2,808 installed files carry the tag). If you are testing a zip
-anyway, ProBooks now detects this and says what to do instead of showing a
+anyway, LedgerTB now detects this and says what to do instead of showing a
 traceback. To clear it by hand:
 
 ```powershell
@@ -73,15 +73,15 @@ Or right-click the **zip** → Properties → tick **Unblock** → OK, *then* ex
 - Default red Streamlit theme, a "Deploy" button top-right, or a sidebar
   nav that starts with lowercase "app" — all mean the bundled config went
   missing.
-- Generic exe icon (should be the navy PB mark).
+- Generic exe icon (should be the navy LT mark).
 
 ## The test
 
-Data lives under your Windows user profile — a fresh, empty ProBooks,
+Data lives under your Windows user profile — a fresh, empty LedgerTB,
 nowhere near real books.
 
 0. **Install** — run the installer, click through SmartScreen. No
-   administrator password should ever be requested. Confirm a **ProBooks**
+   administrator password should ever be requested. Confirm a **LedgerTB**
    entry appears in the Start Menu and in Settings → Apps.
 1. **Launch** from the Start Menu → app window opens, navy theme, no console.
 2. **Passphrase setup** appears → set a throwaway passphrase and tick
@@ -116,9 +116,9 @@ nowhere near real books.
 11. **(Optional) Firm mode** — lock screen (after Forget) → Book file →
     create a second book at some path; confirm the in-use lock file
     appears next to it while open.
-12. **Uninstall proof** — Settings → Apps → ProBooks → Uninstall. It should
+12. **Uninstall proof** — Settings → Apps → LedgerTB → Uninstall. It should
     remove cleanly *and leave your books alone*: the database lives in
-    `%LOCALAPPDATA%\LedgerLabs\ProBooks`, outside the install folder, so it
+    `%LOCALAPPDATA%\LedgerLabs\LedgerTB`, outside the install folder, so it
     must still be there afterwards. Reinstalling should open the same books.
     An uninstall that deletes a client's books is the worst bug this app
     could have.
@@ -128,5 +128,5 @@ nowhere near real books.
 Whatever broke, plus: Windows version, what SmartScreen showed, and
 whether the window looked right (theme, fonts, icon, sizing). Console
 output is gone in this build — if something dies silently, check
-`%LOCALAPPDATA%\ProBooks\server.log` (or the equivalent under your user
+`%LOCALAPPDATA%\LedgerTB\server.log` (or the equivalent under your user
 data dir) and copy it whole.

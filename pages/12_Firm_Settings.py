@@ -105,7 +105,7 @@ _saved_key = get_secret("anthropic_api_key")
 if ANTHROPIC_API_KEY:
     st.success("AI categorization is enabled for this session.")
 elif _saved_key:
-    st.info("An API key is saved. Restart ProBooks to enable AI categorization.")
+    st.info("An API key is saved. Restart LedgerTB to enable AI categorization.")
 else:
     st.warning("Not configured — add an Anthropic API key below.")
 
@@ -121,7 +121,7 @@ with key_cols[0]:
     if st.button("Save key", type="primary", disabled=not api_key_input):
         try:
             set_secret("anthropic_api_key", api_key_input.strip())
-            st.success("Saved to the system credential vault. Restart ProBooks to enable.")
+            st.success("Saved to the system credential vault. Restart LedgerTB to enable.")
         except Exception as exc:
             st.error(f"Could not save the API key securely: {exc}")
 with key_cols[1]:

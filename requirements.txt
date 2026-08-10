@@ -1,4 +1,4 @@
-# Ranges span the versions ProBooks is actually tested on; the platform lock
+# Ranges span the versions LedgerTB is actually tested on; the platform lock
 # files (requirements-windows.lock, requirements-macos-arm64.lock) hold the
 # exact stacks the shipped builds use. The upper bounds are deliberate: a new
 # major of anything below ships only after the full test suite passes on it.

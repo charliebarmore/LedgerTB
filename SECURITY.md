@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes target the latest published ProBooks release and the current
+Security fixes target the latest published LedgerTB release and the current
 `main` branch. Older releases may not receive security updates; reproduce an
 issue against the latest version when practical.
 
@@ -10,7 +10,7 @@ issue against the latest version when practical.
 
 Please do not open a public issue for a suspected vulnerability.
 
-Email **info@ledgerlabs.co** with the subject `ProBooks security report` and
+Email **info@ledgerlabs.co** with the subject `LedgerTB security report` and
 include:
 
 - the affected version or commit;

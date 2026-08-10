@@ -1,11 +1,11 @@
-; Inno Setup script for the ProBooks Windows installer.
+; Inno Setup script for the LedgerTB Windows installer.
 ;
 ; WHY AN INSTALLER AND NOT A ZIP
 ; When Windows extracts a downloaded zip, it stamps every extracted file with
 ; "mark-of-the-web" (Zone.Identifier, ZoneId=3 — the Internet zone). The .NET
 ; Framework refuses to load a managed assembly carrying that tag, so the
 ; bundled Python.Runtime.dll would not load, pywebview's Windows backend could
-; not start, and ProBooks died with a Python traceback before any window
+; not start, and LedgerTB died with a Python traceback before any window
 ; appeared. Observed on a clean Windows 11 machine, 2026-08-05.
 ;
 ; An installer writes the files itself, so nothing lands tagged and the app
@@ -18,22 +18,24 @@
 ; admin prompt, and needing one turns "try this" into "file a ticket".
 ;
 ; BUILD
-;   iscc /DAppVersion=1.0.0 scripts\probooks.iss
-; Expects the PyInstaller output at dist\ProBooks\ relative to the repo root.
+;   iscc /DAppVersion=1.0.0 scripts\ledgertb.iss
+; Expects the PyInstaller output at dist\LedgerTB\ relative to the repo root.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
 
-#define AppName "ProBooks"
+#define AppName "LedgerTB"
 #define AppPublisher "Ledger Labs LLC"
-#define AppURL "https://ledgerlabs.co"
-#define AppExeName "ProBooks.exe"
+#define AppURL "https://ledgertb.com"
+#define AppExeName "LedgerTB.exe"
 
 [Setup]
 ; Stable AppId — never change it, or upgrades install alongside the old copy
-; instead of replacing it.
-AppId={{8F3A1C42-6B7D-4E19-9A5C-2D4E8B1F7A30}
+; instead of replacing it. This is LedgerTB's own identity, minted fresh at
+; the rename: ProBooks was never publicly released, so there is no installed
+; base to upgrade in place, and the one test install gets uninstalled by hand.
+AppId={{8EE4B706-D4BD-4A9E-97DB-219152E5C235}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -52,8 +54,8 @@ DisableDirPage=auto
 
 ; The installer itself is a single file next to the release assets.
 OutputDir=..\installer
-OutputBaseFilename=ProBooks-{#AppVersion}-windows-x64-setup
-SetupIconFile=..\ProBooks.ico
+OutputBaseFilename=LedgerTB-{#AppVersion}-windows-x64-setup
+SetupIconFile=..\LedgerTB.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName} {#AppVersion}
 
@@ -76,7 +78,7 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 ; The whole PyInstaller onedir output. recursesubdirs+createallsubdirs pulls in
 ; _internal\.streamlit\ — the dot-prefixed config folder that has gone missing
 ; from a bundle before and takes the product chrome with it.
-Source: "..\dist\ProBooks\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\LedgerTB\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
@@ -88,6 +90,6 @@ Filename: "{app}\{#AppExeName}"; Description: "Open {#AppName} now"; Flags: nowa
 
 [UninstallDelete]
 ; Remove anything the app wrote inside its own install folder (caches, logs).
-; Books and the saved key live under %LOCALAPPDATA%\LedgerLabs\ProBooks and are
+; Books and the saved key live under %LOCALAPPDATA%\LedgerLabs\LedgerTB and are
 ; deliberately NOT touched — uninstalling the app must never delete the books.
 Type: filesandordirs; Name: "{app}\_internal\__pycache__"

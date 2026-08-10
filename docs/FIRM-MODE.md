@@ -1,6 +1,6 @@
 # Firm mode — book files on a shared drive
 
-A **book** is one encrypted ProBooks database file. By default your book
+A **book** is one encrypted LedgerTB database file. By default your book
 lives in the app's data folder — but a firm can keep book files anywhere,
 including a shared network drive, the way desktop trial-balance software
 has always worked: the app installs on each person's machine, the data
@@ -9,7 +9,7 @@ travels by path, and whoever needs a book opens it.
 ## Using it
 
 - The **lock screen** has a *Book file* section: recent books, or open /
-  create any path (e.g. `\\server\Books\SmithCo.probooks`). Each book has
+  create any path (e.g. `\\server\Books\SmithCo.ledgertb`). Each book has
   a passphrase — the passphrase is the login. **Using one office
   passphrase for all your firm's books is fine**; different passphrases
   per book are an option (say, to wall off one sensitive client), not a
@@ -23,7 +23,7 @@ travels by path, and whoever needs a book opens it.
 
 ## The in-use lock
 
-SQLite's own file locking is unreliable on network shares, so ProBooks
+SQLite's own file locking is unreliable on network shares, so LedgerTB
 coordinates the honest way: opening a book writes a `.lock` file beside
 it naming who has it open. If someone else holds the lock you choose:
 

@@ -1,0 +1,19 @@
+{
+  "brand": "LedgerTB",
+  "parent": "Ledger Labs",
+  "palette": {
+    "teal":   { "name": "Deep Teal",     "hex": "#1D434E", "role": "Primary surface" },
+    "orange": { "name": "Signal Orange", "hex": "#E8913A", "role": "The T-account, accents, links" },
+    "cream":  { "name": "Paper Cream",   "hex": "#FDFCEA", "role": "Body text on dark" },
+    "green":  { "name": "Ledger Green",  "hex": "#2D9148", "role": "Calls-to-action, balanced states" },
+    "amber":  { "name": "Amber Gold",    "hex": "#E6A532", "role": "Highlight gradient stop" },
+    "abyss":  { "name": "Abyss",         "hex": "#0F2A31", "role": "Deeper backgrounds, page base" },
+    "vellum": { "name": "Vellum",        "hex": "#F5ECD6", "role": "Light paper sections" },
+    "ink":    { "name": "Ink",           "hex": "#0B1A1F", "role": "Maximum-contrast text on light" }
+  },
+  "fonts": {
+    "display": { "name": "Playfair Display", "weights": ["600", "700"], "source": "Google Fonts" },
+    "body":    { "name": "Inter",            "weights": ["400", "500", "600"], "source": "Google Fonts" },
+    "mono":    { "name": "JetBrains Mono",   "weights": ["400", "500"], "source": "Google Fonts" }
+  }
+}

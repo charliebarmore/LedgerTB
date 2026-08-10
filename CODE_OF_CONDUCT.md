@@ -1,6 +1,6 @@
 # Code of Conduct
 
-ProBooks is committed to a respectful, professional, and welcoming community.
+LedgerTB is committed to a respectful, professional, and welcoming community.
 We expect participants to communicate constructively, assume good intent, give
 actionable feedback, and respect differences in experience and perspective.
 
@@ -10,7 +10,7 @@ share client records, credentials, or other confidential financial information
 in project spaces.
 
 This policy applies in repository discussions, issues, pull requests, project
-events, and other spaces where someone is representing the ProBooks community.
+events, and other spaces where someone is representing the LedgerTB community.
 
 Report conduct concerns privately to **info@ledgerlabs.co**. Include relevant
 links or context, but do not forward unrelated personal or client information.

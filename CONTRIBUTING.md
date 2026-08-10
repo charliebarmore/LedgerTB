@@ -1,6 +1,6 @@
-# Contributing to ProBooks
+# Contributing to LedgerTB
 
-Thanks for helping improve ProBooks. Contributions that make the application
+Thanks for helping improve LedgerTB. Contributions that make the application
 safer, clearer, and more dependable for accounting professionals are welcome.
 
 ## Before opening an issue
@@ -12,7 +12,7 @@ safer, clearer, and more dependable for accounting professionals are welcome.
 
 ## Development setup
 
-ProBooks is tested with Python 3.12.
+LedgerTB is tested with Python 3.12.
 
 ```bash
 python3.12 -m venv .venv

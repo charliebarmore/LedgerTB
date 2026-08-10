@@ -3,7 +3,7 @@
 Windows tags every file extracted from a downloaded zip with an NTFS
 Zone.Identifier stream naming the Internet zone. The .NET Framework then
 refuses to load the bundled Python.Runtime.dll, pywebview's Windows backend
-cannot start, and ProBooks dies with a traceback about clr_loader before any
+cannot start, and LedgerTB dies with a traceback about clr_loader before any
 window appears -- observed on clean Windows 11, 2026-08-05.
 
 The installer sidesteps this entirely. These tests cover the detection that
@@ -15,7 +15,7 @@ import sys
 
 import pytest
 
-import run_probooks
+import run_ledgertb
 
 windows_only = pytest.mark.skipif(
     os.name != "nt", reason="alternate data streams are an NTFS/Windows feature"
@@ -30,7 +30,7 @@ def test_is_blocked_reads_an_internet_zone_tag(tmp_path):
     with open(f"{target}:Zone.Identifier", "w", encoding="utf-8") as fh:
         fh.write("[ZoneTransfer]\nZoneId=3\nReferrerUrl=https://example.invalid/x.zip\n")
 
-    assert run_probooks._is_blocked(target)
+    assert run_ledgertb._is_blocked(target)
 
 
 @windows_only
@@ -38,7 +38,7 @@ def test_is_blocked_ignores_a_local_file(tmp_path):
     target = tmp_path / "local.dll"
     target.write_bytes(b"not really a dll")
 
-    assert not run_probooks._is_blocked(target)
+    assert not run_ledgertb._is_blocked(target)
 
 
 @windows_only
@@ -51,7 +51,7 @@ def test_is_blocked_ignores_a_trusted_zone_tag(tmp_path):
     with open(f"{target}:Zone.Identifier", "w", encoding="utf-8") as fh:
         fh.write("[ZoneTransfer]\nZoneId=1\n")
 
-    assert not run_probooks._is_blocked(target)
+    assert not run_ledgertb._is_blocked(target)
 
 
 @windows_only
@@ -63,7 +63,7 @@ def test_is_blocked_catches_the_untrusted_zone(tmp_path):
     with open(f"{target}:Zone.Identifier", "w", encoding="utf-8") as fh:
         fh.write("[ZoneTransfer]\nZoneId=4\n")
 
-    assert run_probooks._is_blocked(target)
+    assert run_ledgertb._is_blocked(target)
 
 
 @windows_only
@@ -73,18 +73,18 @@ def test_is_blocked_survives_a_malformed_tag(tmp_path):
     with open(f"{target}:Zone.Identifier", "w", encoding="utf-8") as fh:
         fh.write("[ZoneTransfer]\nZoneId=not-a-number\n")
 
-    assert not run_probooks._is_blocked(target)
+    assert not run_ledgertb._is_blocked(target)
 
 
 def test_is_blocked_survives_a_missing_file(tmp_path):
-    assert not run_probooks._is_blocked(tmp_path / "does_not_exist.dll")
+    assert not run_ledgertb._is_blocked(tmp_path / "does_not_exist.dll")
 
 
 def test_running_from_source_is_never_reported_as_blocked():
     """The check is about a frozen bundle's own files. Running from source
     (the dev and test path) must always be a no-op."""
     assert not getattr(sys, "frozen", False)
-    assert not run_probooks._webview_blocked_by_windows()
+    assert not run_ledgertb._webview_blocked_by_windows()
 
 
 @pytest.mark.parametrize(
@@ -96,7 +96,7 @@ def test_running_from_source_is_never_reported_as_blocked():
     ],
 )
 def test_clr_failures_are_recognised(exc):
-    assert run_probooks._looks_like_clr_failure(exc)
+    assert run_ledgertb._looks_like_clr_failure(exc)
 
 
 @pytest.mark.parametrize(
@@ -109,13 +109,13 @@ def test_clr_failures_are_recognised(exc):
 def test_unrelated_failures_are_not_swallowed(exc):
     """The backstop must not turn an ordinary crash into a misleading
     'Windows blocked this' message."""
-    assert not run_probooks._looks_like_clr_failure(exc)
+    assert not run_ledgertb._looks_like_clr_failure(exc)
 
 
 def test_blocked_message_tells_the_user_what_to_do():
     """Per the project's writing rule: say what happened and what to do, not
     what module failed."""
-    msg = run_probooks._BLOCKED_MESSAGE
+    msg = run_ledgertb._BLOCKED_MESSAGE
     assert "Unblock" in msg
     assert "installer" in msg.lower()
     for jargon in ("clr", "Python.Runtime", "assembly", "traceback", ".NET"):

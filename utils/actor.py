@@ -1,6 +1,6 @@
 """Who is doing the work, for audit and activity attribution.
 
-ProBooks has no login of its own — the operating system already knows who is
+LedgerTB has no login of its own — the operating system already knows who is
 signed in, so the actor is the OS account's full name (falling back to the
 short username). Captured once per process.
 

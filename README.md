@@ -1,4 +1,4 @@
-# ProBooks
+# LedgerTB
 
 Double-entry bookkeeping you can read, run, and change. A desktop app built by a practicing CPA to keep real books: multiple clients, journal entries with debit-credit validation, bank imports, AI-assisted categorization, standard reports, and a close workflow that ends in a branded PDF package.
 
@@ -22,7 +22,7 @@ A **Ledger Labs LLC** product — the software studio of [Charlie Barmore, CPA](
 
 Grab the latest from the [Releases page](../../releases/latest).
 
-**Windows** — download `ProBooks-windows-x64-setup.exe` and run it. Because the
+**Windows** — download `LedgerTB-windows-x64-setup.exe` and run it. Because the
 build is not yet code-signed, Windows shows a SmartScreen warning ("Windows
 protected your PC"): click **More info**, then the button to run it anyway
 (Windows labels it *Run anyway* or *Open anyway* depending on version). It
@@ -30,10 +30,10 @@ installs for you alone, under your own user profile, and never asks for an
 administrator password — so it works on a locked-down firm laptop. You get a
 Start Menu entry and a normal entry in Add/Remove Programs.
 
-A `ProBooks-windows-x64.zip` is also attached for anyone who needs to deploy
+A `LedgerTB-windows-x64.zip` is also attached for anyone who needs to deploy
 without an installer. **Read this before using it:** when Windows extracts a
 downloaded zip it marks every file as coming from the internet, and that stops
-part of ProBooks loading — the app will refuse to start and tell you so. To use
+part of LedgerTB loading — the app will refuse to start and tell you so. To use
 the zip, right-click it → **Properties** → tick **Unblock** → **OK**, *then*
 extract. The installer has none of this friction and is the supported path.
 
@@ -45,13 +45,29 @@ The app is self-contained — no Python and no dependencies to install. Your boo
 live in an encrypted database under your user profile, never inside the app
 folder, so upgrading keeps your data and uninstalling does not delete it.
 
+### If you ran a pre-release ProBooks build
+
+ProBooks was LedgerTB's pre-release name; it never shipped publicly. If you
+tested one of those builds, everything keeps working: existing `.probooks`
+book files, saved book choices, `probooks-*` backups, credential-vault
+entries, and `PROBOOKS_*` environment settings are all still honored, and the
+app reuses your existing data folder rather than moving financial data. New
+books use the `.ledgertb` extension and new configuration uses `LEDGERTB_*`.
+
+LedgerTB installs as its own program. On Windows, remove the old ProBooks
+entry from Add/Remove Programs; on macOS, delete the old
+`/Applications/ProBooks.app` once LedgerTB opens your book. Neither the
+installer nor the app ever deletes book data. If assistant (MCP) access was
+configured, point your assistant's configuration at the LedgerTB binary and
+re-approve access from Data Safety.
+
 ## Quickstart (from source)
 
 Requires Python 3.12 (what it's tested on).
 
 ```bash
-git clone https://github.com/charliebarmore/ProBooks.git
-cd ProBooks
+git clone https://github.com/charliebarmore/LedgerTB.git
+cd LedgerTB
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -60,7 +76,7 @@ streamlit run app.py --server.address=127.0.0.1
 
 The virtual environment matters: installing into your system Python often fails
 outright on current installs ("externally managed environment") and mixes
-ProBooks' dependencies into everything else you run.
+LedgerTB's dependencies into everything else you run.
 
 Verified on a clean macOS install (Python 3.12.7, fresh venv, nothing preinstalled): `pip install -r requirements.txt` pulls a prebuilt `sqlcipher3` wheel and needs no Homebrew step. The same is true on Windows x64.
 
@@ -70,12 +86,12 @@ The app runs fully without any API key. To turn on AI categorization, either set
 
 ## Desktop builds
 
-- **macOS**: a standalone `ProBooks.app` — on Apple Silicon, create a clean Python 3.12 environment, install `requirements-macos-arm64.lock`, and run `./scripts/build_release.sh`. The build verifies the lock before packaging. Signing is configured via a local `scripts/signing.env`; no macOS release asset is published yet.
-- **Windows**: an Inno Setup installer built by CI (`.github/workflows/release.yml`, tag-triggered) from `scripts/probooks.iss`. The release pipeline refuses to ship a build whose encryption is unavailable, installs the pinned set in `requirements-windows.lock`, and will not publish a build that cannot serve a page (`scripts/smoke_serve.ps1`).
+- **macOS**: a standalone `LedgerTB.app` — on Apple Silicon, create a clean Python 3.12 environment, install `requirements-macos-arm64.lock`, and run `./scripts/build_release.sh`. The build verifies the lock before packaging. Signing is configured via a local `scripts/signing.env`; no macOS release asset is published yet.
+- **Windows**: an Inno Setup installer built by CI (`.github/workflows/release.yml`, tag-triggered) from `scripts/ledgertb.iss`. The release pipeline refuses to ship a build whose encryption is unavailable, installs the pinned set in `requirements-windows.lock`, and will not publish a build that cannot serve a page (`scripts/smoke_serve.ps1`).
 
 ## The posture
 
-This tool follows the same rule we teach in the Lab: AI drafts, the professional decides. Categorization suggestions are never auto-posted, everything is reviewable, and the audit trail keeps the record. Assistant access via MCP is off by default and permissioned at **read / propose / post**; the default is propose, while direct posting requires an explicit warning and confirmation. The database always blocks assistant edits and deletes. ProBooks itself makes an outbound call only when you enable Anthropic categorization. If you enable MCP, your MCP client may also send returned book data to its configured AI provider—vet that provider and your firm's data policy before using client data. The books remain in the local encrypted database.
+This tool follows the same rule we teach in the Lab: AI drafts, the professional decides. Categorization suggestions are never auto-posted, everything is reviewable, and the audit trail keeps the record. Assistant access via MCP is off by default and permissioned at **read / propose / post**; the default is propose, while direct posting requires an explicit warning and confirmation. The database always blocks assistant edits and deletes. LedgerTB itself makes an outbound call only when you enable Anthropic categorization. If you enable MCP, your MCP client may also send returned book data to its configured AI provider—vet that provider and your firm's data policy before using client data. The books remain in the local encrypted database.
 
 ## Tests
 
@@ -101,7 +117,7 @@ python -m pytest -q -m "not performance"
 
 ## What this is — and isn't
 
-ProBooks is software, not accounting advice. It gives you double-entry rails,
+LedgerTB is software, not accounting advice. It gives you double-entry rails,
 an audit trail, and review workflows, but every judgment in your books —
 categorization, adjustments, what gets posted — is yours, whether you made it
 directly or accepted a suggestion from the AI assistant. Nothing it produces

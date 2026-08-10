@@ -102,7 +102,7 @@ def test_legacy_backups_can_be_adopted_from_data_safety(db, monkeypatch):
     monkeypatch.setattr(
         backups_mod, "adopt_legacy_backups",
         lambda *a, **k: calls.append(1) or {
-            "adopted": ["probooks-a.db", "probooks-b.db"], "skipped": []})
+            "adopted": ["ledgertb-a.db", "ledgertb-b.db"], "skipped": []})
 
     at = AppTest.from_file(page_path("pages/9_Data_Safety.py"),
                            default_timeout=30).run()

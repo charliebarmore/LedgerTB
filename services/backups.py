@@ -16,6 +16,7 @@ from database import connection as db_connection
 
 DEFAULT_BACKUP_DIR = BACKUP_DIR
 _BOOK_ID = re.compile(r"^[0-9a-f]{32}$")
+_BACKUP_PATTERNS = ("ledgertb-*.db", "probooks-*.db")
 
 
 class BackupBookMismatch(ValueError):
@@ -95,6 +96,21 @@ def _book_backup_dir(backup_dir: Path, book_id: str) -> Path:
     return Path(backup_dir) / book_id
 
 
+def _mtime_or_zero(path: Path) -> int:
+    # The sort key stats each file, and backup_health runs on every sidebar
+    # render — a backup pruned between glob and stat must sort, not crash.
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _backup_paths(directory: Path) -> list[Path]:
+    """New LedgerTB backups plus ProBooks-era backups, without duplicates."""
+    found = {path for pattern in _BACKUP_PATTERNS for path in directory.glob(pattern)}
+    return sorted(found, key=_mtime_or_zero, reverse=True)
+
+
 def create_backup(
     backup_dir: Path = DEFAULT_BACKUP_DIR,
     *,
@@ -113,7 +129,7 @@ def create_backup(
         book_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(book_dir, 0o700)
         stamp = _timestamp()
-        final_db = book_dir / f"probooks-{book_id[:12]}-{stamp}.db"
+        final_db = book_dir / f"ledgertb-{book_id[:12]}-{stamp}.db"
         temp_db = book_dir / f".{final_db.name}.tmp"
         manifest = final_db.with_suffix(".json")
         temp_manifest = book_dir / f".{manifest.name}.tmp"
@@ -224,7 +240,7 @@ def list_backups(backup_dir: Path = DEFAULT_BACKUP_DIR) -> list[BackupRecord]:
     book_id = active_book_id()
     book_dir = _book_backup_dir(backup_root, book_id)
     records = []
-    for path in book_dir.glob("probooks-*.db"):
+    for path in _backup_paths(book_dir):
         try:
             manifest = path.with_suffix(".json")
             records.append(_cached_record(
@@ -300,7 +316,7 @@ def backup_health(
             "latest": None,
         }
     book_dir = _book_backup_dir(backup_root, book_id)
-    candidates = sorted(book_dir.glob("probooks-*.db"), reverse=True)
+    candidates = _backup_paths(book_dir)
     if not candidates:
         return {
             "healthy": False,
@@ -344,7 +360,7 @@ def legacy_backup_count(backup_dir: Path = DEFAULT_BACKUP_DIR) -> int:
     if not backup_root.exists():
         return 0
     count = 0
-    for path in backup_root.glob("probooks-*.db"):
+    for path in _backup_paths(backup_root):
         try:
             payload = json.loads(path.with_suffix(".json").read_text())
         except Exception:
@@ -357,7 +373,7 @@ def legacy_backup_count(backup_dir: Path = DEFAULT_BACKUP_DIR) -> int:
 def adopt_legacy_backups(backup_dir: Path = DEFAULT_BACKUP_DIR) -> dict:
     """Bring pre-book-identity backups under the currently open book.
 
-    ProBooks never guesses which book a legacy backup belongs to; adoption is
+    LedgerTB never guesses which book a legacy backup belongs to; adoption is
     the user asserting ownership, and the assertion is checked: a backup is
     adopted only if it verifies against its manifest AND opens intact with
     THIS book's key. Anything that fails is left exactly where it was.
@@ -369,7 +385,7 @@ def adopt_legacy_backups(backup_dir: Path = DEFAULT_BACKUP_DIR) -> dict:
     book_id = active_book_id()
     book_dir = _book_backup_dir(backup_root, book_id)
 
-    for path in sorted(backup_root.glob("probooks-*.db")):
+    for path in reversed(_backup_paths(backup_root)):
         manifest = path.with_suffix(".json")
         try:
             payload = json.loads(manifest.read_text())

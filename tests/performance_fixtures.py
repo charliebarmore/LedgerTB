@@ -1,4 +1,4 @@
-"""Deterministic, generated performance data for representative ProBooks loads.
+"""Deterministic, generated performance data for representative LedgerTB loads.
 
 These helpers intentionally bypass model-by-model writes: their job is to
 construct a realistic database quickly so read/query/render behavior can be

@@ -1,0 +1,14 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- LedgerTB mark without the field, for placement on Deep Teal or Abyss
+       surfaces. Never place this on white — use mark-mono-dark.svg there. -->
+  <rect x="48" y="54" width="160" height="20" rx="3" fill="#E8913A"/>
+  <rect x="118" y="54" width="20" height="118" rx="3" fill="#E8913A"/>
+  <rect x="60" y="92" width="46" height="12" rx="3" fill="#FDFCEA"/>
+  <rect x="60" y="116" width="34" height="12" rx="3" fill="#FDFCEA"/>
+  <rect x="60" y="140" width="42" height="12" rx="3" fill="#FDFCEA"/>
+  <rect x="150" y="92" width="38" height="12" rx="3" fill="#FDFCEA"/>
+  <rect x="150" y="116" width="46" height="12" rx="3" fill="#FDFCEA"/>
+  <rect x="150" y="140" width="30" height="12" rx="3" fill="#FDFCEA"/>
+  <rect x="60" y="186" width="136" height="6" rx="2" fill="#FDFCEA"/>
+  <rect x="60" y="198" width="136" height="6" rx="2" fill="#FDFCEA"/>
+</svg>

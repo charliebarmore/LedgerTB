@@ -3,7 +3,7 @@
 # WHY THIS FILE EXISTS
 # requirements.txt gives ranges ("streamlit>=1.59.0"), so a fresh CI install
 # picks whatever is newest that day. That is how build 31013372986 shipped a
-# ProBooks that returned HTTP 500 on every page: it drew starlette 1.4.0, which
+# LedgerTB that returned HTTP 500 on every page: it drew starlette 1.4.0, which
 # made an argument required that Streamlit 1.61.0 did not pass. Streamlit
 # 1.61.1 later capped it at "starlette<1.4.0". Same source, different day,
 # different app.

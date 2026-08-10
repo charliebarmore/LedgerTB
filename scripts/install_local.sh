@@ -3,15 +3,15 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-SOURCE="dist/ProBooks.app"
-TARGET="/Applications/ProBooks.app"
+SOURCE="dist/LedgerTB.app"
+TARGET="/Applications/LedgerTB.app"
 
 [ -d "$SOURCE" ] || {
   echo "Missing $SOURCE. Run ./scripts/build_release.sh first."
   exit 1
 }
 
-PROBOOKS_MODE=selfcheck "$SOURCE/Contents/MacOS/ProBooks"
+LEDGERTB_MODE=selfcheck "$SOURCE/Contents/MacOS/LedgerTB"
 codesign --verify --deep --strict "$SOURCE"
 
 echo "Installing $TARGET"
@@ -23,4 +23,4 @@ echo "Installing $TARGET"
 rm -rf "$TARGET"
 ditto "$SOURCE" "$TARGET"
 codesign --verify --deep --strict "$TARGET"
-echo "Installed. Open ProBooks from Applications, then choose Options > Keep in Dock."
+echo "Installed. Open LedgerTB from Applications, then choose Options > Keep in Dock."

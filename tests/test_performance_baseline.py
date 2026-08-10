@@ -25,11 +25,11 @@ pytestmark = pytest.mark.performance
 # Regression tripwires, not benchmarks: generous enough that a busy shared
 # machine (app + build + suite at once) doesn't flake them, tight enough that
 # a real 2x blowup still fails. A 15s ceiling failed at 15.46s under load.
-MAX_FIXTURE_SECONDS = float(os.getenv("PROBOOKS_PERF_FIXTURE_SECONDS", "25"))
-MAX_QUERY_SECONDS = float(os.getenv("PROBOOKS_PERF_QUERY_SECONDS", "8"))
-MAX_PAGE_SECONDS = float(os.getenv("PROBOOKS_PERF_PAGE_SECONDS", "25"))
-MAX_CSV_SECONDS = float(os.getenv("PROBOOKS_PERF_CSV_SECONDS", "25"))
-MAX_CSV_PEAK_MIB = float(os.getenv("PROBOOKS_PERF_CSV_PEAK_MIB", "512"))
+MAX_FIXTURE_SECONDS = float(os.getenv("LEDGERTB_PERF_FIXTURE_SECONDS", "25"))
+MAX_QUERY_SECONDS = float(os.getenv("LEDGERTB_PERF_QUERY_SECONDS", "8"))
+MAX_PAGE_SECONDS = float(os.getenv("LEDGERTB_PERF_PAGE_SECONDS", "25"))
+MAX_CSV_SECONDS = float(os.getenv("LEDGERTB_PERF_CSV_SECONDS", "25"))
+MAX_CSV_PEAK_MIB = float(os.getenv("LEDGERTB_PERF_CSV_PEAK_MIB", "512"))
 
 
 def _timed(action):

@@ -1,14 +1,14 @@
-"""Frozen-app entry point for ProBooks (PyInstaller / Tier 2).
+"""Frozen-app entry point for LedgerTB (PyInstaller / Tier 2).
 
 One binary, two modes:
   * default (parent): pick a free port, launch the *same* binary in server mode
     as a child process, wait for it, then show it in a native pywebview window.
-  * server mode (child, PROBOOKS_MODE=server): run the Streamlit server via its
+  * server mode (child, LEDGERTB_MODE=server): run the Streamlit server via its
     CLI as the process's main thread -- which avoids the signal/main-thread
     pitfalls of running Streamlit inside a background thread.
 
-This also runs from source (`python run_probooks.py`) for testing: the child is
-launched as `python run_probooks.py` instead of the frozen binary.
+This also runs from source (`python run_ledgertb.py`) for testing: the child is
+launched as `python run_ledgertb.py` instead of the frozen binary.
 
 Heavy third-party deps are imported here so PyInstaller's analysis bundles them
 (the app modules load them at runtime from the bundled source tree).
@@ -54,7 +54,16 @@ def bundle_dir() -> Path:
 
 
 BUNDLE = bundle_dir()
-WINDOW_TITLE = "ProBooks"
+WINDOW_TITLE = "LedgerTB"
+
+
+def _app_env(suffix: str, default=None):
+    """Prefer LedgerTB's environment name; accept the ProBooks legacy alias."""
+    return (
+        os.environ.get(f"LEDGERTB_{suffix}")
+        or os.environ.get(f"PROBOOKS_{suffix}")
+        or default
+    )
 
 
 def _find_free_port() -> int:
@@ -65,7 +74,7 @@ def _find_free_port() -> int:
 
 def _run_server() -> int:
     """Child process: run Streamlit as the main thread via its CLI."""
-    port = os.environ.get("PROBOOKS_PORT", "8501")
+    port = _app_env("PORT", "8501")
     os.chdir(BUNDLE)  # so Streamlit finds pages/ and .streamlit/config.toml
     sys.argv = [
         "streamlit", "run", str(BUNDLE / "app.py"),
@@ -126,20 +135,20 @@ def _stop(proc: subprocess.Popen) -> None:
 # say what to do. The installer never hits this; a zip does.
 
 _BLOCKED_MESSAGE = (
-    "Windows has blocked part of ProBooks because it was downloaded from the "
+    "Windows has blocked part of LedgerTB because it was downloaded from the "
     "internet, so the app cannot start.\n\n"
-    "The simplest fix is to install ProBooks rather than run it from an "
+    "The simplest fix is to install LedgerTB rather than run it from an "
     "extracted folder. The installer does not have this problem.\n\n"
     "To use this folder anyway:\n"
     "    1. Delete the folder you extracted.\n"
-    "    2. Right-click the ProBooks .zip file you downloaded.\n"
+    "    2. Right-click the LedgerTB .zip file you downloaded.\n"
     "    3. Choose Properties, tick Unblock, then click OK.\n"
-    "    4. Extract it again and open ProBooks.\n\n"
+    "    4. Extract it again and open LedgerTB.\n\n"
     "Your books are not affected."
 )
 
 
-def _show_windows_message(text: str, title: str = "ProBooks") -> None:
+def _show_windows_message(text: str, title: str = "LedgerTB") -> None:
     """Show a native message box. A windowed build has no console, so anything
     printed here would go nowhere the user can see."""
     try:
@@ -190,7 +199,7 @@ def _looks_like_clr_failure(exc: BaseException) -> bool:
 
 def _selfcheck() -> int:
     """Import the app's key runtime deps and report — verifies the (trimmed)
-    bundle didn't drop anything the app needs. Run: PROBOOKS_MODE=selfcheck <bin>"""
+    bundle didn't drop anything the app needs. Run: LEDGERTB_MODE=selfcheck <bin>"""
     os.chdir(BUNDLE)
     sys.path.insert(0, str(BUNDLE))
     # Import database.connection before config to mirror app.py's real cold-start
@@ -236,12 +245,12 @@ def _selfcheck() -> int:
             sample = Image.new("RGB", (900, 180), "white")
             font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 48)
             ImageDraw.Draw(sample).text(
-                (30, 60), "PROBOOKS OCR 123.45", font=font, fill="black"
+                (30, 60), "LEDGERTB OCR 123.45", font=font, fill="black"
             )
             encoded = io.BytesIO()
             sample.save(encoded, format="PNG")
             recognized = _vision_ocr(encoded.getvalue()).upper()
-            if "PROBOOKS" not in recognized:
+            if "LEDGERTB" not in recognized:
                 failed.append(f"Apple Vision OCR: unexpected result {recognized!r}")
         except Exception as e:
             failed.append(f"Apple Vision OCR: {e}")
@@ -305,11 +314,12 @@ def _place_window(window, wx, wy):
 
 
 def main() -> int:
-    if os.environ.get("PROBOOKS_MODE") == "selfcheck":
+    mode = _app_env("MODE")
+    if mode == "selfcheck":
         return _selfcheck()
-    if os.environ.get("PROBOOKS_MODE") == "server":
+    if mode == "server":
         return _run_server()
-    if os.environ.get("PROBOOKS_MODE") == "mcp":
+    if mode == "mcp":
         # Permissioned MCP server over stdio (spawned by Claude Desktop/Code).
         os.chdir(BUNDLE)
         sys.path.insert(0, str(BUNDLE))
@@ -319,7 +329,7 @@ def main() -> int:
     port = _find_free_port()
     url = f"http://127.0.0.1:{port}"
 
-    env = dict(os.environ, PROBOOKS_MODE="server", PROBOOKS_PORT=str(port))
+    env = dict(os.environ, LEDGERTB_MODE="server", LEDGERTB_PORT=str(port))
     kwargs = {"env": env}
     if os.name == "posix":
         kwargs["start_new_session"] = True
@@ -330,7 +340,7 @@ def main() -> int:
         # keep any transient console from flashing.
         from platformdirs import user_data_dir
 
-        log_dir = Path(user_data_dir("ProBooks", appauthor=False))
+        log_dir = Path(user_data_dir("LedgerTB", appauthor=False))
         log_dir.mkdir(parents=True, exist_ok=True)
         server_log = open(log_dir / "server.log", "a", buffering=1, encoding="utf-8")
         kwargs["stdout"] = server_log
@@ -341,7 +351,7 @@ def main() -> int:
 
     try:
         if not _wait_until_ready(url):
-            print("ProBooks server did not become ready.", file=sys.stderr)
+            print("LedgerTB server did not become ready.", file=sys.stderr)
             return 1
 
         # Checked before touching pywebview: on Windows the backend loads a
