@@ -27,13 +27,15 @@
 
 #define AppName "LedgerTB"
 #define AppPublisher "Ledger Labs LLC"
-#define AppURL "https://ledgerlabs.co"
+#define AppURL "https://ledgertb.com"
 #define AppExeName "LedgerTB.exe"
 
 [Setup]
 ; Stable AppId — never change it, or upgrades install alongside the old copy
-; instead of replacing it.
-AppId={{8F3A1C42-6B7D-4E19-9A5C-2D4E8B1F7A30}
+; instead of replacing it. This is LedgerTB's own identity, minted fresh at
+; the rename: ProBooks was never publicly released, so there is no installed
+; base to upgrade in place, and the one test install gets uninstalled by hand.
+AppId={{8EE4B706-D4BD-4A9E-97DB-219152E5C235}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -77,16 +79,6 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 ; _internal\.streamlit\ — the dot-prefixed config folder that has gone missing
 ; from a bundle before and takes the product chrome with it.
 Source: "..\dist\LedgerTB\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-[InstallDelete]
-; The stable AppId makes this an in-place upgrade for ProBooks users. Remove
-; only obsolete application files/shortcuts whose names changed; books live
-; under the user-data directory and are never installation targets.
-Type: files; Name: "{app}\ProBooks.exe"
-Type: files; Name: "{group}\ProBooks.lnk"
-Type: files; Name: "{autodesktop}\ProBooks.lnk"
-Type: files; Name: "{app}\_internal\assets\probooks-mark.png"
-Type: files; Name: "{app}\_internal\assets\probooks-wordmark.png"
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"

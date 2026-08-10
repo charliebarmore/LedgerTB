@@ -38,13 +38,17 @@ def test_existing_book_key_derivation_never_changes():
     )
 
 
-def test_windows_installer_keeps_upgrade_identity():
+def test_windows_installer_uses_a_fresh_identity():
+    """Owner's call (2026-08-10): LedgerTB installs under its own AppId — a
+    clean break, not an in-place upgrade of the never-released ProBooks."""
     installer = Path(__file__).parents[1] / "scripts" / "ledgertb.iss"
     text = installer.read_text()
-    assert "AppId={{8F3A1C42-6B7D-4E19-9A5C-2D4E8B1F7A30}" in text
+    assert "AppId={{8EE4B706-D4BD-4A9E-97DB-219152E5C235}" in text
+    assert "8F3A1C42-6B7D-4E19-9A5C-2D4E8B1F7A30" not in text  # ProBooks id
     assert '#define AppName "LedgerTB"' in text
-    assert 'Name: "{app}\\ProBooks.exe"' in text
-    assert 'Name: "{group}\\ProBooks.lnk"' in text
+    assert '#define AppExeName "LedgerTB.exe"' in text
+    assert "ProBooks.exe" not in text
+    assert "ProBooks.lnk" not in text
 
 
 def test_release_build_clears_both_signing_aliases_during_packaging():
