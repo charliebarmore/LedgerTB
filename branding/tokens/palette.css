@@ -1,0 +1,15 @@
+/* LedgerTB — Brand Palette (inherits the Ledger Labs studio palette) */
+:root {
+  --tb-teal: #1D434E;       /* Deep Teal — primary surface */
+  --tb-orange: #E8913A;     /* Signal Orange — the T-account, accents, links */
+  --tb-cream: #FDFCEA;      /* Paper Cream — body text on dark */
+  --tb-green: #2D9148;      /* Ledger Green — calls-to-action, "balanced" states */
+  --tb-amber: #E6A532;      /* Amber Gold — highlight gradient stop */
+  --tb-abyss: #0F2A31;      /* Abyss — deeper backgrounds, page base */
+  --tb-vellum: #F5ECD6;     /* Vellum — light "paper" sections */
+  --tb-ink: #0B1A1F;        /* Ink — maximum-contrast text on light */
+
+  --tb-font-display: "Playfair Display", Georgia, serif;
+  --tb-font-body: "Inter", -apple-system, "Segoe UI", sans-serif;
+  --tb-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+}
