@@ -32,18 +32,24 @@ def _write_private(path: Path, payload: bytes) -> None:
     than written through. 0600 because this is the whole close package —
     trial balance, every journal line — in the clear.
     """
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    # O_BINARY matters on Windows: without it these handles translate newlines
+    # and every PDF and XLSX comes out corrupt. O_NOFOLLOW does not exist there
+    # and resolves to 0; the explicit is_symlink() check below covers both.
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+             | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
     if path.is_symlink():
         raise ValueError(
             f"{path.name} already exists as a symbolic link; refusing to write "
             "the export through it. Remove it and try again."
         )
-    fd = os.open(path, flags, 0o600)
+    # fdopen rather than a bare os.write: os.write is not obliged to consume
+    # the whole buffer in one call, and a short write truncates the file.
+    with os.fdopen(os.open(path, flags, 0o600), "wb") as handle:
+        handle.write(payload)
     try:
-        os.write(fd, payload)
-    finally:
-        os.close(fd)
-    os.chmod(path, 0o600)
+        os.chmod(path, 0o600)
+    except OSError:
+        pass  # Windows has no POSIX mode; the user profile is the boundary
 
 
 def _parse_date(value: Optional[str], name: str) -> Optional[date]:

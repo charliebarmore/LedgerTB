@@ -5,6 +5,7 @@ Contract: exports only land inside user-approved roots, work at read level
 uncalculated =SUM() formulas that render as literal text in any tool without
 a calc engine.
 """
+import os
 from datetime import date
 from io import BytesIO
 from pathlib import Path
@@ -146,6 +147,9 @@ def test_export_refuses_to_write_through_a_planted_symlink(client_id, accounts,
     assert not elsewhere.exists(), "export was written through the symlink"
 
 
+@pytest.mark.skipif(os.name == "nt",
+                    reason="Windows has no POSIX file mode; NTFS inherits the "
+                           "user-profile ACL instead")
 def test_exports_are_not_world_readable(client_id, accounts, tmp_path,
                                         monkeypatch):
     """The book is 0600; the unencrypted close package of that same book
