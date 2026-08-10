@@ -12,6 +12,7 @@ Requires pywebview (see requirements-desktop.txt).
 
 import atexit
 import os
+import secrets
 import signal
 import socket
 import subprocess
@@ -30,9 +31,13 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def start_streamlit(port: int) -> subprocess.Popen:
+def start_streamlit(port: int, ui_token: str) -> subprocess.Popen:
     """Launch `streamlit run app.py` headless on the given port, in its own
-    process group so the whole tree can be torn down cleanly on exit."""
+    process group so the whole tree can be torn down cleanly on exit.
+
+    The UI token goes in the environment rather than argv: other users on the
+    machine can read another process's command line, but not its environment.
+    """
     cmd = [
         sys.executable, "-m", "streamlit", "run", str(APP_DIR / "app.py"),
         "--server.headless=true",
@@ -41,7 +46,8 @@ def start_streamlit(port: int) -> subprocess.Popen:
         "--server.runOnSave=false",
         "--browser.gatherUsageStats=false",
     ]
-    kwargs = {"cwd": str(APP_DIR)}
+    kwargs = {"cwd": str(APP_DIR),
+              "env": dict(os.environ, LEDGERTB_UI_TOKEN=ui_token)}
     if os.name == "posix":
         kwargs["start_new_session"] = True  # own process group for clean shutdown
     return subprocess.Popen(cmd, **kwargs)
@@ -129,9 +135,11 @@ def _place_window(window, wx, wy):
 
 def main() -> int:
     port = _find_free_port()
+    ui_token = secrets.token_urlsafe(32)
     url = f"http://127.0.0.1:{port}"
+    window_url = f"{url}/?t={ui_token}"
 
-    proc = start_streamlit(port)
+    proc = start_streamlit(port, ui_token)
     atexit.register(stop_streamlit, proc)
 
     if not wait_until_ready(url):
@@ -145,7 +153,7 @@ def main() -> int:
 
     geom = _window_geometry()
     win_x, win_y = geom.pop("x", None), geom.pop("y", None)
-    window = webview.create_window(WINDOW_TITLE, url, **geom)
+    window = webview.create_window(WINDOW_TITLE, window_url, **geom)
     webview.start(_place_window, (window, win_x, win_y))  # blocks until the window is closed
 
     stop_streamlit(proc)

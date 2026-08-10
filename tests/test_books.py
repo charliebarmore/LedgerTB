@@ -227,3 +227,104 @@ def test_create_book_by_name_actually_creates(db, monkeypatch, tmp_path):
         assert "_switch_book" not in at.session_state
     finally:
         dbconn.set_active_key(key)
+
+
+def test_ui_token_gate_refuses_sessions_the_app_did_not_open(db, monkeypatch):
+    """The unlock is process-wide, so a second session reaching the local port
+    would otherwise get the decrypted books with no passphrase. Only the window
+    the launcher opened carries the token."""
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+
+    import utils.client_selector as selector
+    from tests.conftest import page_path
+    from utils import unlock
+
+    monkeypatch.setattr(selector, "render_client_selector", lambda: None)
+    monkeypatch.setattr(st, "page_link", lambda *a, **k: None)
+    monkeypatch.setenv(unlock.UI_TOKEN_ENV, "launch-secret")
+
+    # No token: blocked before any book content renders.
+    at = AppTest.from_file(page_path("pages/7_Dashboard.py"), default_timeout=30)
+    at.run()
+    assert not at.exception
+    assert any("was not opened by" in e.value for e in at.error)
+
+    # Wrong token is no better than none.
+    at = AppTest.from_file(page_path("pages/7_Dashboard.py"), default_timeout=30)
+    at.query_params["t"] = "guessed"
+    at.run()
+    assert any("was not opened by" in e.value for e in at.error)
+
+    # The real token opens the app, and the session stays authorized
+    # afterwards even though navigation drops the query parameter.
+    at = AppTest.from_file(page_path("pages/7_Dashboard.py"), default_timeout=30)
+    at.query_params["t"] = "launch-secret"
+    at.run()
+    assert not any("was not opened by" in e.value for e in at.error)
+    at.query_params.clear()
+    at.run()
+    assert not any("was not opened by" in e.value for e in at.error)
+
+
+def test_no_token_configured_means_no_gate(db, monkeypatch):
+    """Running from source there is no launcher to mint a token; the gate must
+    stay out of the way rather than locking the developer out."""
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+
+    import utils.client_selector as selector
+    from tests.conftest import page_path
+    from utils import unlock
+
+    monkeypatch.setattr(selector, "render_client_selector", lambda: None)
+    monkeypatch.setattr(st, "page_link", lambda *a, **k: None)
+    monkeypatch.delenv(unlock.UI_TOKEN_ENV, raising=False)
+
+    at = AppTest.from_file(page_path("pages/7_Dashboard.py"), default_timeout=30)
+    at.run()
+    assert not any("was not opened by" in e.value for e in at.error)
+
+
+def test_refuses_to_serve_when_bound_off_loopback(db, monkeypatch):
+    """A user following a 'share your Streamlit app' guide must not silently
+    publish unlocked books to the office network."""
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+
+    import utils.client_selector as selector
+    from tests.conftest import page_path
+
+    monkeypatch.setattr(selector, "render_client_selector", lambda: None)
+    monkeypatch.setattr(st, "page_link", lambda *a, **k: None)
+    real_get_option = st.get_option
+    monkeypatch.setattr(st, "get_option",
+                        lambda name: "0.0.0.0" if name == "server.address"
+                        else real_get_option(name))
+
+    at = AppTest.from_file(page_path("pages/7_Dashboard.py"), default_timeout=30)
+    at.run()
+    assert any("reachable from other computers" in e.value for e in at.error)
+
+
+def test_launchers_mint_a_token_and_pass_it_out_of_argv():
+    """The token must reach the child through the environment, never argv —
+    other users on the machine can read a process's command line."""
+    from pathlib import Path
+
+    for name in ("run_ledgertb.py", "desktop.py"):
+        source = (Path(__file__).parents[1] / name).read_text()
+        assert "secrets.token_urlsafe" in source, name
+        assert "LEDGERTB_UI_TOKEN" in source, name
+        assert "window_url" in source, name
+        assert "--ui-token" not in source, name
+
+
+def test_passphrase_strength_pushes_toward_several_words():
+    from utils.unlock import MIN_PASSPHRASE_LEN, passphrase_strength
+
+    assert MIN_PASSPHRASE_LEN >= 12
+    assert passphrase_strength("Passw0rd!")[0] == "weak"
+    assert passphrase_strength("correct horse battery staple")[0] == "strong"
+    assert passphrase_strength("a" * 24)[0] == "strong"
+    assert passphrase_strength("northwind ledger 42")[0] in ("good", "strong")

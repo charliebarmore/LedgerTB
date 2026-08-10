@@ -15,6 +15,7 @@ Heavy third-party deps are imported here so PyInstaller's analysis bundles them
 """
 
 import os
+import secrets
 import signal
 import socket
 import subprocess
@@ -327,9 +328,16 @@ def main() -> int:
         return mcp_main()
 
     port = _find_free_port()
+    # The token binds the app's own window to this server. Anything else on
+    # the machine that finds the port gets refused instead of handed the
+    # decrypted books. It travels in the child's environment (not argv, which
+    # other users can read via ps) and in the window's URL.
+    ui_token = secrets.token_urlsafe(32)
     url = f"http://127.0.0.1:{port}"
+    window_url = f"{url}/?t={ui_token}"
 
-    env = dict(os.environ, LEDGERTB_MODE="server", LEDGERTB_PORT=str(port))
+    env = dict(os.environ, LEDGERTB_MODE="server", LEDGERTB_PORT=str(port),
+               LEDGERTB_UI_TOKEN=ui_token)
     kwargs = {"env": env}
     if os.name == "posix":
         kwargs["start_new_session"] = True
@@ -365,7 +373,7 @@ def main() -> int:
             import webview
             geom = _window_geometry()
             win_x, win_y = geom.pop("x", None), geom.pop("y", None)
-            window = webview.create_window(WINDOW_TITLE, url, **geom)
+            window = webview.create_window(WINDOW_TITLE, window_url, **geom)
             # Pin the native backend per platform (macOS WebKit, Windows
             # WebView2) so the build can safely exclude the Qt toolkits.
             webview.start(

@@ -17,6 +17,8 @@ read-only or takeover. See utils/books.py and utils/book_lock.py.
 """
 
 import atexit
+import ipaddress
+import os
 from pathlib import Path
 
 import streamlit as st
@@ -32,7 +34,61 @@ from database.crypto import (
 )
 from utils import book_lock, books, secure_store
 
-MIN_PASSPHRASE_LEN = 8
+MIN_PASSPHRASE_LEN = 12
+
+# A launch token binds this browser session to the window the app opened.
+# Without it, the unlock is process-wide: anything else running on the machine
+# — another signed-in user on a terminal server, or a page served by some other
+# tool on another localhost port, which Streamlit's origin check permits — can
+# open a second session and read the decrypted books without the passphrase.
+# The desktop launchers generate a token, pass it in the environment, and open
+# the window with it in the URL. Running from source there is no launcher to
+# mint one, so the gate stays off and the source path is documented as
+# single-user.
+UI_TOKEN_ENV = "LEDGERTB_UI_TOKEN"
+_UI_TOKEN_PARAM = "t"
+_UI_SESSION_FLAG = "_ui_session_authorized"
+
+
+def _require_local_session():
+    """Refuse sessions that did not come from the window this app opened, and
+    refuse to serve at all if the server was bound off-loopback."""
+    try:
+        address = st.get_option("server.address")
+    except Exception:
+        address = None
+    if address and not _is_loopback(address):
+        st.markdown(f"## 🔒 {APP_NAME}")
+        st.error(
+            f"{APP_NAME} is listening on {address}, which makes your books "
+            "reachable from other computers on this network. It only ever "
+            "runs on this computer. Restart it without a custom server "
+            "address."
+        )
+        st.stop()
+
+    expected = os.environ.get(UI_TOKEN_ENV)
+    if not expected or st.session_state.get(_UI_SESSION_FLAG):
+        return
+    if st.query_params.get(_UI_TOKEN_PARAM) == expected:
+        st.session_state[_UI_SESSION_FLAG] = True
+        return
+    st.markdown(f"## 🔒 {APP_NAME}")
+    st.error(
+        "This page was not opened by " + APP_NAME + ". Close it and use the "
+        f"{APP_NAME} window instead. (Only the window the app opens can reach "
+        "your books; this protects them from other programs on this computer.)"
+    )
+    st.stop()
+
+
+def _is_loopback(address: str) -> bool:
+    if address in ("localhost", ""):
+        return True
+    try:
+        return ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return False
 
 
 def saved_key_name(book) -> str:
@@ -83,6 +139,9 @@ def require_unlock():
     database is refused outright, and otherwise the page runs unencrypted
     behind a persistent warning.
     """
+    # Before anything else: this session must belong to the app's own window,
+    # and the server must not be reachable from the network.
+    _require_local_session()
     if not dbconn.ENCRYPTION_AVAILABLE:
         if database_state(dbconn.DATABASE_PATH) == "encrypted":
             st.markdown(f"## 🔒 {APP_NAME}")
@@ -133,9 +192,51 @@ def require_unlock():
     st.stop()
 
 
+def passphrase_strength(passphrase: str) -> tuple[str, str]:
+    """A blunt, honest read on how long this passphrase would survive.
+
+    The encryption is only ever as strong as what the user types: everything
+    else about the cipher is fixed, so this is the one security decision the
+    accountant actually makes. Judged on length and variety rather than a
+    scoring library — the goal is to push people toward a several-word
+    passphrase, not to grade them precisely.
+    """
+    length = len(passphrase)
+    words = len([w for w in passphrase.split() if w])
+    classes = sum((
+        any(c.islower() for c in passphrase),
+        any(c.isupper() for c in passphrase),
+        any(c.isdigit() for c in passphrase),
+        any(not c.isalnum() for c in passphrase),
+    ))
+    if length >= 24 or words >= 4:
+        return "strong", "Strong — a determined attacker will not get through this."
+    if length >= 16 or (words >= 3 and length >= 14):
+        return "good", "Good. Adding another word would make it far stronger."
+    return "weak", (
+        "Weak. A stolen book file with a passphrase this short can be cracked. "
+        "Four random words are far stronger than a short complicated password."
+    )
+
+
+def _render_strength(passphrase: str) -> None:
+    if not passphrase:
+        return
+    level, message = passphrase_strength(passphrase)
+    if level == "strong":
+        st.success(message, icon="🔒")
+    elif level == "good":
+        st.info(message, icon="🔑")
+    else:
+        st.warning(message, icon="⚠️")
+
+
 def _valid_new_passphrase(passphrase: str, confirm: str) -> bool:
     if len(passphrase) < MIN_PASSPHRASE_LEN:
-        st.error(f"Use at least {MIN_PASSPHRASE_LEN} characters.")
+        st.error(
+            f"Use at least {MIN_PASSPHRASE_LEN} characters. This passphrase is "
+            "the only thing protecting the book if the file is ever stolen."
+        )
         return False
     if passphrase != confirm:
         st.error("Passphrases do not match.")
@@ -333,25 +434,34 @@ def _unlock_form():
 
 
 def _setup_form():
+    # Deliberately not st.form: a form batches its inputs and cannot show the
+    # strength read until submit, and this is the one security choice the user
+    # actually makes. Same reason the client forms use containers.
     st.caption(
         "First run — create a passphrase to encrypt this database. It is not "
-        "stored anywhere, so if you lose it the data cannot be recovered. A "
-        "longer passphrase (a memorable sentence) is stronger than a short one."
+        "stored anywhere, so if you lose it the data cannot be recovered. "
+        "**Four random words** (\"stapler-harbor-mint-cyclone\") beat a short "
+        "complicated password: easier to remember, far harder to crack."
     )
-    with st.form("db_setup"):
-        passphrase = st.text_input("New passphrase", type="password")
-        confirm = st.text_input("Confirm passphrase", type="password")
-        remember = st.checkbox(
-            "Remember on this computer",
-            help="Stores this book's unlock key in your system credential "
-                 "vault, so opening the app skips the passphrase. Undo any "
-                 "time on Data Safety.",
-        )
-        if st.form_submit_button("Create encrypted database", type="primary"):
-            if _valid_new_passphrase(passphrase, confirm):
-                # First keyed connection (init_database, next run) creates the
-                # database already encrypted under this passphrase.
-                _finish_unlock(derive_key(passphrase), remember=remember)
+    passphrase = st.text_input("New passphrase", type="password",
+                               key="setup_passphrase")
+    _render_strength(passphrase)
+    confirm = st.text_input("Confirm passphrase", type="password",
+                            key="setup_passphrase_confirm")
+    remember = st.checkbox(
+        "Remember on this computer",
+        key="setup_remember",
+        help="Stores this book's unlock key in your system credential "
+             "vault, so opening the app skips the passphrase. Anyone who can "
+             "sign in to your computer account can then open the book. Undo "
+             "any time on Data Safety.",
+    )
+    if st.button("Create encrypted database", type="primary",
+                 key="setup_submit"):
+        if _valid_new_passphrase(passphrase, confirm):
+            # First keyed connection (init_database, next run) creates the
+            # database already encrypted under this passphrase.
+            _finish_unlock(derive_key(passphrase), remember=remember)
 
 
 def _migrate_form():
@@ -360,14 +470,17 @@ def _migrate_form():
         "encrypt it. A one-time copy of the unencrypted file is kept next to it "
         "(delete that copy once you've confirmed the encrypted database works)."
     )
-    with st.form("db_migrate"):
-        passphrase = st.text_input("New passphrase", type="password")
-        confirm = st.text_input("Confirm passphrase", type="password")
-        if st.form_submit_button("Encrypt existing database", type="primary"):
-            if _valid_new_passphrase(passphrase, confirm):
-                try:
-                    encrypt_plaintext_db(dbconn.DATABASE_PATH, passphrase)
-                except Exception as exc:
-                    st.error(f"The database was not changed: {exc}")
-                else:
-                    _finish_unlock(derive_key(passphrase))
+    passphrase = st.text_input("New passphrase", type="password",
+                               key="migrate_passphrase")
+    _render_strength(passphrase)
+    confirm = st.text_input("Confirm passphrase", type="password",
+                            key="migrate_passphrase_confirm")
+    if st.button("Encrypt existing database", type="primary",
+                 key="migrate_submit"):
+        if _valid_new_passphrase(passphrase, confirm):
+            try:
+                encrypt_plaintext_db(dbconn.DATABASE_PATH, passphrase)
+            except Exception as exc:
+                st.error(f"The database was not changed: {exc}")
+            else:
+                _finish_unlock(derive_key(passphrase))
