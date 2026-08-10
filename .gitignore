@@ -58,3 +58,6 @@ req-win.txt
 
 # Local virtualenv used to regenerate requirements-windows.lock
 .lockenv/
+
+# Wrangler (Cloudflare Pages) local state
+.wrangler/
