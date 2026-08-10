@@ -1,11 +1,11 @@
-"""Desktop launcher for ProBooks (native-window mode).
+"""Desktop launcher for LedgerTB (native-window mode).
 
 Starts the Streamlit server headless on a local port and shows it in a native
 desktop window (pywebview) instead of a browser tab. Everything stays local --
 this only changes how the app is launched and displayed.
 
     python desktop.py        # run from a terminal
-    open ProBooks.app        # or double-click the macOS app
+    open LedgerTB.app        # or double-click the macOS app
 
 Requires pywebview (see requirements-desktop.txt).
 """
@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent
-WINDOW_TITLE = "ProBooks"
+WINDOW_TITLE = "LedgerTB"
 
 
 def _find_free_port() -> int:
@@ -136,7 +136,7 @@ def main() -> int:
 
     if not wait_until_ready(url):
         stop_streamlit(proc)
-        print("ProBooks failed to start (Streamlit did not become ready).", file=sys.stderr)
+        print("LedgerTB failed to start (Streamlit did not become ready).", file=sys.stderr)
         return 1
 
     # Imported here (not at module top) so this file loads without a GUI backend

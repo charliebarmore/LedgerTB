@@ -171,7 +171,7 @@ def assign_missing_numbers(accounts, taken=frozenset()):
     """Give numberless accounts numbers by type range, never colliding.
 
     QuickBooks Online turns account numbers off by default, so names-only
-    charts are common. Numbers are how ProBooks (and an assistant) reference
+    charts are common. Numbers are how LedgerTB (and an assistant) reference
     accounts unambiguously, so instead of demanding them we assign them —
     type base upward in steps of 10, skipping anything in ``taken`` or in the
     file itself. Mutates the dicts, sets ``number_assigned: True`` on each

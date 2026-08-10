@@ -1,5 +1,5 @@
 """
-ProBooks - Simple Double-Entry Bookkeeping System
+LedgerTB - Simple Double-Entry Bookkeeping System
 
 A Streamlit-based accounting application for:
 - Managing multiple clients with separate books
@@ -112,7 +112,7 @@ else:
     st.sidebar.info("AI categorization: off")
     with st.expander("Enable AI transaction categorization"):
         st.markdown(
-            "Add an `ANTHROPIC_API_KEY` to a `.env` file in the ProBooks folder, "
+            "Add an `ANTHROPIC_API_KEY` to a `.env` file in the LedgerTB folder, "
             "then restart the app. Pattern learning from your manual categorizations "
             "works without a key."
         )

@@ -1,4 +1,4 @@
-# ProBooks — project instructions
+# LedgerTB — project instructions
 
 Desktop double-entry bookkeeping for CPA client work. Streamlit UI in a native
 window, SQLCipher-encrypted SQLite, local-first: no server, no accounts, no
@@ -17,8 +17,8 @@ custody of anyone's data. Built and maintained with Claude Code.
   mode), secure_store (OS credential vault), ui (statement/ledger renderers),
   client_selector (sidebar + nav).
 - `mcp_server.py` — MCP server (stdio) enforcing the leveled assistant dial
-  (read / propose / post — see invariants); `run_probooks.py` — frozen
-  entry (`PROBOOKS_MODE`: server / selfcheck / mcp).
+  (read / propose / post — see invariants); `run_ledgertb.py` — frozen
+  entry (`LEDGERTB_MODE`: server / selfcheck / mcp).
 
 ## Non-negotiable invariants
 
@@ -92,8 +92,8 @@ custody of anyone's data. Built and maintained with Claude Code.
 ## Packaging gotchas (learned the hard way)
 
 - Pages/services are **data files, invisible to PyInstaller's analyzer** —
-  third-party libs they import need `collect_submodules` in `ProBooks.spec`
-  AND an entry in `run_probooks.py`'s selfcheck module list.
+  third-party libs they import need `collect_submodules` in `LedgerTB.spec`
+  AND an entry in `run_ledgertb.py`'s selfcheck module list.
 - strftime `%-d`/`%-I` are libc extensions that crash on Windows — use
   `utils/dates.py`.
 - `upload-artifact` strips dot-files by default; `.streamlit/` must ship
@@ -108,7 +108,7 @@ custody of anyone's data. Built and maintained with Claude Code.
 - **Windows zips are not a distribution channel.** Explorer marks every
   extracted file internet-sourced, .NET then refuses to load the bundled
   `Python.Runtime.dll`, and pywebview dies before the window opens. Ship the
-  Inno Setup installer (`scripts/probooks.iss`); it writes files itself and
+  Inno Setup installer (`scripts/ledgertb.iss`); it writes files itself and
   nothing gets tagged. Code signing does **not** fix this — different
   mechanism from SmartScreen.
 - **CI cannot see mark-of-the-web**: the runner never downloads its own

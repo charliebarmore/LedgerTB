@@ -50,7 +50,7 @@ def audit_safety_event(action, event_name, details):
         st.warning(f"Operation succeeded, but its audit event could not be recorded: {exc}")
 
 st.title("Data Safety")
-st.caption(f"ProBooks {APP_VERSION} · Book: {dbconn.DATABASE_PATH}")
+st.caption(f"LedgerTB {APP_VERSION} · Book: {dbconn.DATABASE_PATH}")
 
 # ---- Book file (firm mode) -------------------------------------------------
 from utils import book_lock as _bl
@@ -112,7 +112,7 @@ if _plaintext_copy.exists() or _plaintext_copy.is_symlink():
         "file can expose all client data without the book passphrase."
     )
     st.caption(
-        "ProBooks will re-check the encrypted live book before deleting this "
+        "LedgerTB will re-check the encrypted live book before deleting this "
         "specific adjacent copy. Deletion removes the local file, but copies "
         "in cloud version history, system backups, or snapshots may remain."
     )
@@ -167,11 +167,11 @@ _legacy_backups = legacy_backup_count()
 if _legacy_backups:
     st.info(
         f"{_legacy_backups} older backup(s) are not shown because they predate "
-        "book-specific recovery protection. ProBooks will not guess which book "
+        "book-specific recovery protection. LedgerTB will not guess which book "
         "they belong to."
     )
     st.caption(
-        "If those backups were made from this book, adopt them below. ProBooks "
+        "If those backups were made from this book, adopt them below. LedgerTB "
         "verifies each one opens intact with this book's passphrase before "
         "adopting it; any that don't are left exactly where they are."
     )
@@ -311,7 +311,7 @@ if not _mcp_book_is_local:
     st.warning(
         "This book uses a custom or shared-drive path. Assistant access is "
         "limited to read only because the MCP process does not participate in "
-        "the book's one-writer lock. Move the book to ProBooks' local data "
+        "the book's one-writer lock. Move the book to LedgerTB's local data "
         "folder to enable proposals or direct posting."
     )
 _post_ok = True
@@ -381,7 +381,7 @@ if _mcp_enabled:
         _export_pick = st.text_input(
             "Export folder (assistant may write close packages here)",
             value=_export_root,
-            placeholder=str(Path.home() / "Documents" / "ProBooks Exports"),
+            placeholder=str(Path.home() / "Documents" / "LedgerTB Exports"),
             help="The only place export_close_package can write files. Leave "
                  "blank to keep file export off. Point it at the same folder "
                  "as your workpaper tool's root to pass files between them.",
@@ -412,7 +412,7 @@ if _mcp_enabled:
 
     if getattr(sys, "frozen", False):
         _mcp_config = {"command": sys.executable, "args": [],
-                       "env": {"PROBOOKS_MODE": "mcp"}}
+                       "env": {"LEDGERTB_MODE": "mcp"}}
     else:
         _mcp_config = {"command": sys.executable,
                        "args": [str(Path(__file__).resolve().parent.parent / "mcp_server.py")]}
@@ -422,7 +422,7 @@ if _mcp_enabled:
         "contains no personal paths beyond the app's own location — the "
         "access level and export folder are read from this page's settings:"
     )
-    st.code(json.dumps({"probooks": _mcp_config}, indent=2), language="json")
+    st.code(json.dumps({"ledgertb": _mcp_config}, indent=2), language="json")
 
 st.divider()
 st.caption(

@@ -1,6 +1,6 @@
 # Support
 
-ProBooks is open-source software provided under the MIT License and does not
+LedgerTB is open-source software provided under the MIT License and does not
 include guaranteed response times or professional accounting support.
 
 For a reproducible software bug, use the bug report form in the GitHub issue

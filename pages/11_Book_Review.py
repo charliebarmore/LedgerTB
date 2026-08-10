@@ -109,7 +109,7 @@ st.divider()
 st.subheader("Category consistency review")
 if not book_review_service.is_available():
     st.caption("AI reviews are off — add your Anthropic API key on the Firm "
-               "Settings page, then restart ProBooks.")
+               "Settings page, then restart LedgerTB.")
     st.page_link("pages/12_Firm_Settings.py", label="Set up AI", icon=icons.FIRM)
 else:
     if st.button("Review categorizations", type="primary"):

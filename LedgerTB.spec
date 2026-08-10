@@ -1,14 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for a standalone ProBooks.app (no Python required).
+"""PyInstaller spec for a standalone LedgerTB.app (no Python required).
 
-Build:   pyinstaller ProBooks.spec --noconfirm
-Result:  dist/ProBooks.app
+Build:   pyinstaller LedgerTB.spec --noconfirm
+Result:  dist/LedgerTB.app
 
 The app's own source (app.py, pages/, models/, services/, database/, utils/,
 config/constants/money, .streamlit/) is bundled as DATA and loaded from disk at
 runtime -- Streamlit runs app.py and scans pages/ from the bundle dir, and the
 app inserts that dir on sys.path to import its own packages. The third-party
-deps those modules use are frozen normally (imported in run_probooks.py so the
+deps those modules use are frozen normally (imported in run_ledgertb.py so the
 analysis sees them).
 """
 
@@ -24,10 +24,14 @@ APP_VERSION = version_meta["APP_VERSION"]
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
 
-# Set PROBOOKS_CODESIGN_ID to a Developer ID Application identity to have
+# Set LEDGERTB_CODESIGN_ID to a Developer ID Application identity to have
 # PyInstaller sign the bundle (inside-out, hardened runtime) during the build;
 # leave unset for a normal ad-hoc-signed local build.
-CODESIGN_ID = os.environ.get("PROBOOKS_CODESIGN_ID") or None
+CODESIGN_ID = (
+    os.environ.get("LEDGERTB_CODESIGN_ID")
+    or os.environ.get("PROBOOKS_CODESIGN_ID")
+    or None
+)
 
 # Modules the app never uses but that get dragged in from a large Anaconda env.
 # Trimming these takes the bundle from ~1.2 GB to a fraction of that.
@@ -99,7 +103,7 @@ hiddenimports = st_hiddenimports + [
     # them all to avoid ModuleNotFound (the openpyxl.utils.dataframe lesson).
 
 a = Analysis(
-    ["run_probooks.py"],
+    ["run_ledgertb.py"],
     pathex=[],
     binaries=st_binaries,
     datas=app_datas + st_datas + metadatas,
@@ -121,13 +125,13 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="ProBooks",
+    name="LedgerTB",
     debug=False,
     bootloader_ignore_signals=False,
     strip=IS_MAC,
     upx=False,
     console=False,          # windowed on every platform
-    icon=None if IS_MAC else "ProBooks.ico",   # BUNDLE carries the .icns
+    icon=None if IS_MAC else "LedgerTB.ico",   # BUNDLE carries the .icns
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -141,7 +145,7 @@ coll = COLLECT(
     a.datas,
     strip=IS_MAC,
     upx=False,
-    name="ProBooks",
+    name="LedgerTB",
 )
 
 if not IS_MAC:
@@ -149,12 +153,12 @@ if not IS_MAC:
 else:
     app = BUNDLE(
     coll,
-    name="ProBooks.app",
-    icon="ProBooks.app/Contents/Resources/ProBooks.icns",
-    bundle_identifier="com.ledgerlabs.probooks",
+    name="LedgerTB.app",
+    icon="LedgerTB.app/Contents/Resources/LedgerTB.icns",
+    bundle_identifier="com.ledgerlabs.ledgertb",
     info_plist={
-        "CFBundleName": "ProBooks",
-        "CFBundleDisplayName": "ProBooks",
+        "CFBundleName": "LedgerTB",
+        "CFBundleDisplayName": "LedgerTB",
         "CFBundleShortVersionString": APP_VERSION,
         "CFBundleVersion": APP_VERSION,
         "NSHighResolutionCapable": True,

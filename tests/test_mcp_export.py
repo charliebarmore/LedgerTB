@@ -26,6 +26,7 @@ def _seed(client_id, accounts):
 
 def test_export_refused_without_roots(client_id, accounts, tmp_path, monkeypatch):
     _seed(client_id, accounts)
+    monkeypatch.delenv("LEDGERTB_MCP_EXPORT_ROOTS", raising=False)
     monkeypatch.delenv("PROBOOKS_MCP_EXPORT_ROOTS", raising=False)
     with pytest.raises(ValueError, match="export is off"):
         mcp_tools.export_close_package(client_id, "2026-01-01", "2026-03-31",
@@ -37,7 +38,7 @@ def test_export_refused_outside_roots(client_id, accounts, tmp_path, monkeypatch
     approved = tmp_path / "approved"
     approved.mkdir()
     elsewhere = tmp_path / "elsewhere"
-    monkeypatch.setenv("PROBOOKS_MCP_EXPORT_ROOTS", str(approved))
+    monkeypatch.setenv("LEDGERTB_MCP_EXPORT_ROOTS", str(approved))
     with pytest.raises(ValueError, match="outside"):
         mcp_tools.export_close_package(client_id, "2026-01-01", "2026-03-31",
                                        str(elsewhere))
@@ -49,7 +50,7 @@ def test_export_refused_outside_roots(client_id, accounts, tmp_path, monkeypatch
 def test_export_writes_both_files_at_read_level(client_id, accounts, tmp_path,
                                                 monkeypatch):
     _seed(client_id, accounts)
-    monkeypatch.setenv("PROBOOKS_MCP_EXPORT_ROOTS", str(tmp_path))
+    monkeypatch.setenv("LEDGERTB_MCP_EXPORT_ROOTS", str(tmp_path))
     monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "read")
 
     result = mcp_tools.export_close_package(
@@ -88,6 +89,7 @@ def test_vault_export_root_works_and_env_overrides(client_id, accounts, tmp_path
     from utils.assistant_access import credential_names
 
     _seed(client_id, accounts)
+    monkeypatch.delenv("LEDGERTB_MCP_EXPORT_ROOTS", raising=False)
     monkeypatch.delenv("PROBOOKS_MCP_EXPORT_ROOTS", raising=False)
 
     vault_root = tmp_path / "vault-root"
@@ -100,7 +102,19 @@ def test_vault_export_root_works_and_env_overrides(client_id, accounts, tmp_path
 
     env_root = tmp_path / "env-root"
     env_root.mkdir()
-    monkeypatch.setenv("PROBOOKS_MCP_EXPORT_ROOTS", str(env_root))
+    monkeypatch.setenv("LEDGERTB_MCP_EXPORT_ROOTS", str(env_root))
     with pytest.raises(ValueError, match="outside"):
         mcp_tools.export_close_package(
             client_id, "2026-01-01", "2026-03-31", str(vault_root / "again"))
+
+
+def test_probooks_export_root_env_alias_remains_supported(client_id, accounts,
+                                                          tmp_path,
+                                                          monkeypatch):
+    _seed(client_id, accounts)
+    monkeypatch.delenv("LEDGERTB_MCP_EXPORT_ROOTS", raising=False)
+    monkeypatch.setenv("PROBOOKS_MCP_EXPORT_ROOTS", str(tmp_path))
+
+    result = mcp_tools.export_close_package(
+        client_id, "2026-01-01", "2026-03-31", str(tmp_path / "legacy-config"))
+    assert result["pdf"].startswith(str(tmp_path))

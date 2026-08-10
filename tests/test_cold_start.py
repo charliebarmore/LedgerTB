@@ -9,7 +9,7 @@ def test_database_connection_imports_in_clean_process(tmp_path):
     init_database now requires the passphrase-derived key to be set first (the
     unlock gate does this in the app), so the probe sets a key before init.
     """
-    env = dict(os.environ, PROBOOKS_DB_PATH=str(tmp_path / "cold-start.db"))
+    env = dict(os.environ, LEDGERTB_DB_PATH=str(tmp_path / "cold-start.db"))
     code = (
         "from database import connection, init_database\n"
         "from database.crypto import derive_key\n"

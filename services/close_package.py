@@ -447,7 +447,7 @@ def build_close_package_pdf(
         leftMargin=0.5 * inch, rightMargin=0.5 * inch,
         topMargin=0.6 * inch, bottomMargin=0.55 * inch,
         title=f"Close Package — {client_name}",
-        author=branding.firm_name or "ProBooks",
+        author=branding.firm_name or "LedgerTB",
     )
 
     footer_left = f"{client_name} — {period_label}"

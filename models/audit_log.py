@@ -79,7 +79,7 @@ class AuditLog:
         if action not in AUDIT_ACTIONS:
             raise ValueError(f"Unsupported audit action: {action}")
         # Stamp local time explicitly rather than leaning on SQLite's
-        # CURRENT_TIMESTAMP default, which is UTC. ProBooks is a single-user
+        # CURRENT_TIMESTAMP default, which is UTC. LedgerTB is a single-user
         # local desktop app whose audit filter and every other date use the
         # machine's local clock (date.today()); a UTC default made evening
         # entries (past UTC midnight) appear dated "tomorrow", inverting the

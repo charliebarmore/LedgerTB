@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/charliebarmore/ProBooks/security/policy
+    url: https://github.com/charliebarmore/LedgerTB/security/policy
     about: Use the private reporting instructions in the Security Policy.

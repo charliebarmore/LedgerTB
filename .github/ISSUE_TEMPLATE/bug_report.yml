@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in ProBooks
+description: Report a reproducible problem in LedgerTB
 title: "[Bug]: "
 labels:
   - bug
@@ -11,7 +11,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: ProBooks version or commit
+      label: LedgerTB version or commit
       description: Use the release version or commit SHA when available.
       placeholder: v0.1.0 or abc1234
     validations:

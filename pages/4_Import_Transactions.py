@@ -186,7 +186,7 @@ if selected_tab == "Upload CSV":
         If your CSV contains transactions from multiple accounts (e.g., from Mint or a combined export):
         1. Check "CSV contains transactions from multiple accounts"
         2. Select the column that identifies which account each transaction is from
-        3. Map each account name to a ProBooks account
+        3. Map each account name to a LedgerTB account
         """)
 
         # Sample template download
@@ -842,7 +842,7 @@ if selected_tab == "Upload CSV":
             # Account mapping for multi-account mode with source column
             if multi_account_mode and source_account_col:
                 st.subheader("Account Mapping")
-                st.caption("Map account names from your CSV to accounts in ProBooks")
+                st.caption("Map account names from your CSV to accounts in LedgerTB")
 
                 # Get unique account values from the CSV
                 import pandas as pd
@@ -1031,7 +1031,7 @@ elif selected_tab == "Upload Statement":
     st.subheader("Upload PDF or Image Statement")
     st.caption(
         "PDF text extraction and image OCR run locally on this Mac. Uploaded documents are "
-        "held only for the current session and are not saved to the ProBooks database."
+        "held only for the current session and are not saved to the LedgerTB database."
     )
 
     all_importable = [a for a in accounts if a.type in ("Asset", "Liability")]

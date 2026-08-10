@@ -1,13 +1,10 @@
-"""Generate ProBooks.icns (macOS) and ProBooks.ico (Windows) app icons.
+"""Generate LedgerTB.icns (macOS) and LedgerTB.ico (Windows) app icons.
 
-Draws a navy rounded-square mark with a white "PB" wordmark matching the app
-theme (#1f3a5f), then builds a multi-resolution .icns via the macOS iconutil
-and a multi-resolution .ico via Pillow (repo root, referenced by the spec's
-Windows EXE). Reproducible: re-run `python scripts/make_icon.py`.
+Draws a navy rounded-square mark with a white "LT" wordmark matching the app
+theme (#1f3a5f), then builds multi-resolution .icns and .ico files via Pillow.
+Reproducible: re-run `python scripts/make_icon.py` on macOS, Windows, or Linux.
 """
 
-import subprocess
-import tempfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -15,8 +12,8 @@ from PIL import Image, ImageDraw, ImageFont
 NAVY = (31, 58, 95)        # #1f3a5f — app primaryColor
 WHITE = (255, 255, 255)
 ROOT = Path(__file__).resolve().parent.parent
-ICNS_OUT = ROOT / "ProBooks.app" / "Contents" / "Resources" / "ProBooks.icns"
-ICO_OUT = ROOT / "ProBooks.ico"
+ICNS_OUT = ROOT / "LedgerTB.app" / "Contents" / "Resources" / "LedgerTB.icns"
+ICO_OUT = ROOT / "LedgerTB.ico"
 
 _FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
@@ -42,7 +39,7 @@ def _base_png(px: int = 1024) -> Image.Image:
     radius = int(px * 0.22)
     d.rounded_rectangle([pad, pad, px - pad, px - pad], radius=radius, fill=NAVY)
 
-    text = "PB"
+    text = "LT"
     font = _load_font(int(px * 0.42))
     box = d.textbbox((0, 0), text, font=font)
     tw, th = box[2] - box[0], box[3] - box[1]
@@ -53,16 +50,9 @@ def _base_png(px: int = 1024) -> Image.Image:
 def main() -> None:
     ICNS_OUT.parent.mkdir(parents=True, exist_ok=True)
     base = _base_png(1024)
-
-    with tempfile.TemporaryDirectory() as tmp:
-        iconset = Path(tmp) / "ProBooks.iconset"
-        iconset.mkdir()
-        # macOS iconset requires these exact names/sizes.
-        for size in (16, 32, 128, 256, 512):
-            base.resize((size, size), Image.LANCZOS).save(iconset / f"icon_{size}x{size}.png")
-            base.resize((size * 2, size * 2), Image.LANCZOS).save(iconset / f"icon_{size}x{size}@2x.png")
-        subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(ICNS_OUT)], check=True)
-
+    # Pillow writes the complete modern ICNS size set. This is also portable;
+    # macOS 26's iconutil rejects even iconsets it just extracted itself.
+    base.save(ICNS_OUT, format="ICNS")
     base.save(ICO_OUT, sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 
     print(f"Wrote {ICNS_OUT}")

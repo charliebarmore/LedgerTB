@@ -137,6 +137,7 @@ def _fabricate_legacy_backup(record, backup_root):
 
     from database import connection as dbconn
 
+    # This exact prefix was emitted before the product rename.
     legacy_db = backup_root / "probooks-20260701T000000000000Z.db"
     shutil.copy2(record.database_path, legacy_db)
     conn = dbconn.open_keyed(legacy_db)
@@ -201,7 +202,7 @@ def test_adoption_refuses_backups_it_cannot_verify(db, tmp_path):
 
     backup_root = tmp_path / "backups"
     backup_root.mkdir()
-    foreign = backup_root / "probooks-20260601T000000000000Z.db"
+    foreign = backup_root / "ledgertb-20260601T000000000000Z.db"
     plain = sqlite3.connect(foreign)  # unreadable under our key, like a
     plain.execute("CREATE TABLE t (x)")  # backup keyed by another passphrase
     plain.commit()

@@ -101,10 +101,10 @@ _ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 def apply_sidebar_style():
     """Inject the narrow-sidebar CSS and the app logo. Safe to call on every page."""
-    wordmark = _ASSETS_DIR / "probooks-wordmark.png"
+    wordmark = _ASSETS_DIR / "ledgertb-wordmark.png"
     if wordmark.exists():
         st.logo(str(wordmark), size="large",
-                icon_image=str(_ASSETS_DIR / "probooks-mark.png"))
+                icon_image=str(_ASSETS_DIR / "ledgertb-mark.png"))
     st.html(_SIDEBAR_CSS)
 
 

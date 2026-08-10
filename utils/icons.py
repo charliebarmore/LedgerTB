@@ -1,4 +1,4 @@
-"""Material Symbols used throughout the ProBooks navigation."""
+"""Material Symbols used throughout the LedgerTB navigation."""
 
 SECURITY = ":material/security:"
 ADD_CLIENT = ":material/person_add:"

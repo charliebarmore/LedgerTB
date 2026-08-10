@@ -1,58 +1,63 @@
-# Running ProBooks as a desktop app
+# Running LedgerTB as a desktop app
 
-ProBooks can run in its own native window (no browser tab, no terminal) via
+LedgerTB can run in its own native window (no browser tab, no terminal) via
 `pywebview`. Everything stays local — this only changes how the app is launched
 and displayed.
 
 ## One-time setup
 
-Install the desktop dependency into the same Python that runs ProBooks:
+Install the desktop dependency into the same Python that runs LedgerTB:
 
 ```bash
 python -m pip install -r requirements-desktop.txt
 ```
 
-(If ProBooks runs under a different Python than the one on your PATH, install
-there instead and set `PROBOOKS_PYTHON` — see below.)
+(If LedgerTB runs under a different Python than the one on your PATH, install
+there instead and set `LEDGERTB_PYTHON` — see below.)
 
 ## Launch it
 
-- **Double-click `ProBooks.app`** in the project folder, or
+- **Double-click `LedgerTB.app`** in the project folder, or
 - Run it from a terminal:
 
   ```bash
   python desktop.py
   ```
 
-A native ProBooks window opens with the navy **PB** icon in the Dock. Close the
+A native LedgerTB window opens with the navy **LT** icon in the Dock. Close the
 window to shut the app (and its background server) down cleanly.
 
 > First launch: macOS may say the app is from an unidentified developer (it's an
-> unsigned, locally-built app). Right-click `ProBooks.app` → **Open** once, and
+> unsigned, locally-built app). Right-click `LedgerTB.app` → **Open** once, and
 > it will open normally thereafter.
 
 ## How it works
 
 `desktop.py` starts Streamlit headless on a private `127.0.0.1` port, waits for
-it to be ready, then shows that URL in a pywebview window. `ProBooks.app` is a
+it to be ready, then shows that URL in a pywebview window. `LedgerTB.app` is a
 thin macOS wrapper that runs `desktop.py` from this folder.
 
-- **Which Python it uses:** `ProBooks.app` tries `PROBOOKS_PYTHON` first, then
+- **Which Python it uses:** `LedgerTB.app` tries `LEDGERTB_PYTHON` first, then
   a repo-local `.macos-venv`, then `python3` on your PATH. Set
-  `PROBOOKS_PYTHON` if it picks the wrong one. `python desktop.py` just uses
+  `LEDGERTB_PYTHON` if it picks the wrong one. `python desktop.py` just uses
   whatever `python` is on your PATH.
-- **Logs:** double-click launches write output to `~/Library/Logs/ProBooks.log`
+- **Logs:** double-click launches write output to `~/Library/Logs/LedgerTB.log`
   — check there if the window doesn't appear.
 - **Data location:** unchanged from the normal app. Before storing **real**
-  client data, set `PROBOOKS_DB_PATH` to a location your firm's encrypted
+  client data, set `LEDGERTB_DB_PATH` to a location your firm's encrypted
   backup covers (see `config.py`).
 - **Backup location:** defaults to the app data directory. Override it with
-  `PROBOOKS_BACKUP_DIR`; the in-app Data Safety page shows the active database
+  `LEDGERTB_BACKUP_DIR`; the in-app Data Safety page shows the active database
   and verified-backup status.
+
+Existing ProBooks installations are detected in their previous application-data
+folder and used in place; LedgerTB does not move financial data automatically.
+The old `PROBOOKS_PYTHON`, `PROBOOKS_DB_PATH`, and `PROBOOKS_BACKUP_DIR`
+environment names remain accepted during the transition.
 
 ## Regenerating the icon
 
-The Dock icon is `ProBooks.app/Contents/Resources/ProBooks.icns`, built from
+The Dock icon is `LedgerTB.app/Contents/Resources/LedgerTB.icns`, built from
 `scripts/make_icon.py`:
 
 ```bash
@@ -63,8 +68,8 @@ python scripts/make_icon.py
 
 # Standalone app (no Python required)
 
-The above `ProBooks.app` is a thin wrapper that still needs Python + the deps
-installed. You can also build a **fully standalone** `ProBooks.app` that bundles
+The above `LedgerTB.app` is a thin wrapper that still needs Python + the deps
+installed. You can also build a **fully standalone** `LedgerTB.app` that bundles
 Python and every dependency — installable on a Mac with no Python at all (e.g.
 to hand to a colleague).
 
@@ -91,33 +96,33 @@ For a tested, repeatable local release, use the wrapper instead:
 ./scripts/install_local.sh   # explicit: copies to /Applications
 ```
 
-After installation, open ProBooks from Applications, Control-click its Dock
+After installation, open LedgerTB from Applications, Control-click its Dock
 icon, and choose **Options → Keep in Dock**.
 
-Output: `dist/ProBooks.app` (~530 MB — it bundles Python, Streamlit, pandas,
-etc.). Double-click it, or `open dist/ProBooks.app`.
+Output: `dist/LedgerTB.app` (~530 MB — it bundles Python, Streamlit, pandas,
+etc.). Double-click it, or `open dist/LedgerTB.app`.
 
 The spec trims the bundle by excluding heavy libraries the app never uses
 (scipy, scikit-learn, Qt, LLVM, matplotlib, the Jupyter stack, …) — see
-`EXCLUDES` in `ProBooks.spec`. `PROBOOKS_MODE=selfcheck dist/ProBooks.app/Contents/MacOS/ProBooks`
+`EXCLUDES` in `LedgerTB.spec`. `LEDGERTB_MODE=selfcheck dist/LedgerTB.app/Contents/MacOS/LedgerTB`
 imports every runtime dependency and reports, to confirm a trim didn't drop
 anything.
 
 ## How the standalone build works
 
-- `run_probooks.py` is the entry point. The one binary runs in two modes: the
+- `run_ledgertb.py` is the entry point. The one binary runs in two modes: the
   parent shows the pywebview window; it re-launches *itself* in `server` mode
   (a child process) to run Streamlit as that process's main thread.
-- `ProBooks.spec` bundles the app source (`app.py`, `pages/`, `models/`,
+- `LedgerTB.spec` bundles the app source (`app.py`, `pages/`, `models/`,
   `services/`, `database/` incl. the migration `.sql`, `utils/`, `.streamlit/`)
   as data, plus Streamlit and all deps.
 - **Data location (frozen):** because the app bundle is read-only, a standalone
   build keeps its database and saved API key in
-  `~/Library/Application Support/ProBooks/`. (Running from source still uses the
-  repo `data/` folder.) Set `PROBOOKS_DB_PATH` to a location your firm's
+  `~/Library/Application Support/LedgerTB/`. (Running from source still uses the
+  repo `data/` folder.) Set `LEDGERTB_DB_PATH` to a location your firm's
   encrypted backup covers before storing real client data, as always.
 - **First open (unsigned build):** a plain build is ad-hoc signed, so macOS
-  Gatekeeper will warn. Right-click `dist/ProBooks.app` → **Open** once. Fine for
+  Gatekeeper will warn. Right-click `dist/LedgerTB.app` → **Open** once. Fine for
   personal use.
 
 `build/` and `dist/` are gitignored (build artifacts); the spec, entry point,
@@ -132,8 +137,8 @@ membership ($99/yr) — everything else is wired up:
 - `scripts/entitlements.plist` — the Hardened Runtime entitlements a bundled
   Python needs (JIT / unsigned executable memory / library validation off /
   outbound network).
-- `ProBooks.spec` signs the bundle **during the build** (inside-out, hardened
-  runtime) when `PROBOOKS_CODESIGN_ID` is set.
+- `LedgerTB.spec` signs the bundle **during the build** (inside-out, hardened
+  runtime) when `LEDGERTB_CODESIGN_ID` is set.
 - `scripts/notarize.sh` verifies, submits to Apple's notary service, and staples
   the ticket.
 
@@ -142,7 +147,7 @@ One-time setup and the two commands are documented at the top of
 
 ```bash
 # after a one-time cert + notarytool credential setup:
-PROBOOKS_CODESIGN_ID="Developer ID Application: Your Name (TEAMID)" \
-  pyinstaller ProBooks.spec --noconfirm
+LEDGERTB_CODESIGN_ID="Developer ID Application: Your Name (TEAMID)" \
+  pyinstaller LedgerTB.spec --noconfirm
 ./scripts/notarize.sh
 ```

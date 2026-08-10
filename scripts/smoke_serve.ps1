@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Start the built ProBooks.exe as a server and prove it actually serves a page.
+    Start the built LedgerTB.exe as a server and prove it actually serves a page.
 
 .DESCRIPTION
-    PROBOOKS_MODE=selfcheck answers "are all the parts in the box?" - it imports
+    LEDGERTB_MODE=selfcheck answers "are all the parts in the box?" - it imports
     the runtime modules and exits. It does NOT start the server or request a
     page, which is how build 31013372986 passed every gate and still returned
     HTTP 500 on every request: starlette 1.4.0 made an argument required that
@@ -24,7 +24,7 @@
     runs pwsh (7.x, UTF-8 by default) and would not notice.
 
 .PARAMETER ExePath
-    Path to the built ProBooks.exe. Defaults to the standard build output.
+    Path to the built LedgerTB.exe. Defaults to the standard build output.
 
 .PARAMETER Port
     Local port to serve on. Defaults to 8599.
@@ -35,11 +35,11 @@
 
 .EXAMPLE
     pwsh scripts/smoke_serve.ps1
-    pwsh scripts/smoke_serve.ps1 -ExePath dist/ProBooks/ProBooks.exe
+    pwsh scripts/smoke_serve.ps1 -ExePath dist/LedgerTB/LedgerTB.exe
 #>
 [CmdletBinding()]
 param(
-    [string]$ExePath = "dist/ProBooks/ProBooks.exe",
+    [string]$ExePath = "dist/LedgerTB/LedgerTB.exe",
     [int]$Port = 8599,
     [int]$TimeoutSeconds = 90
 )
@@ -49,13 +49,13 @@ if (-not (Test-Path $ExePath)) {
     exit 1
 }
 
-$logDir = Join-Path ([System.IO.Path]::GetTempPath()) "probooks-smoke"
+$logDir = Join-Path ([System.IO.Path]::GetTempPath()) "ledgertb-smoke"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $outLog = Join-Path $logDir "server.out.log"
 $errLog = Join-Path $logDir "server.err.log"
 
-$env:PROBOOKS_MODE = "server"
-$env:PROBOOKS_PORT = "$Port"
+$env:LEDGERTB_MODE = "server"
+$env:LEDGERTB_PORT = "$Port"
 
 Write-Host "smoke check: starting $ExePath on 127.0.0.1:$Port"
 $proc = Start-Process -FilePath $ExePath -PassThru -WindowStyle Hidden `

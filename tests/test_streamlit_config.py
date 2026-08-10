@@ -15,6 +15,6 @@ def test_checked_in_streamlit_config_binds_to_loopback():
 
 
 def test_launchers_and_source_instructions_bind_to_loopback():
-    for relative_path in ("desktop.py", "run_probooks.py", "README.md"):
+    for relative_path in ("desktop.py", "run_ledgertb.py", "README.md"):
         contents = (ROOT / relative_path).read_text(encoding="utf-8")
         assert "server.address=127.0.0.1" in contents, relative_path

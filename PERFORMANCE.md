@@ -1,6 +1,6 @@
 # Performance baselines
 
-ProBooks has generated, repeatable volume fixtures before query or rendering
+LedgerTB has generated, repeatable volume fixtures before query or rendering
 optimization begins. The fixtures never read or alter the live books database.
 Pytest creates a temporary SQLite database and deletes it after each test.
 
@@ -23,9 +23,9 @@ pytest -q -m performance -s
 
 They also run with the normal test suite. The default limits are deliberately
 generous regression tripwires, not performance promises or production SLAs.
-Slower CI can override them with `PROBOOKS_PERF_FIXTURE_SECONDS`,
-`PROBOOKS_PERF_QUERY_SECONDS`, `PROBOOKS_PERF_PAGE_SECONDS`,
-`PROBOOKS_PERF_CSV_SECONDS`, and `PROBOOKS_PERF_CSV_PEAK_MIB`.
+Slower CI can override them with `LEDGERTB_PERF_FIXTURE_SECONDS`,
+`LEDGERTB_PERF_QUERY_SECONDS`, `LEDGERTB_PERF_PAGE_SECONDS`,
+`LEDGERTB_PERF_CSV_SECONDS`, and `LEDGERTB_PERF_CSV_PEAK_MIB`.
 
 When optimizing, capture the printed JSON before and after the change on the
 same machine. Preserve the correctness assertions: counts, balanced totals,
