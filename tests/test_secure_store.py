@@ -16,9 +16,28 @@ def test_secure_store_roundtrip(monkeypatch):
     values = {}
     monkeypatch.setattr("keyring.set_password", lambda service, name, value: values.__setitem__((service, name), value))
     monkeypatch.setattr("keyring.get_password", lambda service, name: values.get((service, name)))
+    monkeypatch.setattr("keyring.delete_password", lambda service, name: values.pop((service, name), None))
 
     set_secret("api", "secret")
     assert get_secret("api") == "secret"
+
+
+def test_writes_never_leave_a_stale_legacy_value_behind(monkeypatch):
+    """Turning the assistant dial down must reach the old service name too —
+    a stale legacy entry would let a still-installed ProBooks build keep
+    enforcing the higher, superseded level."""
+    values = {(LEGACY_SERVICE_NAME, "mcp_access_level"): "post"}
+    monkeypatch.setattr("keyring.set_password",
+                        lambda service, name, value:
+                        values.__setitem__((service, name), value))
+    monkeypatch.setattr("keyring.get_password",
+                        lambda service, name: values.get((service, name)))
+    monkeypatch.setattr("keyring.delete_password",
+                        lambda service, name: values.pop((service, name)))
+
+    set_secret("mcp_access_level", "read")
+    assert values.get((SERVICE_NAME, "mcp_access_level")) == "read"
+    assert (LEGACY_SERVICE_NAME, "mcp_access_level") not in values
 
 
 def test_probooks_vault_entry_is_copied_and_remains_readable(monkeypatch):

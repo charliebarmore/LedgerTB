@@ -18,7 +18,7 @@
 ; admin prompt, and needing one turns "try this" into "file a ticket".
 ;
 ; BUILD
-;   iscc /DAppVersion=1.1.0 scripts\ledgertb.iss
+;   iscc /DAppVersion=1.0.0 scripts\ledgertb.iss
 ; Expects the PyInstaller output at dist\LedgerTB\ relative to the repo root.
 
 #ifndef AppVersion

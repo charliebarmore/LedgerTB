@@ -32,6 +32,12 @@ FAV_T = [(44, 52, 168, 28), (114, 52, 28, 116)]
 FAV_RULES = [(56, 188, 144, 10), (56, 206, 144, 10)]
 
 
+def draw_mark(size: int, *, field: bool = True, simplified: bool = False) -> Image.Image:
+    """The LedgerTB mark at any size. Shared by the icon and wordmark
+    generators so every surface renders the one brand identity."""
+    return _draw(size, field=field, simplified=simplified)
+
+
 def _draw(size: int, *, field: bool, simplified: bool = False) -> Image.Image:
     s = size / 256
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))

@@ -96,10 +96,19 @@ def _book_backup_dir(backup_dir: Path, book_id: str) -> Path:
     return Path(backup_dir) / book_id
 
 
+def _mtime_or_zero(path: Path) -> int:
+    # The sort key stats each file, and backup_health runs on every sidebar
+    # render — a backup pruned between glob and stat must sort, not crash.
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 def _backup_paths(directory: Path) -> list[Path]:
     """New LedgerTB backups plus ProBooks-era backups, without duplicates."""
     found = {path for pattern in _BACKUP_PATTERNS for path in directory.glob(pattern)}
-    return sorted(found, key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    return sorted(found, key=_mtime_or_zero, reverse=True)
 
 
 def create_backup(

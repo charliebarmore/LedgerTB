@@ -45,26 +45,21 @@ The app is self-contained — no Python and no dependencies to install. Your boo
 live in an encrypted database under your user profile, never inside the app
 folder, so upgrading keeps your data and uninstalling does not delete it.
 
-### Upgrading from ProBooks
+### If you ran a pre-release ProBooks build
 
-LedgerTB 1.1 is a product rename, not a new accounting engine. Existing
-`.probooks` book files, saved book choices, verified `probooks-*` backups,
-credential-vault entries, and `PROBOOKS_*` environment settings remain
-supported. New books use the `.ledgertb` extension and new configuration should
-use `LEDGERTB_*`. The app deliberately reuses an existing ProBooks data folder
-instead of moving financial data during startup.
+ProBooks was LedgerTB's pre-release name; it never shipped publicly. If you
+tested one of those builds, everything keeps working: existing `.probooks`
+book files, saved book choices, `probooks-*` backups, credential-vault
+entries, and `PROBOOKS_*` environment settings are all still honored, and the
+app reuses your existing data folder rather than moving financial data. New
+books use the `.ledgertb` extension and new configuration uses `LEDGERTB_*`.
 
-On Windows, the LedgerTB installer retains the prior installer's upgrade
-identity, so it replaces the ProBooks installation while preserving books kept
-under your user profile. On macOS, verify that LedgerTB opens the expected book
-before manually removing an older `/Applications/ProBooks.app`; the installer
-scripts never delete the old app or any book data automatically.
-
-If assistant access was configured before the rename, open **Data Safety →
-Assistant access** and replace the old ProBooks MCP entry in your assistant's
-configuration with the newly generated LedgerTB entry. Access remains off by
-default and each book keeps its existing permission stored in the credential
-vault.
+LedgerTB installs as its own program. On Windows, remove the old ProBooks
+entry from Add/Remove Programs; on macOS, delete the old
+`/Applications/ProBooks.app` once LedgerTB opens your book. Neither the
+installer nor the app ever deletes book data. If assistant (MCP) access was
+configured, point your assistant's configuration at the LedgerTB binary and
+re-approve access from Data Safety.
 
 ## Quickstart (from source)
 

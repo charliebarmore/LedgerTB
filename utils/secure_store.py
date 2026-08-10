@@ -20,9 +20,10 @@ def get_secret(name: str) -> Optional[str]:
         legacy = _read(keyring, LEGACY_SERVICE_NAME, name)
         if not legacy:
             return None
-        # Copy, verify, and retain the old entry so an older installed build
-        # remains usable during the transition. A later explicit delete clears
-        # both names to prevent a disabled credential from resurfacing.
+        # Copy and retain on READ so an older installed build stays usable
+        # during the transition. Any WRITE (set_secret/delete_secret) is
+        # authoritative and clears the legacy name — a read-only fallback must
+        # never resurrect a value the user has since changed or revoked.
         try:
             keyring.set_password(SERVICE_NAME, name, legacy)
             if _read(keyring, SERVICE_NAME, name) != legacy:
@@ -41,6 +42,15 @@ def set_secret(name: str, value: str) -> None:
     keyring.set_password(SERVICE_NAME, name, value)
     if keyring.get_password(SERVICE_NAME, name) != value:
         raise RuntimeError("The credential vault did not verify the saved secret.")
+    # A write is authoritative for BOTH service names. Leaving a stale copy
+    # under the old ProBooks service would let an old installed build keep
+    # enforcing a superseded value — e.g. an assistant access level the user
+    # has since turned down. The verified new-name write above stands even if
+    # the vault refuses the legacy delete.
+    try:
+        keyring.delete_password(LEGACY_SERVICE_NAME, name)
+    except Exception:
+        pass
 
 
 def delete_secret(name: str) -> None:

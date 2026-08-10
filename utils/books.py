@@ -18,7 +18,8 @@ from config import USER_DATA_DIR, app_env
 SETTINGS_PATH = USER_DATA_DIR / "books.json"
 MAX_RECENT = 8
 BOOK_EXTENSION = ".ledgertb"
-LEGACY_BOOK_EXTENSION = ".probooks"
+# ProBooks-era ".probooks" files keep working with no special handling: book
+# selection is entirely path-based, so no legacy-extension code path exists.
 
 
 def _load() -> dict:
