@@ -37,7 +37,15 @@ Files in `logos/`:
 
 Rules: keep clear space of at least the crossbar's height around the mark;
 don't recolor it, outline it, rotate it, or set it on white without switching
-to `mark-mono-dark.svg`; below 64px always use the simplified favicon variant.
+to `mark-mono-dark.svg`.
+
+**Use the full mark everywhere it is drawn as vector or from a high-resolution
+source** — it stays readable down to about 30px, which covers site headers and
+footers, the app sidebar, and Dock icons. The simplified variant is only for
+small *raster* renders where the column entries would turn to mush: browser
+tab favicons, Windows taskbar `.ico` sizes, 16–32px PNGs. Two variants on one
+surface reads as two logos, so pick by how the mark is being drawn, not by
+how big it happens to be.
 
 ## Color
 
