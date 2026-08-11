@@ -184,7 +184,7 @@ jobs:
           name: ledgertb-release-assets-${{ github.run_id }}
           path: release-assets
 
-      - name: Create draft release
+      - name: Create or update draft release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
@@ -193,7 +193,13 @@ jobs:
           # fails with "not a git repository". Name it explicitly.
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$RELEASE_TAG" release-assets/* \
-            --draft \
-            --generate-notes \
-            --verify-tag
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            # A never-published tag may be rebuilt during release preparation.
+            # Preserve its reviewed notes while replacing only verified assets.
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          else
+            gh release create "$RELEASE_TAG" release-assets/* \
+              --draft \
+              --generate-notes \
+              --verify-tag
+          fi
