@@ -43,7 +43,9 @@ jobs:
           detect-secrets-hook -- "${tracked_files[@]}"
 
       - name: Audit release dependencies
-        run: pip-audit --no-deps --disable-pip -r requirements-windows.lock
+        run: |
+          pip-audit --no-deps --disable-pip -r requirements-windows.lock
+          pip-audit --no-deps --disable-pip -r requirements-macos-arm64.lock
 
       - name: Audit GitHub Actions workflows
         run: zizmor --pedantic --offline .github/workflows

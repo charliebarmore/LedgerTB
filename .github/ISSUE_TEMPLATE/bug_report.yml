@@ -36,6 +36,7 @@ body:
       options:
         - Windows installer
         - Windows ZIP
+        - macOS download
         - macOS local build
         - Running from source
         - Other
