@@ -3,10 +3,17 @@
 # read-only token and no secrets.
 name: Tests
 
+# The landing page and brand assets ship in this repo so the marketing claims
+# stay next to the code they describe — but nothing under them can affect a
+# test, so editing copy should not run the suite. Markdown deliberately still
+# does: tests/test_streamlit_config.py reads README.md to check the documented
+# run command still pins the server to loopback.
 on:
   pull_request:
+    paths-ignore: ['site/**', 'branding/**']
   push:
     branches: [main]
+    paths-ignore: ['site/**', 'branding/**']
   workflow_dispatch:
 
 permissions:
