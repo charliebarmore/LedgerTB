@@ -45,8 +45,8 @@ LEDGERTB_MODE=selfcheck "$BIN"
 
 if [ -n "${LEDGERTB_CODESIGN_ID:-}" ]; then
   echo "==> Signing bundle with Developer ID"
-  # No --timestamp for local builds: it needs one Apple round-trip per nested
-  # binary and only matters for notarization (notarize.sh re-signs with it).
+  # No --timestamp for local builds: it only matters for notarization.
+  # notarize.sh re-signs the finished bundle with a secure timestamp.
   codesign --force --deep --options runtime \
     --entitlements scripts/entitlements.plist \
     -s "$LEDGERTB_CODESIGN_ID" "$APP"

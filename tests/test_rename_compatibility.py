@@ -56,3 +56,20 @@ def test_release_build_clears_both_signing_aliases_during_packaging():
     text = script.read_text()
     assert "LEDGERTB_CODESIGN_ID= PROBOOKS_CODESIGN_ID=" in text
     assert 'codesign --force --deep --options runtime' in text
+
+
+def test_frozen_app_never_writes_bytecode_inside_signed_bundle():
+    launcher = Path(__file__).parents[1] / "run_ledgertb.py"
+    text = launcher.read_text()
+    frozen_guard = 'if getattr(sys, "frozen", False):'
+    assert text.index(frozen_guard) < text.index("import pandas")
+    assert "sys.dont_write_bytecode = True" in text
+
+
+def test_notarization_timestamps_and_packages_the_stapled_app():
+    script = Path(__file__).parents[1] / "scripts" / "notarize.sh"
+    text = script.read_text()
+    assert "codesign --force --deep --timestamp --options runtime" in text
+    assert text.index("xcrun stapler staple") < text.rindex(
+        'ditto -c -k --keepParent "$APP" "$ZIP"'
+    )

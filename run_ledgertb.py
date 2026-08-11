@@ -24,6 +24,13 @@ import time
 import urllib.request
 from pathlib import Path
 
+# LedgerTB's own modules are bundled as source files because Streamlit needs to
+# execute and scan them from disk. A frozen app must never write __pycache__
+# files beside that source: doing so mutates the sealed .app after signing and
+# makes Gatekeeper reject it on a later launch.
+if getattr(sys, "frozen", False):
+    sys.dont_write_bytecode = True
+
 # --- ensure PyInstaller bundles the app's third-party deps (imported by the
 # app's models/services at runtime, which analysis of this file wouldn't see) ---
 import pandas          # noqa: F401
