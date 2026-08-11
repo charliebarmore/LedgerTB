@@ -63,7 +63,10 @@ def test_export_writes_both_files_at_read_level(client_id, accounts, tmp_path,
     assert pdf.startswith(b"%PDF")
 
     wb = openpyxl.load_workbook(BytesIO(open(result["xlsx"], "rb").read()))
-    assert set(wb.sheetnames) >= {"Summary", "Trial Balance", "Transactions"}
+    assert set(wb.sheetnames) >= {
+        "Summary", "Income Statement", "Balance Sheet", "Trial Balance",
+        "Transactions",
+    }
 
     # Gap-2 regression: the TOTALS row must be numbers, never formula text —
     # openpyxl caches no results, so "=SUM(...)" reads as a literal string in

@@ -504,8 +504,8 @@ with btn_cols[1]:
         )
 
 with btn_cols[2]:
-    # Everything needed to hand off a finished period: final TB, all
-    # transactions, the AJEs, and receipts/disbursements per cash account.
+    # Everything needed to hand off a finished period: financial statements,
+    # final TB, all transactions, AJEs, and cash-account activity.
     # PDF is the file/record copy; the Excel workbook is for further work.
     # (Replaced the old attest-claw bridge export.)
     if rows:
@@ -529,8 +529,9 @@ with btn_cols[2]:
             data=pdf,
             file_name=f"ClosePackage_{client.name}_{period_end.strftime('%Y%m%d')}.pdf",
             mime="application/pdf",
-            help="One PDF: summary with tie-outs, final trial balance, "
-                 "transactions, adjusting entries, receipts & disbursements",
+            help="One PDF: summary with tie-outs, income statement, balance "
+                 "sheet, final trial balance, transactions, adjusting entries, "
+                 "receipts & disbursements",
             on_click=AuditLog.log_event,
             args=(client_id, "EXPORT", "close_package_export", {
                 "format": "pdf",

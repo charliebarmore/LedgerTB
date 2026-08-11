@@ -69,9 +69,42 @@ def test_workbook_sheets_and_tie_outs(booked_period, accounts):
     wb = openpyxl.load_workbook(BytesIO(package.read()))
 
     assert wb.sheetnames == [
-        "Summary", "Trial Balance", "Transactions",
-        "Adjusting Entries", "Receipts & Disbursements",
+        "Summary", "Income Statement", "Balance Sheet", "Trial Balance",
+        "Transactions", "Adjusting Entries", "Receipts & Disbursements",
     ]
+
+    # Core financial statements are part of the package, not separate exports.
+    income = wb["Income Statement"]
+    income_values = {
+        income.cell(row=i, column=1).value: income.cell(row=i, column=2).value
+        for i in range(1, income.max_row + 1)
+    }
+    assert income_values["Total Revenue"] == pytest.approx(240.0)
+    assert income_values["Total Expenses"] == pytest.approx(50.0)
+    assert income_values["NET INCOME"] == pytest.approx(190.0)
+
+    balance = wb["Balance Sheet"]
+    balance_values = {
+        balance.cell(row=i, column=1).value: balance.cell(row=i, column=2).value
+        for i in range(1, balance.max_row + 1)
+    }
+    assert balance_values["Total Assets"] == pytest.approx(690.0)
+    assert balance_values["TOTAL LIABILITIES & EQUITY"] == pytest.approx(690.0)
+    assert balance_values["BALANCE CHECK"] == pytest.approx(0.0)
+
+    # Every supporting-table header must fit its Excel column. This guards the
+    # close package against unreadable Activity/AJE/receipt headers.
+    for sheet_name in [
+        "Trial Balance", "Transactions", "Adjusting Entries",
+        "Receipts & Disbursements",
+    ]:
+        sheet = wb[sheet_name]
+        for cell in sheet[1]:
+            required = min(len(str(cell.value)) + 2, 40)
+            actual = sheet.column_dimensions[cell.column_letter].width
+            assert actual >= required, (
+                f"{sheet_name}!{cell.coordinate} is clipped: {actual} < {required}"
+            )
 
     # Transactions sheet: 7 in-period lines under 1 header row
     tx = wb["Transactions"]
@@ -163,14 +196,18 @@ def test_pdf_package_contains_every_section(booked_period, accounts):
                 page.close()
         text = "\n".join(pages)
         for heading in ["Close Package", "Summary", "Cash Activity",
+                        "Income Statement", "Balance Sheet",
                         "Final Trial Balance", "Transactions",
                         "Adjusting Journal Entries"]:
             assert heading in text, f"missing section {heading!r}"
         # tie-outs appear in print: cash walk and the AJE reference
         assert "AJE-1" in text
         assert "690.00" in text          # ending cash
+        assert "240.00" in text          # total revenue
+        assert "190.00" in text          # net income
+        assert "Balance sheet is in balance." in text
         assert "TOTALS" in text
-        assert len(doc) >= 4
+        assert len(doc) >= 6
     finally:
         doc.close()
 
@@ -189,6 +226,12 @@ def test_pdf_and_excel_can_share_one_captured_snapshot(
     monkeypatch.setattr(close_package, "get_period_transactions", unexpected_reload)
     monkeypatch.setattr(close_package, "get_cash_activity", unexpected_reload)
     monkeypatch.setattr(close_package, "get_branding", unexpected_reload)
+    monkeypatch.setattr(
+        close_package.ReportGenerator, "income_statement", unexpected_reload
+    )
+    monkeypatch.setattr(
+        close_package.ReportGenerator, "balance_sheet", unexpected_reload
+    )
 
     xlsx = build_close_package(
         booked_period, "Test Co", *Q1, tb_rows, snapshot=snapshot

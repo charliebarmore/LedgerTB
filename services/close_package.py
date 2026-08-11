@@ -1,19 +1,19 @@
 """Close package: everything a reviewer needs to tie out a finished period.
 
 Two formats from the same underlying data — an Excel workbook for further
-work, and a single multi-section PDF for the permanent file: Summary, final
-Trial Balance (with the worksheet columns), Transactions (every journal line
-in the period), Adjusting Entries, and Receipts & Disbursements per cash
-account.
+work, and a single multi-section PDF for the permanent file: Summary, Income
+Statement, Balance Sheet, final Trial Balance (with the worksheet columns),
+Transactions (every journal line in the period), Adjusting Entries, and
+Receipts & Disbursements per cash account.
 """
 from dataclasses import dataclass
 from contextlib import contextmanager
 from datetime import date, datetime
 from io import BytesIO
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import openpyxl
-from openpyxl.styles import Font
+from openpyxl.styles import Border, Font, Side
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib.styles import ParagraphStyle
@@ -31,7 +31,7 @@ from reportlab.platypus import (
 
 from database import connection as dbconn
 from database.connection import get_connection, get_cursor
-from models.reports import TrialBalanceWorksheetRow
+from models.reports import ReportGenerator, TrialBalanceWorksheetRow
 from money import to_dollars
 from services.branding import FirmBranding, get_branding
 from utils.dates import long_date, long_datetime
@@ -39,6 +39,7 @@ from utils.export import set_excel_literal
 
 _HEADER_FONT = Font(bold=True)
 _MONEY_FMT = "#,##0.00"
+_TOTAL_BORDER = Border(top=Side(style="thin", color="000000"))
 
 
 @contextmanager
@@ -79,6 +80,8 @@ class CashActivityRow:
 class ClosePackageSnapshot:
     transactions: List[dict]
     cash: List[CashActivityRow]
+    income_statement: Dict
+    balance_sheet: Dict
     branding: FirmBranding
     generated_at: datetime
 
@@ -170,6 +173,10 @@ def load_close_package_snapshot(
     return ClosePackageSnapshot(
         transactions=get_period_transactions(client_id, period_start, period_end),
         cash=get_cash_activity(client_id, period_start, period_end),
+        income_statement=ReportGenerator.income_statement(
+            client_id, period_start, period_end
+        ),
+        balance_sheet=ReportGenerator.balance_sheet(client_id, period_end),
         branding=get_branding(),
         generated_at=datetime.now(),
     )
@@ -185,6 +192,7 @@ def _append_literal_row(ws, values):
 
 
 def _write_table(ws, headers, data_rows, money_cols):
+    money_cols = tuple(money_cols)
     _append_literal_row(ws, headers)
     for cell in ws[1]:
         cell.font = _HEADER_FONT
@@ -194,10 +202,66 @@ def _write_table(ws, headers, data_rows, money_cols):
         for row in ws.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
             for cell in row:
                 cell.number_format = _MONEY_FMT
-    widths = {1: 12, 2: 34}
-    for col_idx, width in widths.items():
-        if col_idx <= ws.max_column:
-            ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
+    # Size every populated column from its actual role and contents. The old
+    # fixed widths assumed column 2 was always Account Name, which made Entry #
+    # enormous on transaction sheets while later money headers were clipped.
+    for col_idx in range(1, ws.max_column + 1):
+        values = (
+            ws.cell(row=row_idx, column=col_idx).value
+            for row_idx in range(1, ws.max_row + 1)
+        )
+        longest = max((len(str(value)) for value in values
+                       if value is not None), default=0)
+        minimum = 13 if col_idx in money_cols else 10
+        width = min(max(longest + 2, minimum), 40)
+        ws.column_dimensions[
+            openpyxl.utils.get_column_letter(col_idx)
+        ].width = width
+
+
+def _statement_label(item: dict) -> str:
+    """Account label shared by the two financial-statement sheets."""
+    number = item.get("account_number") or ""
+    return f"{number} - {item['name']}" if number else item["name"]
+
+
+def _start_statement_sheet(wb, title: str, client_name: str, period_label: str):
+    ws = wb.create_sheet(title)
+    _append_literal_row(ws, [client_name, ""])
+    ws["A1"].font = Font(bold=True, size=14)
+    _append_literal_row(ws, [title, period_label])
+    ws["A2"].font = Font(bold=True, size=12)
+    ws["B2"].font = _HEADER_FONT
+    _append_literal_row(ws, ["", ""])
+    ws.column_dimensions["A"].width = 46
+    ws.column_dimensions["B"].width = 18
+    ws.sheet_view.showGridLines = False
+    return ws
+
+
+def _append_statement_section(ws, title: str, items: List[dict],
+                              total_label: str, total_value: float):
+    section_cells = _append_literal_row(ws, [title.upper(), ""])
+    for cell in section_cells:
+        cell.font = _HEADER_FONT
+    for item in items:
+        cells = _append_literal_row(
+            ws, [_statement_label(item), item["balance"]]
+        )
+        cells[1].number_format = _MONEY_FMT
+    total_cells = _append_literal_row(ws, [total_label, total_value])
+    for cell in total_cells:
+        cell.font = _HEADER_FONT
+        cell.border = _TOTAL_BORDER
+    total_cells[1].number_format = _MONEY_FMT
+
+
+def _append_statement_total(ws, label: str, value: float):
+    cells = _append_literal_row(ws, [label, value])
+    for cell in cells:
+        cell.font = _HEADER_FONT
+        cell.border = _TOTAL_BORDER
+    cells[1].number_format = _MONEY_FMT
 
 
 def build_close_package(
@@ -215,6 +279,8 @@ def build_close_package(
     transactions = snapshot.transactions
     ajes = [t for t in transactions if t["entry_type"] == "Adjusting"]
     cash = snapshot.cash
+    income_statement = snapshot.income_statement
+    balance_sheet = snapshot.balance_sheet
 
     wb = openpyxl.Workbook()
 
@@ -236,6 +302,14 @@ def build_close_package(
         ("Final trial balance — total debits", total_dr),
         ("Final trial balance — total credits", total_cr),
         ("In balance", "YES" if abs(total_dr - total_cr) < 0.01 else "OUT OF BALANCE"),
+        ("Net income for period", income_statement["net_income"]),
+        ("Balance sheet — total assets", balance_sheet["total_assets"]),
+        ("Balance sheet — liabilities & equity",
+         balance_sheet["total_liabilities_equity"]),
+        ("Balance sheet in balance",
+         "YES" if abs(balance_sheet["total_assets"] -
+                      balance_sheet["total_liabilities_equity"]) < 0.01
+         else "OUT OF BALANCE"),
         ("Journal lines in period", len(transactions)),
         ("Adjusting entry lines", len(ajes)),
         ("", ""),
@@ -251,6 +325,52 @@ def build_close_package(
     ws["A1"].font = _HEADER_FONT
     ws.column_dimensions["A"].width = 38
     ws.column_dimensions["B"].width = 28
+
+    # ---- Income Statement
+    ws = _start_statement_sheet(
+        wb, "Income Statement", client_name,
+        f"{period_start.isoformat()} to {period_end.isoformat()}",
+    )
+    _append_statement_section(
+        ws, "Revenue", income_statement["revenues"],
+        "Total Revenue", income_statement["total_revenue"],
+    )
+    _append_literal_row(ws, ["", ""])
+    _append_statement_section(
+        ws, "Expenses", income_statement["expenses"],
+        "Total Expenses", income_statement["total_expenses"],
+    )
+    _append_literal_row(ws, ["", ""])
+    _append_statement_total(ws, "NET INCOME", income_statement["net_income"])
+
+    # ---- Balance Sheet
+    ws = _start_statement_sheet(
+        wb, "Balance Sheet", client_name, f"As of {period_end.isoformat()}",
+    )
+    _append_statement_section(
+        ws, "Assets", balance_sheet["assets"],
+        "Total Assets", balance_sheet["total_assets"],
+    )
+    _append_literal_row(ws, ["", ""])
+    _append_statement_section(
+        ws, "Liabilities", balance_sheet["liabilities"],
+        "Total Liabilities", balance_sheet["total_liabilities"],
+    )
+    _append_literal_row(ws, ["", ""])
+    _append_statement_section(
+        ws, "Equity", balance_sheet["equity"],
+        "Total Equity", balance_sheet["total_equity"],
+    )
+    _append_literal_row(ws, ["", ""])
+    _append_statement_total(
+        ws, "TOTAL LIABILITIES & EQUITY",
+        balance_sheet["total_liabilities_equity"],
+    )
+    _append_statement_total(
+        ws, "BALANCE CHECK",
+        round(balance_sheet["total_assets"] -
+              balance_sheet["total_liabilities_equity"], 2),
+    )
 
     # ---- Trial Balance (final, with the worksheet's supporting columns)
     ws = wb.create_sheet("Trial Balance")
@@ -373,6 +493,11 @@ def _money(value: float) -> str:
     return f"{value:,.2f}" if value else ""
 
 
+def _money_total(value: float) -> str:
+    """Display statement totals explicitly, including a meaningful zero."""
+    return f"{value:,.2f}"
+
+
 def _wrap(text: str) -> Paragraph:
     return Paragraph((text or "").replace("&", "&amp;").replace("<", "&lt;"), _PDF_BODY)
 
@@ -427,13 +552,15 @@ def build_close_package_pdf(
     tb_rows: List[TrialBalanceWorksheetRow],
     snapshot: Optional[ClosePackageSnapshot] = None,
 ) -> BytesIO:
-    """One presentable PDF: Summary, TB, Transactions, AJEs, R&D."""
+    """One presentable PDF: Summary, statements, TB, transactions, AJEs."""
     snapshot = snapshot or load_close_package_snapshot(
         client_id, period_start, period_end
     )
     transactions = snapshot.transactions
     ajes = [t for t in transactions if t["entry_type"] == "Adjusting"]
     cash = snapshot.cash
+    income_statement = snapshot.income_statement
+    balance_sheet = snapshot.balance_sheet
     period_label = f"{long_date(period_start)} to {long_date(period_end)}"
 
     branding = snapshot.branding
@@ -514,6 +641,87 @@ def build_close_package_pdf(
                  _money(round(sum(r.ending for r in cash), 2))]
                 if cash else None
             ),
+        ),
+        PageBreak(),
+    ]
+
+    # ---- Income Statement
+    story += [
+        Paragraph("Income Statement", heading_2),
+        Paragraph(period_label, _PDF_META),
+        Spacer(1, 12),
+        Paragraph("Revenue", heading_2),
+        _pdf_table(
+            ["Account", "Amount"],
+            [[_wrap(_statement_label(r)), _money(r["balance"])]
+             for r in income_statement["revenues"]]
+            or [["No revenue recorded", ""]],
+            [7.8 * inch, 2.0 * inch], money_from=1,
+            totals_row=["Total Revenue",
+                        _money_total(income_statement["total_revenue"])],
+        ),
+        Spacer(1, 12),
+        Paragraph("Expenses", heading_2),
+        _pdf_table(
+            ["Account", "Amount"],
+            [[_wrap(_statement_label(e)), _money(e["balance"])]
+             for e in income_statement["expenses"]]
+            or [["No expenses recorded", ""]],
+            [7.8 * inch, 2.0 * inch], money_from=1,
+            totals_row=["Total Expenses",
+                        _money_total(income_statement["total_expenses"])],
+        ),
+        Spacer(1, 12),
+        _pdf_table(
+            ["", ""], [], [7.8 * inch, 2.0 * inch], money_from=1,
+            totals_row=["NET INCOME",
+                        _money_total(income_statement["net_income"])],
+        ),
+        PageBreak(),
+    ]
+
+    # ---- Balance Sheet
+    story += [
+        Paragraph("Balance Sheet", heading_2),
+        Paragraph(f"As of {long_date(period_end)}", _PDF_META),
+        Spacer(1, 12),
+    ]
+    for section_title, items, total_label, total_value in [
+        ("Assets", balance_sheet["assets"],
+         "Total Assets", balance_sheet["total_assets"]),
+        ("Liabilities", balance_sheet["liabilities"],
+         "Total Liabilities", balance_sheet["total_liabilities"]),
+        ("Equity", balance_sheet["equity"],
+         "Total Equity", balance_sheet["total_equity"]),
+    ]:
+        story += [
+            Paragraph(section_title, heading_2),
+            _pdf_table(
+                ["Account", "Amount"],
+                [[_wrap(_statement_label(item)), _money(item["balance"])]
+                 for item in items]
+                or [[f"No {section_title.lower()} recorded", ""]],
+                [7.8 * inch, 2.0 * inch], money_from=1,
+                totals_row=[total_label, _money_total(total_value)],
+            ),
+            Spacer(1, 10),
+        ]
+    balance_difference = round(
+        balance_sheet["total_assets"] -
+        balance_sheet["total_liabilities_equity"], 2
+    )
+    story += [
+        _pdf_table(
+            ["", ""], [], [7.8 * inch, 2.0 * inch], money_from=1,
+            totals_row=["TOTAL LIABILITIES & EQUITY",
+                        _money_total(balance_sheet["total_liabilities_equity"])],
+        ),
+        Spacer(1, 8),
+        Paragraph(
+            "Balance sheet is in balance."
+            if abs(balance_difference) < 0.01
+            else f"Balance sheet is OUT OF BALANCE by ${abs(balance_difference):,.2f}.",
+            _PDF_META,
         ),
         PageBreak(),
     ]
