@@ -41,6 +41,24 @@ def test_clean_books_produce_no_findings(client_id, accounts):
     assert findings == []
 
 
+def test_unclosed_prior_year_is_valid_book_history(client_id, accounts):
+    """Historical P&L activity is valid without a posted closing entry.
+
+    Reports roll unclosed prior-year profit into retained earnings, so a
+    period review must not reinterpret every historical entry as an integrity
+    exception. Current-period activity keeps the separate "went quiet" review
+    signal out of this regression case.
+    """
+    post_entry(client_id, date(2025, 6, 15),
+               [(accounts["cash"], 100, 0), (accounts["revenue"], 0, 100)])
+    post_entry(client_id, date(2026, 1, 15),
+               [(accounts["cash"], 50, 0), (accounts["revenue"], 0, 50)])
+
+    findings = run_integrity_sweep(client_id, *Q1)
+
+    assert findings == []
+
+
 def test_sweep_flags_unposted_imports_and_future_dates(client_id, accounts):
     ImportedTransaction.bulk_insert([ImportedTransaction(
         client_id=client_id, import_batch="stall",

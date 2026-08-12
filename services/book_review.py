@@ -156,23 +156,6 @@ def run_integrity_sweep(client_id: int, period_start: date, period_end: date) ->
                 f"Dated {row['entry_date']}.", entry_id=row["id"],
             ))
 
-        cursor.execute(
-            """
-            SELECT id, entry_date, entry_type FROM journal_entries
-            WHERE client_id = ? AND entry_date < ?
-              AND entry_type NOT IN ('Beginning Balance', 'Closing')
-            """,
-            (client_id, ps),
-        )
-        for row in cursor.fetchall():
-            findings.append(ReviewFinding(
-                "info", "integrity",
-                f"Entry #{row['id']} predates the review period",
-                f"{row['entry_type']} entry dated {row['entry_date']} — expected only "
-                "Beginning Balance or Closing entries before the period.",
-                entry_id=row["id"],
-            ))
-
         # P&L accounts that went quiet: activity before the period, none inside it.
         cursor.execute(
             """

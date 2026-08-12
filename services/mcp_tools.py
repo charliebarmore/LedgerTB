@@ -301,7 +301,6 @@ INTEGRITY_CHECKS = [
     "unposted_imports",
     "posted_import_links",
     "future_dated_entries",
-    "pre_period_entries",
     "quiet_profit_and_loss_accounts",
     "import_row_continuity",
 ]
@@ -309,7 +308,7 @@ INTEGRITY_CHECKS = [
 
 def integrity_sweep(client_id: int, start: str, end: str) -> dict:
     """Deterministic bookkeeping checks: unbalanced or short entries, unposted
-    imports, broken import links, future/pre-period dates, quiet P&L accounts,
+    imports, broken import links, future dates, quiet P&L accounts,
     import row gaps. Always returns an explicit result, including when the book
     is clean, so an empty finding set cannot be mistaken for a failed tool."""
     _require_client(client_id)

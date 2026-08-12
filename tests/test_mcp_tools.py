@@ -123,6 +123,23 @@ def test_integrity_sweep_reports_clean_books_explicitly(client_id, accounts):
     }
 
 
+def test_integrity_sweep_treats_prior_year_entries_as_history(client_id, accounts):
+    post_entry(client_id, date(2025, 6, 15), [
+        (accounts["cash"], 100, 0),
+        (accounts["revenue"], 0, 100),
+    ])
+    post_entry(client_id, date(2026, 1, 15), [
+        (accounts["cash"], 50, 0),
+        (accounts["revenue"], 0, 50),
+    ])
+
+    result = mcp_tools.integrity_sweep(client_id, "2026-01-01", "2026-12-31")
+
+    assert result["clean"] is True
+    assert result["findings"] == []
+    assert "pre_period_entries" not in result["checks_run"]
+
+
 def test_integrity_sweep_reports_findings_in_same_envelope(client_id, accounts):
     _seed(client_id, accounts)
     ImportedTransaction(
