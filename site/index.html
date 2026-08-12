@@ -77,11 +77,11 @@
 
   .hero {
     display: grid;
-    gap: 58px;
-    grid-template-columns: minmax(0, .82fr) minmax(560px, 1.18fr);
-    padding: 94px 0 72px;
-    align-items: center;
+    gap: 52px;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 84px 0 72px;
   }
+  .hero-copy { max-width: 900px; }
   .eyebrow, .kicker {
     color: var(--orange);
     font-family: var(--mono);
@@ -96,10 +96,10 @@
     font-weight: 700;
   }
   h1 {
-    font-size: clamp(3.15rem, 6.2vw, 5.35rem);
+    font-size: clamp(3.15rem, 6.2vw, 4.85rem);
     letter-spacing: -.035em;
-    line-height: .99;
-    max-width: 10.5ch;
+    line-height: 1.01;
+    max-width: 14ch;
   }
   h1 em { color: var(--orange); font-style: normal; }
   .lede {
@@ -131,12 +131,13 @@
   .product-frame {
     background: #fff;
     border: 1px solid rgba(253, 252, 234, .24);
-    border-radius: 10px;
+    border-radius: 8px;
     box-shadow: 0 32px 80px rgba(0, 0, 0, .38);
+    min-width: 0;
     overflow: hidden;
     position: relative;
   }
-  .product-frame img { aspect-ratio: 16 / 11; object-fit: cover; width: 100%; }
+  .product-frame img { height: auto; width: 100%; }
   .product-label {
     background: var(--abyss);
     border: 1px solid rgba(253, 252, 234, .16);
@@ -146,8 +147,10 @@
     font-size: .69rem;
     left: 18px;
     letter-spacing: .04em;
+    margin: 0;
     padding: 8px 10px;
     position: absolute;
+    display: block;
   }
 
   .proof-strip {
@@ -186,30 +189,33 @@
   }
   section:not(.paper) .section-intro .sub { color: var(--muted-light); }
 
-  .tour-primary {
-    border-bottom: 1px solid rgba(11, 26, 31, .17);
-    margin-bottom: 44px;
-    padding-bottom: 44px;
-  }
   .shot {
     background: #fff;
     border: 1px solid #C9D0CF;
-    box-shadow: 0 20px 60px rgba(15, 42, 49, .16);
+    box-shadow: 0 18px 48px rgba(15, 42, 49, .14);
+    min-width: 0;
     overflow: hidden;
   }
-  .shot img { width: 100%; }
-  figcaption {
-    align-items: start;
+  .shot img { height: auto; width: 100%; }
+  .tour-stack { border-top: 1px solid rgba(11, 26, 31, .17); }
+  .tour-row {
+    align-items: center;
+    border-bottom: 1px solid rgba(11, 26, 31, .17);
     display: grid;
-    gap: 26px;
-    grid-template-columns: minmax(190px, .35fr) 1fr;
-    margin-top: 19px;
+    gap: 54px;
+    grid-template-columns: minmax(230px, .55fr) minmax(0, 1.45fr);
+    padding: 56px 0;
   }
-  figcaption strong { font-family: var(--display); font-size: 1.4rem; line-height: 1.2; }
-  figcaption p { color: var(--muted-dark); font-size: .92rem; max-width: 48rem; }
-  .tour-secondary { display: grid; gap: 34px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .tour-secondary figcaption { display: block; }
-  .tour-secondary figcaption strong { display: block; margin-bottom: 7px; }
+  .tour-row.reverse { grid-template-columns: minmax(0, 1.45fr) minmax(230px, .55fr); }
+  .tour-row figcaption { display: block; margin: 0; }
+  .tour-row figcaption strong {
+    display: block;
+    font-family: var(--display);
+    font-size: clamp(1.55rem, 2.5vw, 2rem);
+    line-height: 1.14;
+    margin-bottom: 13px;
+  }
+  .tour-row figcaption p { color: var(--muted-dark); font-size: .93rem; }
   .sample-note {
     color: var(--muted-dark);
     font-family: var(--mono);
@@ -326,9 +332,8 @@
   footer .credit { color: #91A29E; font-size: .78rem; margin-top: 18px; }
 
   @media (max-width: 980px) {
-    .hero { grid-template-columns: 1fr; }
     .hero-copy { max-width: 46rem; }
-    .hero h1 { max-width: 12ch; }
+    .hero h1 { max-width: 14ch; }
     .proof-list { grid-template-columns: repeat(2, 1fr); }
     .proof-item:nth-child(3) { border-left: 0; border-top: 1px solid rgba(253, 252, 234, .12); }
     .proof-item:nth-child(4) { border-top: 1px solid rgba(253, 252, 234, .12); }
@@ -347,10 +352,12 @@
     .hero { gap: 42px; padding: 66px 0 54px; }
     h1 { font-size: clamp(2.9rem, 15vw, 4.3rem); }
     section { padding: 78px 0; }
-    .proof-list, .tour-secondary, .workflow-grid, .security-grid, .posture, .download-grid { grid-template-columns: 1fr; }
+    .proof-list, .workflow-grid, .security-grid, .posture, .download-grid { grid-template-columns: 1fr; }
     .proof-item + .proof-item { border-left: 0; border-top: 1px solid rgba(253, 252, 234, .12); }
-    figcaption, .capability, .level { grid-template-columns: 1fr; }
-    figcaption { gap: 9px; }
+    .tour-row, .tour-row.reverse { gap: 25px; grid-template-columns: 1fr; padding: 40px 0; }
+    .tour-row figcaption { order: 0; }
+    .tour-row .shot { order: 1; }
+    .capability, .level { grid-template-columns: 1fr; }
     .workflow-step, .workflow-step + .workflow-step { padding-left: 0; }
     .download-option { padding-right: 0; }
     .download-option + .download-option { border-left: 0; border-top: 1px solid rgba(253, 252, 234, .17); margin-top: 30px; padding-left: 0; padding-top: 30px; }
@@ -395,7 +402,7 @@
       </div>
 
       <figure class="product-frame">
-        <img src="images/app-dashboard.png" width="1600" height="1100"
+        <img src="images/app-dashboard-hero.png" width="3200" height="1800"
              alt="LedgerTB dashboard showing assets, liabilities, net income, pending imports, recent activity, and quick actions for the fictional Northline Studio sample book">
         <figcaption class="product-label">Actual app · fictional sample data</figcaption>
       </figure>
@@ -425,35 +432,24 @@
         These are screenshots from the released desktop application.</p>
       </div>
 
-      <figure class="tour-primary">
-        <div class="shot">
-          <img src="images/app-trial-balance.png" width="1600" height="1100" loading="lazy"
-               alt="LedgerTB trial balance worksheet showing a balanced year-close checklist and debit and credit columns for a fictional sample client">
-        </div>
-        <figcaption>
-          <strong>The trial balance stays at the center.</strong>
-          <p>Beginning balances, period activity, unadjusted balances, AJEs, and
-          adjusted balances live in one working paper. The close checklist calls
-          out pending imports and integrity issues before the year is locked.</p>
-        </figcaption>
-      </figure>
-
-      <div class="tour-secondary">
-        <figure>
-          <div class="shot">
-            <img src="images/app-dashboard.png" width="1600" height="1100" loading="lazy"
-                 alt="LedgerTB client dashboard with account totals, recent activity, and quick actions">
-          </div>
+      <div class="tour-stack">
+        <figure class="tour-row">
           <figcaption>
-            <strong>See the state of the books immediately.</strong>
-            <p>Client totals, pending work, recent imports, adjusting entries,
-            and who performed them are visible before you touch the ledger.</p>
+            <strong>The trial balance stays at the center.</strong>
+            <p>Beginning balances, period activity, unadjusted balances, AJEs,
+            and adjusted balances live in one working paper. The close checklist
+            calls out pending imports and integrity issues before the year is
+            locked.</p>
           </figcaption>
+          <div class="shot">
+            <img src="images/app-trial-balance.png" width="3200" height="2200" loading="lazy"
+                 alt="LedgerTB trial balance worksheet showing a balanced year-close checklist and debit and credit columns for a fictional sample client">
+          </div>
         </figure>
 
-        <figure>
+        <figure class="tour-row reverse">
           <div class="shot">
-            <img src="images/app-assistant-review.png" width="1600" height="1100" loading="lazy"
+            <img src="images/app-assistant-review.png" width="3200" height="1940" loading="lazy"
                  alt="LedgerTB Assistant Review page showing one proposed draft, four staged imports, and AI-attributed audit activity">
           </div>
           <figcaption>
