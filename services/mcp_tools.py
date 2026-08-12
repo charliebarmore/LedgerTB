@@ -94,9 +94,13 @@ def list_accounts(client_id: int) -> list:
     ]
 
 
-def trial_balance(client_id: int, as_of: Optional[str] = None) -> dict:
+def trial_balance(
+    client_id: int, as_of: Optional[str] = None,
+    compare_to_prior_year: bool = False,
+) -> dict:
     _require_client(client_id)
-    rows = ReportGenerator.trial_balance(client_id, _parse_date(as_of, "as_of"))
+    as_of_date = _parse_date(as_of, "as_of") or date.today()
+    rows = ReportGenerator.trial_balance(client_id, as_of_date)
     out = [
         {
             "number": r.account_number,
@@ -109,16 +113,29 @@ def trial_balance(client_id: int, as_of: Optional[str] = None) -> dict:
     ]
     total_debits = round(sum(r["debit"] for r in out), 2)
     total_credits = round(sum(r["credit"] for r in out), 2)
-    return {
-        "as_of": as_of or date.today().isoformat(),
+    result = {
+        "as_of": as_of_date.isoformat(),
         "accounts": out,
         "total_debits": total_debits,
         "total_credits": total_credits,
         "balanced": total_debits == total_credits,
     }
+    if compare_to_prior_year:
+        comparison = ReportGenerator.comparative_trial_balance(
+            client_id, as_of_date
+        )
+        result["comparison"] = {
+            **comparison,
+            "current_as_of": comparison["current_as_of"].isoformat(),
+            "prior_as_of": comparison["prior_as_of"].isoformat(),
+        }
+    return result
 
 
-def income_statement(client_id: int, start: str, end: str) -> dict:
+def income_statement(
+    client_id: int, start: str, end: str,
+    compare_to_prior_year: bool = False,
+) -> dict:
     _require_client(client_id)
     report = ReportGenerator.income_statement(
         client_id, _parse_date(start, "start"), _parse_date(end, "end")
@@ -129,7 +146,7 @@ def income_statement(client_id: int, start: str, end: str) -> dict:
              "amount": round(i["balance"], 2)}
             for i in items
         ]
-    return {
+    result = {
         "start": start,
         "end": end,
         "revenues": _lines(report["revenues"]),
@@ -138,9 +155,27 @@ def income_statement(client_id: int, start: str, end: str) -> dict:
         "total_expenses": round(report["total_expenses"], 2),
         "net_income": round(report["net_income"], 2),
     }
+    if compare_to_prior_year:
+        comparison = ReportGenerator.comparative_income_statement(
+            client_id, _parse_date(start, "start"), _parse_date(end, "end")
+        )
+        result["comparison"] = {
+            **comparison,
+            "current_period": {
+                "start": comparison["current_period"]["start"].isoformat(),
+                "end": comparison["current_period"]["end"].isoformat(),
+            },
+            "prior_period": {
+                "start": comparison["prior_period"]["start"].isoformat(),
+                "end": comparison["prior_period"]["end"].isoformat(),
+            },
+        }
+    return result
 
 
-def balance_sheet(client_id: int, as_of: str) -> dict:
+def balance_sheet(
+    client_id: int, as_of: str, compare_to_prior_year: bool = False,
+) -> dict:
     _require_client(client_id)
     report = ReportGenerator.balance_sheet(client_id, _parse_date(as_of, "as_of"))
     def _lines(items):
@@ -149,7 +184,7 @@ def balance_sheet(client_id: int, as_of: str) -> dict:
              "amount": round(i["balance"], 2)}
             for i in items
         ]
-    return {
+    result = {
         "as_of": as_of,
         "assets": _lines(report["assets"]),
         "liabilities": _lines(report["liabilities"]),
@@ -161,6 +196,16 @@ def balance_sheet(client_id: int, as_of: str) -> dict:
         "balanced": round(report["total_assets"], 2)
         == round(report["total_liabilities_equity"], 2),
     }
+    if compare_to_prior_year:
+        comparison = ReportGenerator.comparative_balance_sheet(
+            client_id, _parse_date(as_of, "as_of")
+        )
+        result["comparison"] = {
+            **comparison,
+            "current_as_of": comparison["current_as_of"].isoformat(),
+            "prior_as_of": comparison["prior_as_of"].isoformat(),
+        }
+    return result
 
 
 def general_ledger(client_id: int, account_number: str,

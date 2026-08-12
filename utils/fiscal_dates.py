@@ -29,6 +29,25 @@ def previous_fiscal_year_bounds(
     return fiscal_year_bounds(previous_end, fiscal_year_end_month)
 
 
+def prior_year_date(value: date) -> date:
+    """Return the same calendar date one year earlier.
+
+    Financial-statement comparisons conventionally compare a selected date
+    with the same month/day in the prior year. February 29 has no exact peer
+    in a non-leap year, so it compares with February 28.
+    """
+    try:
+        return value.replace(year=value.year - 1)
+    except ValueError:
+        return value.replace(year=value.year - 1, day=28)
+
+
+def prior_year_period(start_date: date, end_date: date) -> tuple[date, date]:
+    """Return the same inclusive reporting period one year earlier."""
+    require_valid_range(start_date, end_date, "Comparison period")
+    return prior_year_date(start_date), prior_year_date(end_date)
+
+
 def require_valid_range(start_date: date, end_date: date, label: str = "Date") -> None:
     """Reject inverted inclusive date ranges at the domain boundary."""
     if start_date and end_date and start_date > end_date:

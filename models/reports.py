@@ -5,7 +5,12 @@ from datetime import date
 from database.connection import get_cursor
 from constants import AccountType
 from money import to_dollars
-from utils.fiscal_dates import fiscal_year_bounds, require_valid_range
+from utils.fiscal_dates import (
+    fiscal_year_bounds,
+    prior_year_date,
+    prior_year_period,
+    require_valid_range,
+)
 import pandas as pd
 
 
@@ -66,6 +71,78 @@ class AJEDetail:
 
 
 class ReportGenerator:
+
+    @staticmethod
+    def _has_history(client_id: int, through_date: date) -> bool:
+        """Whether the book existed by a comparison date.
+
+        This is intentionally broader than "had P&L activity in the period":
+        an established book with a quiet prior period has a meaningful zero,
+        while a book first opened this year has no prior-year result at all.
+        """
+        with get_cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT 1
+                FROM journal_entries
+                WHERE client_id = ? AND entry_date <= ?
+                LIMIT 1
+                """,
+                (client_id, through_date.isoformat()),
+            )
+            return cursor.fetchone() is not None
+
+    @staticmethod
+    def _comparison_value(current: float, prior: float, available: bool) -> Dict:
+        if not available:
+            return {
+                'current': round(current, 2),
+                'prior': None,
+                'change': None,
+                'change_percent': None,
+            }
+        change = round(current - prior, 2)
+        return {
+            'current': round(current, 2),
+            'prior': round(prior, 2),
+            'change': change,
+            'change_percent': (
+                None if round(prior, 2) == 0
+                else round((change / abs(prior)) * 100, 2)
+            ),
+        }
+
+    @staticmethod
+    def _merge_statement_lines(
+        current: List[Dict], prior: List[Dict], available: bool
+    ) -> List[Dict]:
+        """Merge statement lines without dropping accounts unique to a year."""
+        def key(item):
+            return (item.get('account_number') or '', item['name'])
+
+        current_by_key = {key(item): item for item in current}
+        prior_by_key = {key(item): item for item in prior}
+        ordered_keys = list(current_by_key)
+        ordered_keys.extend(k for k in prior_by_key if k not in current_by_key)
+
+        rows = []
+        for line_key in ordered_keys:
+            current_item = current_by_key.get(line_key)
+            prior_item = prior_by_key.get(line_key)
+            source = current_item or prior_item
+            row = {
+                'account_number': source.get('account_number') or '',
+                'name': source['name'],
+            }
+            if 'subtype' in source:
+                row['subtype'] = source.get('subtype')
+            row.update(ReportGenerator._comparison_value(
+                current_item['balance'] if current_item else 0.0,
+                prior_item['balance'] if prior_item else 0.0,
+                available,
+            ))
+            rows.append(row)
+        return rows
 
     @staticmethod
     def trial_balance(client_id: int, as_of_date: Optional[date] = None) -> List[TrialBalanceRow]:
@@ -403,6 +480,39 @@ class ReportGenerator:
         }
 
     @staticmethod
+    def comparative_income_statement(
+        client_id: int,
+        start_date: date,
+        end_date: date,
+    ) -> Dict:
+        """Income statement with the same prior-year period alongside it."""
+        require_valid_range(start_date, end_date, "Income statement")
+        prior_start, prior_end = prior_year_period(start_date, end_date)
+        current = ReportGenerator.income_statement(client_id, start_date, end_date)
+        prior = ReportGenerator.income_statement(client_id, prior_start, prior_end)
+        available = ReportGenerator._has_history(client_id, prior_end)
+        return {
+            'current_period': {'start': start_date, 'end': end_date},
+            'prior_period': {'start': prior_start, 'end': prior_end},
+            'prior_available': available,
+            'revenues': ReportGenerator._merge_statement_lines(
+                current['revenues'], prior['revenues'], available
+            ),
+            'expenses': ReportGenerator._merge_statement_lines(
+                current['expenses'], prior['expenses'], available
+            ),
+            'total_revenue': ReportGenerator._comparison_value(
+                current['total_revenue'], prior['total_revenue'], available
+            ),
+            'total_expenses': ReportGenerator._comparison_value(
+                current['total_expenses'], prior['total_expenses'], available
+            ),
+            'net_income': ReportGenerator._comparison_value(
+                current['net_income'], prior['net_income'], available
+            ),
+        }
+
+    @staticmethod
     def balance_sheet(client_id: int, as_of_date: date) -> Dict:
         """Generate a balance sheet for a client."""
         with get_cursor() as cursor:
@@ -509,6 +619,101 @@ class ReportGenerator:
             'equity': equity,
             'total_equity': to_dollars(total_equity),
             'total_liabilities_equity': to_dollars(total_liabilities + total_equity)
+        }
+
+    @staticmethod
+    def comparative_balance_sheet(client_id: int, as_of_date: date) -> Dict:
+        """Balance sheet with the same date one year earlier alongside it."""
+        prior_as_of = prior_year_date(as_of_date)
+        current = ReportGenerator.balance_sheet(client_id, as_of_date)
+        prior = ReportGenerator.balance_sheet(client_id, prior_as_of)
+        available = ReportGenerator._has_history(client_id, prior_as_of)
+        return {
+            'current_as_of': as_of_date,
+            'prior_as_of': prior_as_of,
+            'prior_available': available,
+            'assets': ReportGenerator._merge_statement_lines(
+                current['assets'], prior['assets'], available
+            ),
+            'liabilities': ReportGenerator._merge_statement_lines(
+                current['liabilities'], prior['liabilities'], available
+            ),
+            'equity': ReportGenerator._merge_statement_lines(
+                current['equity'], prior['equity'], available
+            ),
+            'total_assets': ReportGenerator._comparison_value(
+                current['total_assets'], prior['total_assets'], available
+            ),
+            'total_liabilities': ReportGenerator._comparison_value(
+                current['total_liabilities'], prior['total_liabilities'], available
+            ),
+            'total_equity': ReportGenerator._comparison_value(
+                current['total_equity'], prior['total_equity'], available
+            ),
+            'total_liabilities_equity': ReportGenerator._comparison_value(
+                current['total_liabilities_equity'],
+                prior['total_liabilities_equity'],
+                available,
+            ),
+            'current_balanced': (
+                round(current['total_assets'], 2)
+                == round(current['total_liabilities_equity'], 2)
+            ),
+            'prior_balanced': (
+                None if not available else
+                round(prior['total_assets'], 2)
+                == round(prior['total_liabilities_equity'], 2)
+            ),
+        }
+
+    @staticmethod
+    def comparative_trial_balance(client_id: int, as_of_date: date) -> Dict:
+        """Trial-balance lines at current and prior-year period ends."""
+        prior_as_of = prior_year_date(as_of_date)
+        current = ReportGenerator.trial_balance(client_id, as_of_date)
+        prior = ReportGenerator.trial_balance(client_id, prior_as_of)
+        available = ReportGenerator._has_history(client_id, prior_as_of)
+
+        current_by_number = {row.account_number: row for row in current}
+        prior_by_number = {row.account_number: row for row in prior}
+        account_numbers = list(current_by_number)
+        account_numbers.extend(
+            number for number in prior_by_number if number not in current_by_number
+        )
+        merged = []
+        for number in account_numbers:
+            current_row = current_by_number.get(number)
+            prior_row = prior_by_number.get(number)
+            source = current_row or prior_row
+            merged.append({
+                'account_number': number,
+                'name': source.account_name,
+                'type': source.account_type,
+                'current_debit': round(current_row.debit, 2) if current_row else 0.0,
+                'current_credit': round(current_row.credit, 2) if current_row else 0.0,
+                'prior_debit': (
+                    round(prior_row.debit, 2) if available and prior_row else
+                    (0.0 if available else None)
+                ),
+                'prior_credit': (
+                    round(prior_row.credit, 2) if available and prior_row else
+                    (0.0 if available else None)
+                ),
+            })
+
+        return {
+            'current_as_of': as_of_date,
+            'prior_as_of': prior_as_of,
+            'prior_available': available,
+            'accounts': merged,
+            'current_total_debits': round(sum(r.debit for r in current), 2),
+            'current_total_credits': round(sum(r.credit for r in current), 2),
+            'prior_total_debits': (
+                round(sum(r.debit for r in prior), 2) if available else None
+            ),
+            'prior_total_credits': (
+                round(sum(r.credit for r in prior), 2) if available else None
+            ),
         }
 
     @staticmethod
@@ -640,6 +845,24 @@ class ReportGenerator:
         ])
 
     @staticmethod
+    def comparative_trial_balance_to_dataframe(report: Dict) -> pd.DataFrame:
+        """Convert current/PY trial-balance columns to an exportable table."""
+        return pd.DataFrame([
+            {
+                'Account Number': row['account_number'],
+                'Account Name': row['name'],
+                'Account Type': row['type'],
+                'Current Debit': row['current_debit'] or '',
+                'Current Credit': row['current_credit'] or '',
+                'PY Debit': ('' if row['prior_debit'] in (None, 0)
+                             else row['prior_debit']),
+                'PY Credit': ('' if row['prior_credit'] in (None, 0)
+                              else row['prior_credit']),
+            }
+            for row in report['accounts']
+        ])
+
+    @staticmethod
     def income_statement_to_dataframe(report: Dict) -> pd.DataFrame:
         """Convert income statement to pandas DataFrame for export."""
         rows = []
@@ -686,6 +909,94 @@ class ReportGenerator:
         rows.append({'Item': '', 'Amount': ''})
         rows.append({'Item': 'TOTAL LIABILITIES & EQUITY', 'Amount': report['total_liabilities_equity']})
 
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def comparative_income_statement_to_dataframe(report: Dict) -> pd.DataFrame:
+        """Convert a comparative income statement to an exportable table."""
+        rows = []
+
+        def append_section(title, items, total_label, total):
+            rows.append({'Item': title, 'Current': '', 'Prior Year': '',
+                         'Change': '', 'Change %': ''})
+            for item in items:
+                rows.append({
+                    'Item': f"  {item['account_number']} - {item['name']}",
+                    'Current': item['current'],
+                    'Prior Year': '' if item['prior'] is None else item['prior'],
+                    'Change': '' if item['change'] is None else item['change'],
+                    'Change %': ('' if item['change_percent'] is None
+                                 else item['change_percent']),
+                })
+            rows.append({
+                'Item': total_label,
+                'Current': total['current'],
+                'Prior Year': '' if total['prior'] is None else total['prior'],
+                'Change': '' if total['change'] is None else total['change'],
+                'Change %': ('' if total['change_percent'] is None
+                             else total['change_percent']),
+            })
+
+        append_section('REVENUE', report['revenues'], 'Total Revenue',
+                       report['total_revenue'])
+        rows.append({'Item': ''})
+        append_section('EXPENSES', report['expenses'], 'Total Expenses',
+                       report['total_expenses'])
+        rows.append({'Item': ''})
+        total = report['net_income']
+        rows.append({
+            'Item': 'NET INCOME', 'Current': total['current'],
+            'Prior Year': '' if total['prior'] is None else total['prior'],
+            'Change': '' if total['change'] is None else total['change'],
+            'Change %': ('' if total['change_percent'] is None
+                         else total['change_percent']),
+        })
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def comparative_balance_sheet_to_dataframe(report: Dict) -> pd.DataFrame:
+        """Convert a comparative balance sheet to an exportable table."""
+        rows = []
+
+        def append_section(title, items, total_label, total):
+            rows.append({'Item': title, 'Current': '', 'Prior Year': '',
+                         'Change': '', 'Change %': ''})
+            for item in items:
+                number = item['account_number']
+                rows.append({
+                    'Item': f"  {number} - {item['name']}" if number
+                            else f"  {item['name']}",
+                    'Current': item['current'],
+                    'Prior Year': '' if item['prior'] is None else item['prior'],
+                    'Change': '' if item['change'] is None else item['change'],
+                    'Change %': ('' if item['change_percent'] is None
+                                 else item['change_percent']),
+                })
+            rows.append({
+                'Item': total_label, 'Current': total['current'],
+                'Prior Year': '' if total['prior'] is None else total['prior'],
+                'Change': '' if total['change'] is None else total['change'],
+                'Change %': ('' if total['change_percent'] is None
+                             else total['change_percent']),
+            })
+
+        append_section('ASSETS', report['assets'], 'Total Assets',
+                       report['total_assets'])
+        rows.append({'Item': ''})
+        append_section('LIABILITIES', report['liabilities'], 'Total Liabilities',
+                       report['total_liabilities'])
+        rows.append({'Item': ''})
+        append_section('EQUITY', report['equity'], 'Total Equity',
+                       report['total_equity'])
+        rows.append({'Item': ''})
+        total = report['total_liabilities_equity']
+        rows.append({
+            'Item': 'TOTAL LIABILITIES & EQUITY', 'Current': total['current'],
+            'Prior Year': '' if total['prior'] is None else total['prior'],
+            'Change': '' if total['change'] is None else total['change'],
+            'Change %': ('' if total['change_percent'] is None
+                         else total['change_percent']),
+        })
         return pd.DataFrame(rows)
 
     @staticmethod

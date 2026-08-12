@@ -74,6 +74,93 @@ def test_income_statement_respects_date_range(client_id, accounts):
     assert full_year["total_revenue"] == 350
 
 
+def test_income_statement_comparison_merges_lines_and_calculates_changes(
+    client_id, accounts
+):
+    from models.account import Account
+
+    prior_only = Account(
+        client_id=client_id, account_number="6100", name="Prior-only expense",
+        type="Expense",
+    )
+    prior_only.save()
+    post_entry(client_id, date(2025, 2, 1), [
+        (accounts["cash"], 200, 0), (accounts["revenue"], 0, 200),
+    ])
+    post_entry(client_id, date(2025, 2, 2), [
+        (prior_only.id, 50, 0), (accounts["cash"], 0, 50),
+    ])
+    post_entry(client_id, date(2026, 2, 1), [
+        (accounts["cash"], 300, 0), (accounts["revenue"], 0, 300),
+    ])
+    post_entry(client_id, date(2026, 2, 2), [
+        (accounts["expense"], 60, 0), (accounts["cash"], 0, 60),
+    ])
+
+    report = ReportGenerator.comparative_income_statement(
+        client_id, date(2026, 1, 1), date(2026, 3, 31)
+    )
+    assert report["prior_available"] is True
+    assert report["prior_period"] == {
+        "start": date(2025, 1, 1), "end": date(2025, 3, 31)
+    }
+    assert report["total_revenue"] == {
+        "current": 300, "prior": 200, "change": 100, "change_percent": 50,
+    }
+    assert report["net_income"]["current"] == 240
+    assert report["net_income"]["prior"] == 150
+    expenses = {line["account_number"]: line for line in report["expenses"]}
+    assert expenses["6000"]["prior"] == 0
+    assert expenses["6100"]["current"] == 0
+
+
+def test_comparisons_distinguish_missing_history_from_a_real_zero(
+    client_id, accounts
+):
+    post_entry(client_id, date(2026, 1, 15), [
+        (accounts["cash"], 100, 0), (accounts["revenue"], 0, 100),
+    ])
+    income = ReportGenerator.comparative_income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    balance = ReportGenerator.comparative_balance_sheet(
+        client_id, date(2026, 12, 31)
+    )
+    assert income["prior_available"] is False
+    assert income["total_revenue"]["prior"] is None
+    assert balance["prior_available"] is False
+    assert balance["total_assets"]["prior"] is None
+
+
+def test_balance_sheet_and_trial_balance_compare_same_prior_date(
+    client_id, accounts
+):
+    post_entry(client_id, date(2025, 3, 31), [
+        (accounts["cash"], 500, 0), (accounts["equity"], 0, 500),
+    ])
+    post_entry(client_id, date(2026, 3, 31), [
+        (accounts["cash"], 250, 0), (accounts["equity"], 0, 250),
+    ])
+
+    balance = ReportGenerator.comparative_balance_sheet(
+        client_id, date(2026, 3, 31)
+    )
+    assert balance["prior_as_of"] == date(2025, 3, 31)
+    assert balance["total_assets"]["current"] == 750
+    assert balance["total_assets"]["prior"] == 500
+    assert balance["current_balanced"] is True
+    assert balance["prior_balanced"] is True
+
+    trial = ReportGenerator.comparative_trial_balance(
+        client_id, date(2026, 3, 31)
+    )
+    cash = next(r for r in trial["accounts"] if r["account_number"] == "1000")
+    assert cash["current_debit"] == 750
+    assert cash["prior_debit"] == 500
+    assert trial["current_total_debits"] == trial["current_total_credits"]
+    assert trial["prior_total_debits"] == trial["prior_total_credits"]
+
+
 def test_trial_balance_respects_as_of_date(client_id, accounts):
     post_entry(client_id, date(2025, 1, 1), [
         (accounts["cash"], 1000, 0),

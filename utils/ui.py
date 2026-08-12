@@ -109,6 +109,7 @@ table.pb-statement {
     font-variant-numeric: tabular-nums;
     margin: 0.25rem 0 0.75rem 0;
 }
+table.pb-statement.wide { max-width: 64rem; }
 table.pb-statement td {
     border: none;
     padding: 0.16rem 0.25rem;
@@ -137,16 +138,19 @@ table.pb-statement tr.total td.amt { border-bottom: 3px double #565d68; }
 """
 
 
-def _statement_amount(value, lead_dollar):
+def _statement_amount(value, lead_dollar, value_format="money"):
     if value is None:
         return ""
+    if value_format == "percent":
+        body = f"{abs(value):,.1f}%"
+        return f"({body})" if value < 0 else body
     body = f"{abs(value):,.2f}"
     if value < 0:
         body = f"({body})"
     return f"${body}" if lead_dollar else body
 
 
-def financial_statement(rows, headers=None):
+def financial_statement(rows, headers=None, formats=None):
     """Render rows as an actual financial statement, not a widget pile.
 
     rows: iterables of (kind, label, amounts, note) — note optional.
@@ -157,10 +161,12 @@ def financial_statement(rows, headers=None):
                two for debit/credit layouts). Dollar signs appear on
                subtotal/total rows, accounting-style; negatives in parens.
     headers: optional list of amount-column headings.
+    formats: optional per-column formats ("money" or "percent").
     """
     import html as _html
 
     columns = max((len(r[2]) for r in rows if len(r) > 2 and r[2]), default=1)
+    column_formats = list(formats or []) + ["money"] * columns
     parts = []
     if headers:
         cells = "".join(f"<td class='amt'>{_html.escape(h)}</td>" for h in headers)
@@ -181,11 +187,16 @@ def financial_statement(rows, headers=None):
         lead = kind in ("subtotal", "total")
         padded = list(amounts) + [None] * (columns - len(amounts))
         cells = "".join(
-            f"<td class='amt'>{_statement_amount(a, lead)}</td>" for a in padded
+            f"<td class='amt'>{_statement_amount(a, lead, column_formats[index])}</td>"
+            for index, a in enumerate(padded)
         )
         parts.append(f"<tr class='{kind}'><td class='lbl'>{label_html}</td>{cells}</tr>")
 
-    st.html(_STATEMENT_CSS + f"<table class='pb-statement'>{''.join(parts)}</table>")
+    table_class = "pb-statement wide" if columns >= 4 else "pb-statement"
+    st.html(
+        _STATEMENT_CSS
+        + f"<table class='{table_class}'>{''.join(parts)}</table>"
+    )
 
 
 _LEDGER_CSS = """

@@ -53,6 +53,48 @@ def test_statements_and_ledger(client_id, accounts):
     assert len([e for e in gl["entries"] if e["entry_id"]]) == 2
 
 
+def test_statement_tools_optionally_return_prior_year_comparisons(
+    client_id, accounts
+):
+    post_entry(client_id, date(2025, 1, 15),
+               [(accounts["cash"], 200, 0),
+                (accounts["revenue"], 0, 200)])
+    _seed(client_id, accounts)
+
+    income = mcp_tools.income_statement(
+        client_id, "2026-01-01", "2026-12-31",
+        compare_to_prior_year=True,
+    )
+    assert income["total_revenue"] == 500
+    assert income["comparison"]["prior_period"] == {
+        "start": "2025-01-01", "end": "2025-12-31"
+    }
+    assert income["comparison"]["total_revenue"]["prior"] == 200
+    assert income["comparison"]["total_revenue"]["change"] == 300
+
+    balance = mcp_tools.balance_sheet(
+        client_id, "2026-12-31", compare_to_prior_year=True
+    )
+    assert balance["comparison"]["prior_as_of"] == "2025-12-31"
+    assert balance["comparison"]["total_assets"]["prior"] == 200
+    assert balance["comparison"]["prior_balanced"] is True
+
+    trial = mcp_tools.trial_balance(
+        client_id, "2026-12-31", compare_to_prior_year=True
+    )
+    assert trial["comparison"]["prior_as_of"] == "2025-12-31"
+    prior_cash = next(
+        row for row in trial["comparison"]["accounts"]
+        if row["account_number"] == "1000"
+    )
+    assert prior_cash["prior_debit"] == 200
+
+    # Existing clients get the original compact response unless they opt in.
+    assert "comparison" not in mcp_tools.income_statement(
+        client_id, "2026-01-01", "2026-12-31"
+    )
+
+
 def test_find_entries_and_detail(client_id, accounts):
     _seed(client_id, accounts)
 

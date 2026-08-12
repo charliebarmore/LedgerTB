@@ -8,7 +8,12 @@ from models.journal_entry import JournalEntry
 from models.reconciliation import BankReconciliation
 from models.reports import ReportGenerator
 from models.transaction import ImportedTransaction
-from utils.fiscal_dates import fiscal_year_bounds, previous_fiscal_year_bounds
+from utils.fiscal_dates import (
+    fiscal_year_bounds,
+    previous_fiscal_year_bounds,
+    prior_year_date,
+    prior_year_period,
+)
 
 
 def test_calendar_and_noncalendar_fiscal_year_bounds():
@@ -23,6 +28,14 @@ def test_calendar_and_noncalendar_fiscal_year_bounds():
     )
     assert previous_fiscal_year_bounds(date(2026, 3, 15), 6) == (
         date(2024, 7, 1), date(2025, 6, 30)
+    )
+
+
+def test_prior_year_comparison_dates_include_leap_day_fallback():
+    assert prior_year_date(date(2026, 3, 31)) == date(2025, 3, 31)
+    assert prior_year_date(date(2024, 2, 29)) == date(2023, 2, 28)
+    assert prior_year_period(date(2026, 7, 1), date(2027, 6, 30)) == (
+        date(2025, 7, 1), date(2026, 6, 30)
     )
 
 

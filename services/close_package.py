@@ -82,6 +82,9 @@ class ClosePackageSnapshot:
     cash: List[CashActivityRow]
     income_statement: Dict
     balance_sheet: Dict
+    comparative_income_statement: Dict
+    comparative_balance_sheet: Dict
+    comparative_trial_balance: Dict
     branding: FirmBranding
     generated_at: datetime
 
@@ -177,6 +180,15 @@ def load_close_package_snapshot(
             client_id, period_start, period_end
         ),
         balance_sheet=ReportGenerator.balance_sheet(client_id, period_end),
+        comparative_income_statement=ReportGenerator.comparative_income_statement(
+            client_id, period_start, period_end
+        ),
+        comparative_balance_sheet=ReportGenerator.comparative_balance_sheet(
+            client_id, period_end
+        ),
+        comparative_trial_balance=ReportGenerator.comparative_trial_balance(
+            client_id, period_end
+        ),
         branding=get_branding(),
         generated_at=datetime.now(),
     )
@@ -264,6 +276,49 @@ def _append_statement_total(ws, label: str, value: float):
     cells[1].number_format = _MONEY_FMT
 
 
+def _comparison_values(item: Dict) -> list:
+    return [
+        item['current'], item['prior'], item['change'], item['change_percent']
+    ]
+
+
+def _prepare_comparative_statement_sheet(ws, current_label: str, prior_label: str):
+    cells = _append_literal_row(
+        ws, ["", current_label, prior_label, "$ Change", "% Change"]
+    )
+    for cell in cells:
+        cell.font = _HEADER_FONT
+    for column in ("B", "C", "D"):
+        ws.column_dimensions[column].width = 18
+    ws.column_dimensions["E"].width = 13
+
+
+def _append_comparative_statement_section(
+    ws, title: str, items: List[dict], total_label: str, total: Dict
+):
+    section_cells = _append_literal_row(ws, [title.upper(), "", "", "", ""])
+    for cell in section_cells:
+        cell.font = _HEADER_FONT
+    for item in items:
+        cells = _append_literal_row(
+            ws, [_statement_label(item)] + _comparison_values(item)
+        )
+        for cell in cells[1:4]:
+            cell.number_format = _MONEY_FMT
+        cells[4].number_format = '0.0"%"'
+    _append_comparative_statement_total(ws, total_label, total)
+
+
+def _append_comparative_statement_total(ws, label: str, total: Dict):
+    cells = _append_literal_row(ws, [label] + _comparison_values(total))
+    for cell in cells:
+        cell.font = _HEADER_FONT
+        cell.border = _TOTAL_BORDER
+    for cell in cells[1:4]:
+        cell.number_format = _MONEY_FMT
+    cells[4].number_format = '0.0"%"'
+
+
 def build_close_package(
     client_id: int,
     client_name: str,
@@ -281,6 +336,9 @@ def build_close_package(
     cash = snapshot.cash
     income_statement = snapshot.income_statement
     balance_sheet = snapshot.balance_sheet
+    comparative_income = snapshot.comparative_income_statement
+    comparative_balance = snapshot.comparative_balance_sheet
+    comparative_tb = snapshot.comparative_trial_balance
 
     wb = openpyxl.Workbook()
 
@@ -303,7 +361,13 @@ def build_close_package(
         ("Final trial balance — total credits", total_cr),
         ("In balance", "YES" if abs(total_dr - total_cr) < 0.01 else "OUT OF BALANCE"),
         ("Net income for period", income_statement["net_income"]),
+        ("Prior-year net income",
+         comparative_income["net_income"]["prior"]
+         if comparative_income["prior_available"] else "No prior-year data"),
         ("Balance sheet — total assets", balance_sheet["total_assets"]),
+        ("Prior-year total assets",
+         comparative_balance["total_assets"]["prior"]
+         if comparative_balance["prior_available"] else "No prior-year data"),
         ("Balance sheet — liabilities & equity",
          balance_sheet["total_liabilities_equity"]),
         ("Balance sheet in balance",
@@ -331,40 +395,57 @@ def build_close_package(
         wb, "Income Statement", client_name,
         f"{period_start.isoformat()} to {period_end.isoformat()}",
     )
-    _append_statement_section(
-        ws, "Revenue", income_statement["revenues"],
-        "Total Revenue", income_statement["total_revenue"],
+    _prepare_comparative_statement_sheet(
+        ws,
+        f"{period_start.isoformat()} to {period_end.isoformat()}",
+        (f"{comparative_income['prior_period']['start'].isoformat()} to "
+         f"{comparative_income['prior_period']['end'].isoformat()}"),
     )
-    _append_literal_row(ws, ["", ""])
-    _append_statement_section(
-        ws, "Expenses", income_statement["expenses"],
-        "Total Expenses", income_statement["total_expenses"],
+    if not comparative_income['prior_available']:
+        _append_literal_row(ws, ["No prior-year data", "", "", "", ""])
+    _append_comparative_statement_section(
+        ws, "Revenue", comparative_income["revenues"],
+        "Total Revenue", comparative_income["total_revenue"],
     )
-    _append_literal_row(ws, ["", ""])
-    _append_statement_total(ws, "NET INCOME", income_statement["net_income"])
+    _append_literal_row(ws, ["", "", "", "", ""])
+    _append_comparative_statement_section(
+        ws, "Expenses", comparative_income["expenses"],
+        "Total Expenses", comparative_income["total_expenses"],
+    )
+    _append_literal_row(ws, ["", "", "", "", ""])
+    _append_comparative_statement_total(
+        ws, "NET INCOME", comparative_income["net_income"]
+    )
 
     # ---- Balance Sheet
     ws = _start_statement_sheet(
         wb, "Balance Sheet", client_name, f"As of {period_end.isoformat()}",
     )
-    _append_statement_section(
-        ws, "Assets", balance_sheet["assets"],
-        "Total Assets", balance_sheet["total_assets"],
+    _prepare_comparative_statement_sheet(
+        ws,
+        f"As of {period_end.isoformat()}",
+        f"As of {comparative_balance['prior_as_of'].isoformat()}",
     )
-    _append_literal_row(ws, ["", ""])
-    _append_statement_section(
-        ws, "Liabilities", balance_sheet["liabilities"],
-        "Total Liabilities", balance_sheet["total_liabilities"],
+    if not comparative_balance['prior_available']:
+        _append_literal_row(ws, ["No prior-year data", "", "", "", ""])
+    _append_comparative_statement_section(
+        ws, "Assets", comparative_balance["assets"],
+        "Total Assets", comparative_balance["total_assets"],
     )
-    _append_literal_row(ws, ["", ""])
-    _append_statement_section(
-        ws, "Equity", balance_sheet["equity"],
-        "Total Equity", balance_sheet["total_equity"],
+    _append_literal_row(ws, ["", "", "", "", ""])
+    _append_comparative_statement_section(
+        ws, "Liabilities", comparative_balance["liabilities"],
+        "Total Liabilities", comparative_balance["total_liabilities"],
     )
-    _append_literal_row(ws, ["", ""])
-    _append_statement_total(
+    _append_literal_row(ws, ["", "", "", "", ""])
+    _append_comparative_statement_section(
+        ws, "Equity", comparative_balance["equity"],
+        "Total Equity", comparative_balance["total_equity"],
+    )
+    _append_literal_row(ws, ["", "", "", "", ""])
+    _append_comparative_statement_total(
         ws, "TOTAL LIABILITIES & EQUITY",
-        balance_sheet["total_liabilities_equity"],
+        comparative_balance["total_liabilities_equity"],
     )
     _append_statement_total(
         ws, "BALANCE CHECK",
@@ -374,20 +455,42 @@ def build_close_package(
 
     # ---- Trial Balance (final, with the worksheet's supporting columns)
     ws = wb.create_sheet("Trial Balance")
+    comparison_by_number = {
+        row['account_number']: row for row in comparative_tb['accounts']
+    }
+    tb_export_rows = []
+    current_numbers = set()
+    for row in tb_rows:
+        current_numbers.add(row.account_number)
+        comparison_row = comparison_by_number.get(row.account_number, {})
+        tb_export_rows.append([
+            row.account_number, row.account_name, row.account_type,
+            row.beginning_dr or None, row.beginning_cr or None,
+            row.period_debits or None, row.period_credits or None,
+            row.aje_debits or None, row.aje_credits or None,
+            row.adjusted_dr or None, row.adjusted_cr or None,
+            comparison_row.get('prior_debit') or None,
+            comparison_row.get('prior_credit') or None,
+        ])
+    for comparison_row in comparative_tb['accounts']:
+        if comparison_row['account_number'] in current_numbers:
+            continue
+        if not (comparison_row.get('prior_debit') or
+                comparison_row.get('prior_credit')):
+            continue
+        tb_export_rows.append([
+            comparison_row['account_number'], comparison_row['name'],
+            comparison_row['type'], None, None, None, None, None, None,
+            None, None, comparison_row.get('prior_debit') or None,
+            comparison_row.get('prior_credit') or None,
+        ])
     _write_table(
         ws,
         ["Acct #", "Account Name", "Type", "Beg Dr", "Beg Cr",
          "Activity Dr", "Activity Cr", "AJE Dr", "AJE Cr",
-         "Final Dr", "Final Cr"],
-        [
-            [r.account_number, r.account_name, r.account_type,
-             r.beginning_dr or None, r.beginning_cr or None,
-             r.period_debits or None, r.period_credits or None,
-             r.aje_debits or None, r.aje_credits or None,
-             r.adjusted_dr or None, r.adjusted_cr or None]
-            for r in tb_rows
-        ],
-        money_cols=range(4, 12),
+         "Final Dr", "Final Cr", "PY Final Dr", "PY Final Cr"],
+        tb_export_rows,
+        money_cols=range(4, 14),
     )
     totals = ws.max_row + 1
     ws.cell(row=totals, column=1, value="TOTALS").font = _HEADER_FONT
@@ -404,8 +507,10 @@ def build_close_package(
         round(sum(r.aje_credits for r in tb_rows), 2),
         round(sum(r.adjusted_dr for r in tb_rows), 2),
         round(sum(r.adjusted_cr for r in tb_rows), 2),
+        comparative_tb['prior_total_debits'],
+        comparative_tb['prior_total_credits'],
     ]
-    for col_idx, value in zip(range(4, 12), _tb_totals):
+    for col_idx, value in zip(range(4, 14), _tb_totals):
         cell = ws.cell(row=totals, column=col_idx, value=value)
         cell.font = _HEADER_FONT
         cell.number_format = _MONEY_FMT
@@ -498,6 +603,20 @@ def _money_total(value: float) -> str:
     return f"{value:,.2f}"
 
 
+def _percent(value: Optional[float]) -> str:
+    return "" if value is None else f"{value:,.1f}%"
+
+
+def _pdf_comparison_values(item: Dict, totals: bool = False) -> list:
+    money = _money_total if totals else _money
+    return [
+        money(item['current']),
+        "" if item['prior'] is None else money(item['prior']),
+        "" if item['change'] is None else money(item['change']),
+        _percent(item['change_percent']),
+    ]
+
+
 def _wrap(text: str) -> Paragraph:
     return Paragraph((text or "").replace("&", "&amp;").replace("<", "&lt;"), _PDF_BODY)
 
@@ -561,6 +680,9 @@ def build_close_package_pdf(
     cash = snapshot.cash
     income_statement = snapshot.income_statement
     balance_sheet = snapshot.balance_sheet
+    comparative_income = snapshot.comparative_income_statement
+    comparative_balance = snapshot.comparative_balance_sheet
+    comparative_tb = snapshot.comparative_trial_balance
     period_label = f"{long_date(period_start)} to {long_date(period_end)}"
 
     branding = snapshot.branding
@@ -649,33 +771,46 @@ def build_close_package_pdf(
     story += [
         Paragraph("Income Statement", heading_2),
         Paragraph(period_label, _PDF_META),
+        Paragraph(
+            (f"Prior period: {long_date(comparative_income['prior_period']['start'])} "
+             f"to {long_date(comparative_income['prior_period']['end'])}")
+            if comparative_income['prior_available'] else "No prior-year data",
+            _PDF_META,
+        ),
         Spacer(1, 12),
         Paragraph("Revenue", heading_2),
         _pdf_table(
-            ["Account", "Amount"],
-            [[_wrap(_statement_label(r)), _money(r["balance"])]
-             for r in income_statement["revenues"]]
-            or [["No revenue recorded", ""]],
-            [7.8 * inch, 2.0 * inch], money_from=1,
-            totals_row=["Total Revenue",
-                        _money_total(income_statement["total_revenue"])],
+            ["Account", "Current", "Prior Year", "$ Change", "% Change"],
+            [[_wrap(_statement_label(r))] + _pdf_comparison_values(r)
+             for r in comparative_income["revenues"]]
+            or [["No revenue recorded", "", "", "", ""]],
+            [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
+            money_from=1,
+            totals_row=["Total Revenue"] + _pdf_comparison_values(
+                comparative_income["total_revenue"], totals=True
+            ),
         ),
         Spacer(1, 12),
         Paragraph("Expenses", heading_2),
         _pdf_table(
-            ["Account", "Amount"],
-            [[_wrap(_statement_label(e)), _money(e["balance"])]
-             for e in income_statement["expenses"]]
-            or [["No expenses recorded", ""]],
-            [7.8 * inch, 2.0 * inch], money_from=1,
-            totals_row=["Total Expenses",
-                        _money_total(income_statement["total_expenses"])],
+            ["Account", "Current", "Prior Year", "$ Change", "% Change"],
+            [[_wrap(_statement_label(e))] + _pdf_comparison_values(e)
+             for e in comparative_income["expenses"]]
+            or [["No expenses recorded", "", "", "", ""]],
+            [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
+            money_from=1,
+            totals_row=["Total Expenses"] + _pdf_comparison_values(
+                comparative_income["total_expenses"], totals=True
+            ),
         ),
         Spacer(1, 12),
         _pdf_table(
-            ["", ""], [], [7.8 * inch, 2.0 * inch], money_from=1,
-            totals_row=["NET INCOME",
-                        _money_total(income_statement["net_income"])],
+            ["", "Current", "Prior Year", "$ Change", "% Change"], [],
+            [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
+            money_from=1,
+            totals_row=["NET INCOME"] + _pdf_comparison_values(
+                comparative_income["net_income"], totals=True
+            ),
         ),
         PageBreak(),
     ]
@@ -684,25 +819,33 @@ def build_close_package_pdf(
     story += [
         Paragraph("Balance Sheet", heading_2),
         Paragraph(f"As of {long_date(period_end)}", _PDF_META),
+        Paragraph(
+            f"Prior year as of {long_date(comparative_balance['prior_as_of'])}"
+            if comparative_balance['prior_available'] else "No prior-year data",
+            _PDF_META,
+        ),
         Spacer(1, 12),
     ]
     for section_title, items, total_label, total_value in [
-        ("Assets", balance_sheet["assets"],
-         "Total Assets", balance_sheet["total_assets"]),
-        ("Liabilities", balance_sheet["liabilities"],
-         "Total Liabilities", balance_sheet["total_liabilities"]),
-        ("Equity", balance_sheet["equity"],
-         "Total Equity", balance_sheet["total_equity"]),
+        ("Assets", comparative_balance["assets"],
+         "Total Assets", comparative_balance["total_assets"]),
+        ("Liabilities", comparative_balance["liabilities"],
+         "Total Liabilities", comparative_balance["total_liabilities"]),
+        ("Equity", comparative_balance["equity"],
+         "Total Equity", comparative_balance["total_equity"]),
     ]:
         story += [
             Paragraph(section_title, heading_2),
             _pdf_table(
-                ["Account", "Amount"],
-                [[_wrap(_statement_label(item)), _money(item["balance"])]
+                ["Account", "Current", "Prior Year", "$ Change", "% Change"],
+                [[_wrap(_statement_label(item))] + _pdf_comparison_values(item)
                  for item in items]
-                or [[f"No {section_title.lower()} recorded", ""]],
-                [7.8 * inch, 2.0 * inch], money_from=1,
-                totals_row=[total_label, _money_total(total_value)],
+                or [[f"No {section_title.lower()} recorded", "", "", "", ""]],
+                [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
+                money_from=1,
+                totals_row=[total_label] + _pdf_comparison_values(
+                    total_value, totals=True
+                ),
             ),
             Spacer(1, 10),
         ]
@@ -712,9 +855,12 @@ def build_close_package_pdf(
     )
     story += [
         _pdf_table(
-            ["", ""], [], [7.8 * inch, 2.0 * inch], money_from=1,
-            totals_row=["TOTAL LIABILITIES & EQUITY",
-                        _money_total(balance_sheet["total_liabilities_equity"])],
+            ["", "Current", "Prior Year", "$ Change", "% Change"], [],
+            [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
+            money_from=1,
+            totals_row=["TOTAL LIABILITIES & EQUITY"] + _pdf_comparison_values(
+                comparative_balance["total_liabilities_equity"], totals=True
+            ),
         ),
         Spacer(1, 8),
         Paragraph(
@@ -729,16 +875,41 @@ def build_close_package_pdf(
     # ---- Final Trial Balance
     story.append(Paragraph("Final Trial Balance", heading_2))
     money_w = 0.72 * inch
+    comparison_by_number = {
+        row['account_number']: row for row in comparative_tb['accounts']
+    }
+    pdf_tb_rows = []
+    current_numbers = set()
+    for row in tb_rows:
+        current_numbers.add(row.account_number)
+        comparison_row = comparison_by_number.get(row.account_number, {})
+        pdf_tb_rows.append([
+            row.account_number, _wrap(row.account_name),
+            _money(row.beginning_dr), _money(row.beginning_cr),
+            _money(row.period_debits), _money(row.period_credits),
+            _money(row.aje_debits), _money(row.aje_credits),
+            _money(row.adjusted_dr), _money(row.adjusted_cr),
+            _money(comparison_row.get('prior_debit')),
+            _money(comparison_row.get('prior_credit')),
+        ])
+    for comparison_row in comparative_tb['accounts']:
+        if comparison_row['account_number'] in current_numbers:
+            continue
+        if not (comparison_row.get('prior_debit') or
+                comparison_row.get('prior_credit')):
+            continue
+        pdf_tb_rows.append([
+            comparison_row['account_number'], _wrap(comparison_row['name']),
+            "", "", "", "", "", "", "", "",
+            _money(comparison_row.get('prior_debit')),
+            _money(comparison_row.get('prior_credit')),
+        ])
     story.append(_pdf_table(
         ["Acct #", "Account Name", "Beg Dr", "Beg Cr", "Activity Dr",
-         "Activity Cr", "AJE Dr", "AJE Cr", "Final Dr", "Final Cr"],
-        [[r.account_number, _wrap(r.account_name),
-          _money(r.beginning_dr), _money(r.beginning_cr),
-          _money(r.period_debits), _money(r.period_credits),
-          _money(r.aje_debits), _money(r.aje_credits),
-          _money(r.adjusted_dr), _money(r.adjusted_cr)]
-         for r in tb_rows],
-        [0.6 * inch, 2.9 * inch] + [money_w] * 8, money_from=2,
+         "Activity Cr", "AJE Dr", "AJE Cr", "Final Dr", "Final Cr",
+         "PY Final Dr", "PY Final Cr"],
+        pdf_tb_rows,
+        [0.55 * inch, 2.25 * inch] + [money_w] * 10, money_from=2,
         totals_row=["", "TOTALS",
                     _money(round(sum(r.beginning_dr for r in tb_rows), 2)),
                     _money(round(sum(r.beginning_cr for r in tb_rows), 2)),
@@ -746,7 +917,9 @@ def build_close_package_pdf(
                     _money(round(sum(r.period_credits for r in tb_rows), 2)),
                     _money(round(sum(r.aje_debits for r in tb_rows), 2)),
                     _money(round(sum(r.aje_credits for r in tb_rows), 2)),
-                    _money(total_dr), _money(total_cr)],
+                    _money(total_dr), _money(total_cr),
+                    _money(comparative_tb['prior_total_debits']),
+                    _money(comparative_tb['prior_total_credits'])],
     ))
     story.append(PageBreak())
 

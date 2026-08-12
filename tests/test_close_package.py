@@ -130,6 +130,72 @@ def test_workbook_sheets_and_tie_outs(booked_period, accounts):
     )
 
 
+def test_close_package_includes_line_by_line_prior_year_comparisons(
+    client_id, accounts
+):
+    post_entry(client_id, date(2025, 1, 15), [
+        (accounts["cash"], 100, 0), (accounts["revenue"], 0, 100),
+    ])
+    post_entry(client_id, date(2025, 2, 15), [
+        (accounts["expense"], 20, 0), (accounts["cash"], 0, 20),
+    ])
+    post_entry(client_id, date(2026, 1, 15), [
+        (accounts["cash"], 150, 0), (accounts["revenue"], 0, 150),
+    ])
+    post_entry(client_id, date(2026, 2, 15), [
+        (accounts["expense"], 30, 0), (accounts["cash"], 0, 30),
+    ])
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+    snapshot = load_close_package_snapshot(client_id, *Q1)
+    package = build_close_package(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    )
+    wb = openpyxl.load_workbook(BytesIO(package.read()), data_only=False)
+
+    income = wb["Income Statement"]
+    assert [income.cell(4, col).value for col in range(2, 6)] == [
+        "2026-01-01 to 2026-03-31", "2025-01-01 to 2025-03-31",
+        "$ Change", "% Change",
+    ]
+    income_rows = {
+        income.cell(row, 1).value: [income.cell(row, col).value for col in range(2, 6)]
+        for row in range(1, income.max_row + 1)
+    }
+    assert income_rows["Total Revenue"] == [150, 100, 50, 50]
+    assert income_rows["NET INCOME"] == [120, 80, 40, 50]
+
+    balance = wb["Balance Sheet"]
+    balance_rows = {
+        balance.cell(row, 1).value: [balance.cell(row, col).value for col in range(2, 6)]
+        for row in range(1, balance.max_row + 1)
+    }
+    assert balance_rows["Total Assets"][:3] == [200, 80, 120]
+
+    trial = wb["Trial Balance"]
+    assert trial.cell(1, 12).value == "PY Final Dr"
+    assert trial.cell(1, 13).value == "PY Final Cr"
+    cash_row = next(
+        row for row in range(2, trial.max_row)
+        if trial.cell(row, 1).value == "1000"
+    )
+    assert trial.cell(cash_row, 12).value == 80
+
+    pdf = build_close_package_pdf(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    )
+    doc = pdfium.PdfDocument(pdf.read())
+    try:
+        text = "\n".join(
+            doc[index].get_textpage().get_text_range()
+            for index in range(len(doc))
+        )
+        assert "Prior Year" in text
+        assert "Prior period:" in text
+        assert "PY Final Dr" in text
+    finally:
+        doc.close()
+
+
 def test_workbook_stores_untrusted_text_as_literals(client_id, accounts):
     dangerous_client = "=CLIENT()"
     dangerous_account = "+CASH()"

@@ -160,27 +160,35 @@ def list_accounts(client_id: int) -> list:
 
 
 @server.tool()
-def trial_balance(client_id: int, as_of: str = "") -> dict:
+def trial_balance(client_id: int, as_of: str = "",
+                  compare_to_prior_year: bool = False) -> dict:
     """Trial balance as of a date (ISO, default today): every account's debit
     or credit balance, totals, and whether it balances."""
     _require_level("read")
-    return mcp_tools.trial_balance(client_id, as_of or None)
+    return mcp_tools.trial_balance(
+        client_id, as_of or None, compare_to_prior_year
+    )
 
 
 @server.tool()
-def income_statement(client_id: int, start: str, end: str) -> dict:
+def income_statement(client_id: int, start: str, end: str,
+                     compare_to_prior_year: bool = False) -> dict:
     """Income statement for a period (ISO dates): revenues, expenses, and net
-    income."""
+    income. Set compare_to_prior_year for line-by-line PY amounts and changes."""
     _require_level("read")
-    return mcp_tools.income_statement(client_id, start, end)
+    return mcp_tools.income_statement(
+        client_id, start, end, compare_to_prior_year
+    )
 
 
 @server.tool()
-def balance_sheet(client_id: int, as_of: str) -> dict:
+def balance_sheet(client_id: int, as_of: str,
+                  compare_to_prior_year: bool = False) -> dict:
     """Balance sheet as of a date (ISO): assets, liabilities, equity (including
-    retained and current-year earnings), totals, and whether it balances."""
+    retained and current-year earnings), totals, and whether it balances.
+    Set compare_to_prior_year for line-by-line PY amounts and changes."""
     _require_level("read")
-    return mcp_tools.balance_sheet(client_id, as_of)
+    return mcp_tools.balance_sheet(client_id, as_of, compare_to_prior_year)
 
 
 @server.tool()

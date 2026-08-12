@@ -17,7 +17,12 @@ from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils.dates import long_date
-from utils.ui import financial_statement, ledger_table, view_switcher
+from utils.ui import (
+    apply_default_on_change,
+    financial_statement,
+    ledger_table,
+    view_switcher,
+)
 
 
 from utils import icons
@@ -90,6 +95,18 @@ if selected_report == "Trial Balance":
         as_of_date = st.date_input("As of Date", value=date.today(), key="tb_date")
 
     rows = ReportGenerator.trial_balance(client_id, as_of_date)
+    comparison = ReportGenerator.comparative_trial_balance(client_id, as_of_date)
+    apply_default_on_change(
+        "tb_compare_py", (client_id, as_of_date, comparison['prior_available']),
+        comparison['prior_available'],
+    )
+    compare_py = st.toggle(
+        "Compare to prior year",
+        disabled=not comparison['prior_available'],
+        key="tb_compare_py",
+    )
+    if not comparison['prior_available']:
+        st.caption("No prior-year book history is available for this date.")
 
     # Get accounts for drill-down
     # Include deactivated accounts for historical drill-down. They remain
@@ -104,16 +121,37 @@ if selected_report == "Trial Balance":
         total_credits = sum(r.credit for r in rows)
 
         st.markdown(f"**As of {long_date(as_of_date)}**")
-        statement_rows = [
-            ("item",
-             f"{row.account_number} - {row.account_name}",
-             [row.debit if row.debit > 0 else None,
-              row.credit if row.credit > 0 else None],
-             row.account_type)
-            for row in rows
-        ]
-        statement_rows.append(("total", "Totals", [total_debits, total_credits]))
-        financial_statement(statement_rows, headers=["Debit", "Credit"])
+        if compare_py:
+            statement_rows = [
+                ("item", f"{row['account_number']} - {row['name']}",
+                 [row['current_debit'] or None, row['current_credit'] or None,
+                  row['prior_debit'] or None, row['prior_credit'] or None],
+                 row['type'])
+                for row in comparison['accounts']
+            ]
+            statement_rows.append((
+                "total", "Totals",
+                [comparison['current_total_debits'],
+                 comparison['current_total_credits'],
+                 comparison['prior_total_debits'],
+                 comparison['prior_total_credits']],
+            ))
+            financial_statement(
+                statement_rows,
+                headers=["Current Dr", "Current Cr", "PY Dr", "PY Cr"],
+            )
+            st.caption(f"Prior year as of {long_date(comparison['prior_as_of'])}")
+        else:
+            statement_rows = [
+                ("item",
+                 f"{row.account_number} - {row.account_name}",
+                 [row.debit if row.debit > 0 else None,
+                  row.credit if row.credit > 0 else None],
+                 row.account_type)
+                for row in rows
+            ]
+            statement_rows.append(("total", "Totals", [total_debits, total_credits]))
+            financial_statement(statement_rows, headers=["Debit", "Credit"])
 
         if abs(total_debits - total_credits) < 0.01:
             st.success("Trial balance is in balance.")
@@ -131,7 +169,10 @@ if selected_report == "Trial Balance":
 
         # Export
         st.divider()
-        df = ReportGenerator.trial_balance_to_dataframe(rows)
+        df = (
+            ReportGenerator.comparative_trial_balance_to_dataframe(comparison)
+            if compare_py else ReportGenerator.trial_balance_to_dataframe(rows)
+        )
 
         buffer = BytesIO()
         with st.spinner("Preparing export..."):
@@ -162,7 +203,21 @@ elif selected_report == "Income Statement":
         st.error("Income statement start date cannot be after the end date.")
         st.stop()
 
-    report = ReportGenerator.income_statement(client_id, is_start, is_end)
+    report = ReportGenerator.comparative_income_statement(
+        client_id, is_start, is_end
+    )
+    apply_default_on_change(
+        "is_compare_py",
+        (client_id, is_start, is_end, report['prior_available']),
+        report['prior_available'],
+    )
+    compare_py = st.toggle(
+        "Compare to prior year",
+        disabled=not report['prior_available'],
+        key="is_compare_py",
+    )
+    if not report['prior_available']:
+        st.caption("No prior-year book history is available for this period.")
 
     # Get accounts for drill-down
     accounts = Account.get_all(client_id, active_only=False)
@@ -172,40 +227,73 @@ elif selected_report == "Income Statement":
         f"**{long_date(is_start)} to {long_date(is_end)}**"
     )
 
+    def _amounts(item):
+        if not compare_py:
+            return [item['current']]
+        return [item['current'], item['prior'], item['change'],
+                item['change_percent']]
+
+    revenue_lines = (
+        report['revenues'] if compare_py
+        else [item for item in report['revenues'] if item['current'] != 0]
+    )
+    expense_lines = (
+        report['expenses'] if compare_py
+        else [item for item in report['expenses'] if item['current'] != 0]
+    )
+
     statement_rows = [("section", "Revenue", [])]
-    if report['revenues']:
+    if revenue_lines:
         statement_rows += [
-            ("item", f"{r['account_number']} - {r['name']}", [r['balance']])
-            for r in report['revenues']
+            ("item", f"{r['account_number']} - {r['name']}", _amounts(r))
+            for r in revenue_lines
         ]
     else:
         statement_rows.append(("note", "No revenue recorded", []))
-    statement_rows.append(("subtotal", "Total Revenue", [report['total_revenue']]))
+    statement_rows.append(("subtotal", "Total Revenue",
+                           _amounts(report['total_revenue'])))
 
     statement_rows.append(("section", "Expenses", []))
-    if report['expenses']:
+    if expense_lines:
         statement_rows += [
-            ("item", f"{e['account_number']} - {e['name']}", [e['balance']])
-            for e in report['expenses']
+            ("item", f"{e['account_number']} - {e['name']}", _amounts(e))
+            for e in expense_lines
         ]
     else:
         statement_rows.append(("note", "No expenses recorded", []))
-    statement_rows.append(("subtotal", "Total Expenses", [report['total_expenses']]))
-    statement_rows.append(("total", "Net Income", [report['net_income']]))
+    statement_rows.append(("subtotal", "Total Expenses",
+                           _amounts(report['total_expenses'])))
+    statement_rows.append(("total", "Net Income", _amounts(report['net_income'])))
 
-    financial_statement(statement_rows)
+    financial_statement(
+        statement_rows,
+        headers=["Current", "Prior Year", "$ Change", "% Change"]
+        if compare_py else None,
+        formats=["money", "money", "money", "percent"]
+        if compare_py else None,
+    )
+    if compare_py:
+        st.caption(
+            f"Prior period: {long_date(report['prior_period']['start'])} to "
+            f"{long_date(report['prior_period']['end'])}"
+        )
 
     gl_drill_down(
         {account_id_lookup[r['account_number']]:
              f"{r['account_number']} - {r['name']}"
-         for r in report['revenues'] + report['expenses']
+         for r in revenue_lines + expense_lines
          if r['account_number'] in account_id_lookup},
         key="is", start_date=is_start, end_date=is_end,
     )
 
     # Export
     st.divider()
-    df = ReportGenerator.income_statement_to_dataframe(report)
+    df = (
+        ReportGenerator.comparative_income_statement_to_dataframe(report)
+        if compare_py else ReportGenerator.income_statement_to_dataframe(
+            ReportGenerator.income_statement(client_id, is_start, is_end)
+        )
+    )
 
     buffer = BytesIO()
     sanitize_df(df).to_excel(buffer, index=False, sheet_name="Income Statement")
@@ -230,7 +318,18 @@ elif selected_report == "Balance Sheet":
     with col1:
         bs_date = st.date_input("As of Date", value=date.today(), key="bs_date")
 
-    report = ReportGenerator.balance_sheet(client_id, bs_date)
+    report = ReportGenerator.comparative_balance_sheet(client_id, bs_date)
+    apply_default_on_change(
+        "bs_compare_py", (client_id, bs_date, report['prior_available']),
+        report['prior_available'],
+    )
+    compare_py = st.toggle(
+        "Compare to prior year",
+        disabled=not report['prior_available'],
+        key="bs_compare_py",
+    )
+    if not report['prior_available']:
+        st.caption("No prior-year book history is available for this date.")
 
     # Get accounts for drill-down
     accounts = Account.get_all(client_id, active_only=False)
@@ -238,30 +337,54 @@ elif selected_report == "Balance Sheet":
 
     st.markdown(f"**As of {long_date(bs_date)}**")
 
+    def _bs_amounts(item):
+        if not compare_py:
+            return [item['current']]
+        return [item['current'], item['prior'], item['change'],
+                item['change_percent']]
+
+    def _bs_lines(items):
+        return items if compare_py else [
+            item for item in items if item['current'] != 0
+        ]
+
+    asset_lines = _bs_lines(report['assets'])
+    liability_lines = _bs_lines(report['liabilities'])
+    equity_lines = _bs_lines(report['equity'])
+
     def _section(title, entries, subtotal_label, subtotal_value):
         rows = [("section", title, [])]
         if entries:
             rows += [
                 ("item", (f"{e['account_number']} - {e['name']}"
                           if e['account_number'] else e['name']),
-                 [e['balance']])
+                 _bs_amounts(e))
                 for e in entries
             ]
         else:
             rows.append(("note", f"No {title.lower()} recorded", []))
-        rows.append(("subtotal", subtotal_label, [subtotal_value]))
+        rows.append(("subtotal", subtotal_label, _bs_amounts(subtotal_value)))
         return rows
 
     statement_rows = (
-        _section("Assets", report['assets'], "Total Assets", report['total_assets'])
-        + _section("Liabilities", report['liabilities'],
+        _section("Assets", asset_lines, "Total Assets", report['total_assets'])
+        + _section("Liabilities", liability_lines,
                    "Total Liabilities", report['total_liabilities'])
-        + _section("Equity", report['equity'], "Total Equity", report['total_equity'])
-        + [("total", "Total Liabilities & Equity", [report['total_liabilities_equity']])]
+        + _section("Equity", equity_lines, "Total Equity", report['total_equity'])
+        + [("total", "Total Liabilities & Equity",
+            _bs_amounts(report['total_liabilities_equity']))]
     )
-    financial_statement(statement_rows)
+    financial_statement(
+        statement_rows,
+        headers=["Current", "Prior Year", "$ Change", "% Change"]
+        if compare_py else None,
+        formats=["money", "money", "money", "percent"]
+        if compare_py else None,
+    )
+    if compare_py:
+        st.caption(f"Prior year as of {long_date(report['prior_as_of'])}")
 
-    if abs(report['total_assets'] - report['total_liabilities_equity']) < 0.01:
+    if report['current_balanced']:
         st.success("Balance sheet is balanced.")
     else:
         st.error("Balance sheet is OUT OF BALANCE!")
@@ -269,7 +392,7 @@ elif selected_report == "Balance Sheet":
     gl_drill_down(
         {account_id_lookup[e['account_number']]:
              f"{e['account_number']} - {e['name']}"
-         for e in report['assets'] + report['liabilities'] + report['equity']
+         for e in asset_lines + liability_lines + equity_lines
          if e['account_number'] and e['account_number'] in account_id_lookup},
         key="bs",
         start_date=fiscal_year_bounds(bs_date, client.fiscal_year_end_month)[0],
@@ -278,7 +401,12 @@ elif selected_report == "Balance Sheet":
 
     # Export
     st.divider()
-    df = ReportGenerator.balance_sheet_to_dataframe(report)
+    df = (
+        ReportGenerator.comparative_balance_sheet_to_dataframe(report)
+        if compare_py else ReportGenerator.balance_sheet_to_dataframe(
+            ReportGenerator.balance_sheet(client_id, bs_date)
+        )
+    )
 
     buffer = BytesIO()
     sanitize_df(df).to_excel(buffer, index=False, sheet_name="Balance Sheet")
