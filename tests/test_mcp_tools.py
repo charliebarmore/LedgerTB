@@ -6,6 +6,7 @@ import pytest
 
 from database import connection as dbconn
 from database.connection import get_cursor
+from models.transaction import ImportedTransaction
 from services import mcp_tools
 from tests.conftest import post_entry
 
@@ -68,11 +69,37 @@ def test_find_entries_and_detail(client_id, accounts):
         mcp_tools.trial_balance(999999)
 
 
-def test_integrity_sweep_shape(client_id, accounts):
+def test_integrity_sweep_reports_clean_books_explicitly(client_id, accounts):
     _seed(client_id, accounts)
-    findings = mcp_tools.integrity_sweep(client_id, "2026-01-01", "2026-12-31")
-    assert isinstance(findings, list)
-    for f in findings:
+    result = mcp_tools.integrity_sweep(client_id, "2026-01-01", "2026-12-31")
+
+    assert result == {
+        "period": {"start": "2026-01-01", "end": "2026-12-31"},
+        "checks_run": mcp_tools.INTEGRITY_CHECKS,
+        "clean": True,
+        "findings": [],
+    }
+
+
+def test_integrity_sweep_reports_findings_in_same_envelope(client_id, accounts):
+    _seed(client_id, accounts)
+    ImportedTransaction(
+        client_id=client_id,
+        import_batch="unreviewed.csv",
+        transaction_date=date(2026, 3, 1),
+        description="Pending transaction",
+        amount=-25,
+        bank_account_id=accounts["cash"],
+        status="Pending",
+    ).save()
+
+    result = mcp_tools.integrity_sweep(client_id, "2026-01-01", "2026-12-31")
+
+    assert result["clean"] is False
+    assert result["checks_run"] == mcp_tools.INTEGRITY_CHECKS
+    assert result["period"] == {"start": "2026-01-01", "end": "2026-12-31"}
+    assert result["findings"]
+    for f in result["findings"]:
         assert {"severity", "check", "title", "detail"} <= set(f)
 
 

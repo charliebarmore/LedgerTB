@@ -250,15 +250,28 @@ def entry_detail(client_id: int, entry_id: int) -> dict:
     }
 
 
-def integrity_sweep(client_id: int, start: str, end: str) -> list:
+INTEGRITY_CHECKS = [
+    "entry_balance",
+    "minimum_entry_lines",
+    "unposted_imports",
+    "posted_import_links",
+    "future_dated_entries",
+    "pre_period_entries",
+    "quiet_profit_and_loss_accounts",
+    "import_row_continuity",
+]
+
+
+def integrity_sweep(client_id: int, start: str, end: str) -> dict:
     """Deterministic bookkeeping checks: unbalanced or short entries, unposted
     imports, broken import links, future/pre-period dates, quiet P&L accounts,
-    import row gaps."""
+    import row gaps. Always returns an explicit result, including when the book
+    is clean, so an empty finding set cannot be mistaken for a failed tool."""
     _require_client(client_id)
-    findings = run_integrity_sweep(
-        client_id, _parse_date(start, "start"), _parse_date(end, "end")
-    )
-    return [
+    period_start = _parse_date(start, "start")
+    period_end = _parse_date(end, "end")
+    findings = run_integrity_sweep(client_id, period_start, period_end)
+    finding_rows = [
         {
             "severity": f.severity,
             "check": f.skill,
@@ -268,6 +281,15 @@ def integrity_sweep(client_id: int, start: str, end: str) -> list:
         }
         for f in findings
     ]
+    return {
+        "period": {
+            "start": period_start.isoformat(),
+            "end": period_end.isoformat(),
+        },
+        "checks_run": list(INTEGRITY_CHECKS),
+        "clean": not finding_rows,
+        "findings": finding_rows,
+    }
 
 
 def propose_entry(client_id: int, entry_date: str, description: str,

@@ -311,10 +311,11 @@ def import_accounts(client_id: int, rows: list) -> dict:
 
 
 @server.tool()
-def integrity_sweep(client_id: int, start: str, end: str) -> list:
+def integrity_sweep(client_id: int, start: str, end: str) -> dict:
     """Deterministic bookkeeping checks for a period: unbalanced or one-line
     entries, unposted imports, broken import links, future/pre-period dates,
-    quiet P&L accounts, and import row-continuity gaps."""
+    quiet P&L accounts, and import row-continuity gaps. Returns an explicit
+    clean status and the checks run even when there are no findings."""
     _require_level("read")
     return mcp_tools.integrity_sweep(client_id, start, end)
 
