@@ -3,113 +3,362 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LedgerTB — books that tie, in a file you own</title>
-<meta name="description" content="Desktop double-entry bookkeeping for client work. Trial balance to close, in one encrypted file on your machine — with an AI assistant on a permission dial. Free and open source.">
+<title>LedgerTB — local-first bookkeeping built around the trial balance</title>
+<meta name="description" content="Desktop double-entry bookkeeping for client work, from imports and adjustments through a trial balance that ties. One encrypted file on your machine. Free and open source.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.ico">
-<meta property="og:title" content="LedgerTB — books that tie, in a file you own">
-<meta property="og:description" content="Local-first double-entry bookkeeping for client work, with an AI assistant on a permission dial. Free and open source.">
+<meta property="og:title" content="LedgerTB — local-first bookkeeping built around the trial balance">
+<meta property="og:description" content="Desktop double-entry bookkeeping for client work, from imports and adjustments through a trial balance that ties. Free and open source.">
 <meta property="og:image" content="https://ledgertb.com/og-image.png">
 <meta property="og:url" content="https://ledgertb.com">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
 <style>
   :root {
-    --teal: #1D434E; --orange: #E8913A; --cream: #FDFCEA; --green: #2D9148;
-    --amber: #E6A532; --abyss: #0F2A31; --vellum: #F5ECD6; --ink: #0B1A1F;
+    --teal: #1D434E;
+    --orange: #E8913A;
+    --cream: #FDFCEA;
+    --green: #2D9148;
+    --amber: #E6A532;
+    --abyss: #0F2A31;
+    --vellum: #F5ECD6;
+    --ink: #0B1A1F;
+    --muted-light: #C8D2CF;
+    --muted-dark: #516368;
     --display: "Playfair Display", Georgia, serif;
     --body: "Inter", -apple-system, "Segoe UI", sans-serif;
     --mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
   }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; }
-  body { font-family: var(--body); background: var(--abyss); color: var(--cream); line-height: 1.6; }
-  a { color: var(--orange); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  body {
+    background: var(--abyss);
+    color: var(--cream);
+    font-family: var(--body);
+    line-height: 1.6;
+    text-rendering: optimizeLegibility;
+  }
+  img { display: block; max-width: 100%; }
+  a { color: inherit; text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 4px; }
+  a:focus-visible, button:focus-visible {
+    outline: 3px solid var(--amber);
+    outline-offset: 4px;
+  }
+  .wrap { width: min(1180px, calc(100% - 48px)); margin-inline: auto; }
 
-  /* Nav */
-  nav { display: flex; align-items: center; justify-content: space-between; padding: 20px 0; }
-  .brand { display: flex; align-items: center; gap: 12px; font-family: var(--display); font-weight: 600; font-size: 1.5rem; color: var(--cream); }
+  .site-nav {
+    align-items: center;
+    border-bottom: 1px solid rgba(253, 252, 234, .12);
+    display: flex;
+    justify-content: space-between;
+    min-height: 80px;
+  }
+  .brand {
+    align-items: center;
+    color: var(--cream);
+    display: inline-flex;
+    font-family: var(--display);
+    font-size: 1.48rem;
+    font-weight: 600;
+    gap: 11px;
+  }
   .brand:hover { text-decoration: none; }
+  .brand img { height: 42px; width: 42px; }
   .brand .tb { color: var(--orange); }
-  .brand svg { width: 40px; height: 40px; }
-  nav .links { display: flex; gap: 24px; font-size: .95rem; }
-  nav .links a { color: var(--cream); opacity: .85; }
-  nav .links a:hover { opacity: 1; color: var(--orange); text-decoration: none; }
+  .nav-links { align-items: center; display: flex; gap: 28px; }
+  .nav-links a { color: var(--muted-light); font-size: .92rem; font-weight: 500; }
+  .nav-links a:hover { color: var(--cream); text-decoration: none; }
+  .nav-links .nav-download { color: var(--cream); }
 
-  /* Hero */
-  header { background: linear-gradient(180deg, var(--abyss) 0%, var(--teal) 100%); padding-bottom: 88px; }
-  .hero { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr); gap: 48px; align-items: center; padding-top: 72px; }
-  h1 { font-family: var(--display); font-weight: 700; font-size: clamp(2.4rem, 5vw, 3.6rem); line-height: 1.12; }
-  h1 .tie { color: var(--orange); }
-  .hero p.lede { margin: 22px 0 30px; font-size: 1.15rem; opacity: .92; max-width: 34em; }
-  .cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
-  .btn { display: inline-block; padding: 13px 22px; border-radius: 10px; font-weight: 600; font-size: 1rem; }
-  .btn:hover { text-decoration: none; filter: brightness(1.08); }
+  .hero {
+    display: grid;
+    gap: 58px;
+    grid-template-columns: minmax(0, .82fr) minmax(560px, 1.18fr);
+    padding: 94px 0 72px;
+    align-items: center;
+  }
+  .eyebrow, .kicker {
+    color: var(--orange);
+    font-family: var(--mono);
+    font-size: .76rem;
+    font-weight: 500;
+    letter-spacing: .14em;
+    margin-bottom: 15px;
+    text-transform: uppercase;
+  }
+  h1, h2, .quote {
+    font-family: var(--display);
+    font-weight: 700;
+  }
+  h1 {
+    font-size: clamp(3.15rem, 6.2vw, 5.35rem);
+    letter-spacing: -.035em;
+    line-height: .99;
+    max-width: 10.5ch;
+  }
+  h1 em { color: var(--orange); font-style: normal; }
+  .lede {
+    color: #E5E9E4;
+    font-size: 1.12rem;
+    margin: 26px 0 30px;
+    max-width: 39rem;
+  }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 13px; }
+  .btn {
+    border: 1px solid transparent;
+    border-radius: 7px;
+    display: inline-flex;
+    font-size: .96rem;
+    font-weight: 600;
+    justify-content: center;
+    padding: 13px 21px;
+  }
+  .btn:hover { filter: brightness(1.08); text-decoration: none; }
   .btn.primary { background: var(--green); color: #fff; }
-  .btn.ghost { border: 1.5px solid rgba(253,252,234,.45); color: var(--cream); }
-  .cta-note { margin-top: 14px; font-size: .85rem; opacity: .7; }
+  .btn.secondary { border-color: rgba(253, 252, 234, .42); color: var(--cream); }
+  .hero-note {
+    color: var(--muted-light);
+    font-family: var(--mono);
+    font-size: .74rem;
+    margin-top: 17px;
+  }
 
-  /* The TB card in the hero */
-  .tb-card { background: var(--teal); border: 1px solid rgba(253,252,234,.12); border-radius: 16px; padding: 26px 28px; box-shadow: 0 24px 60px rgba(0,0,0,.35); }
-  .tb-card h3 { font-family: var(--body); font-weight: 600; font-size: .95rem; letter-spacing: .02em; opacity: .85; margin-bottom: 4px; }
-  .tb-card .period { font-size: .8rem; opacity: .6; margin-bottom: 18px; }
-  .tb-card table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: .92rem; }
-  .tb-card td { padding: 7px 0; }
-  .tb-card td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
-  .tb-card tr.total td { border-top: 1.5px solid rgba(253,252,234,.5); font-weight: 500; padding-top: 10px; }
-  .tb-card .rule { border-bottom: 3px double var(--cream); margin-top: 6px; }
-  .tb-card .ties { display: flex; align-items: center; gap: 8px; margin-top: 14px; color: #7FD49A; font-size: .9rem; font-weight: 600; }
-  .tb-card .ties .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); }
+  .product-frame {
+    background: #fff;
+    border: 1px solid rgba(253, 252, 234, .24);
+    border-radius: 10px;
+    box-shadow: 0 32px 80px rgba(0, 0, 0, .38);
+    overflow: hidden;
+    position: relative;
+  }
+  .product-frame img { aspect-ratio: 16 / 11; object-fit: cover; width: 100%; }
+  .product-label {
+    background: var(--abyss);
+    border: 1px solid rgba(253, 252, 234, .16);
+    bottom: 18px;
+    color: var(--cream);
+    font-family: var(--mono);
+    font-size: .69rem;
+    left: 18px;
+    letter-spacing: .04em;
+    padding: 8px 10px;
+    position: absolute;
+  }
 
-  /* Sections */
-  section { padding: 80px 0; }
-  section.deep { background: var(--teal); }
+  .proof-strip {
+    border-bottom: 1px solid rgba(253, 252, 234, .12);
+    border-top: 1px solid rgba(253, 252, 234, .12);
+  }
+  .proof-list {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .proof-item { padding: 25px 26px; }
+  .proof-item + .proof-item { border-left: 1px solid rgba(253, 252, 234, .12); }
+  .proof-item strong { display: block; font-size: .94rem; margin-bottom: 2px; }
+  .proof-item span { color: var(--muted-light); font-size: .79rem; }
+
+  section { padding: 104px 0; }
   section.paper { background: var(--vellum); color: var(--ink); }
-  h2 { font-family: var(--display); font-weight: 600; font-size: clamp(1.7rem, 3.4vw, 2.4rem); margin-bottom: 12px; }
-  .kicker { font-family: var(--mono); font-size: .8rem; letter-spacing: .14em; text-transform: uppercase; color: var(--orange); margin-bottom: 10px; }
-  .sub { max-width: 44em; opacity: .88; margin-bottom: 40px; }
-  section.paper .sub { opacity: .8; }
+  section.teal { background: var(--teal); }
+  h2 {
+    font-size: clamp(2.25rem, 4.5vw, 3.75rem);
+    letter-spacing: -.025em;
+    line-height: 1.08;
+    max-width: 15ch;
+  }
+  .section-intro {
+    align-items: end;
+    display: flex;
+    gap: 46px;
+    justify-content: space-between;
+    margin-bottom: 54px;
+  }
+  .section-intro .sub {
+    color: var(--muted-dark);
+    font-size: 1rem;
+    max-width: 37rem;
+  }
+  section:not(.paper) .section-intro .sub { color: var(--muted-light); }
 
-  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
-  .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .card { background: rgba(253,252,234,.045); border: 1px solid rgba(253,252,234,.1); border-radius: 14px; padding: 24px; }
-  section.paper .card { background: rgba(11,26,31,.035); border-color: rgba(11,26,31,.12); }
-  .card h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; }
-  .card p { font-size: .93rem; opacity: .85; }
-  .card .m { font-family: var(--mono); color: var(--orange); font-size: .8rem; display: block; margin-bottom: 10px; letter-spacing: .06em; }
+  .tour-primary {
+    border-bottom: 1px solid rgba(11, 26, 31, .17);
+    margin-bottom: 44px;
+    padding-bottom: 44px;
+  }
+  .shot {
+    background: #fff;
+    border: 1px solid #C9D0CF;
+    box-shadow: 0 20px 60px rgba(15, 42, 49, .16);
+    overflow: hidden;
+  }
+  .shot img { width: 100%; }
+  figcaption {
+    align-items: start;
+    display: grid;
+    gap: 26px;
+    grid-template-columns: minmax(190px, .35fr) 1fr;
+    margin-top: 19px;
+  }
+  figcaption strong { font-family: var(--display); font-size: 1.4rem; line-height: 1.2; }
+  figcaption p { color: var(--muted-dark); font-size: .92rem; max-width: 48rem; }
+  .tour-secondary { display: grid; gap: 34px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tour-secondary figcaption { display: block; }
+  .tour-secondary figcaption strong { display: block; margin-bottom: 7px; }
+  .sample-note {
+    color: var(--muted-dark);
+    font-family: var(--mono);
+    font-size: .72rem;
+    margin-top: 34px;
+  }
 
-  /* Dial */
-  .dial { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; margin-top: 8px; }
-  .dial .level { border-left: 3px solid var(--orange); padding: 4px 0 4px 18px; }
-  .dial .level h3 { font-family: var(--mono); font-size: 1rem; color: var(--orange); margin-bottom: 6px; }
-  .dial .level p { font-size: .92rem; opacity: .85; }
+  .workflow-grid {
+    display: grid;
+    gap: 0;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 52px;
+  }
+  .workflow-step {
+    border-top: 2px solid rgba(253, 252, 234, .22);
+    padding: 22px 30px 0 0;
+  }
+  .workflow-step + .workflow-step { padding-left: 30px; }
+  .workflow-step .number {
+    color: var(--orange);
+    display: block;
+    font-family: var(--mono);
+    font-size: .76rem;
+    margin-bottom: 18px;
+  }
+  .workflow-step h3 { font-size: 1.05rem; margin-bottom: 8px; }
+  .workflow-step p { color: var(--muted-light); font-size: .88rem; }
 
-  .assurance { margin-top: 34px; padding: 20px 24px; border: 1px solid rgba(253,252,234,.15); border-radius: 12px; font-size: .95rem; background: rgba(15,42,49,.5); }
-  .assurance strong { color: var(--amber); }
+  .capabilities {
+    display: grid;
+    gap: 72px;
+    grid-template-columns: .75fr 1.25fr;
+  }
+  .capabilities h2 { position: sticky; top: 42px; }
+  .capability-list { border-top: 1px solid rgba(253, 252, 234, .18); }
+  .capability {
+    border-bottom: 1px solid rgba(253, 252, 234, .18);
+    display: grid;
+    gap: 26px;
+    grid-template-columns: minmax(180px, .65fr) 1.35fr;
+    padding: 26px 0;
+  }
+  .capability h3 { font-size: 1rem; }
+  .capability p { color: var(--muted-light); font-size: .9rem; }
 
-  /* Posture */
-  .posture-quote { font-family: var(--display); font-weight: 600; font-size: clamp(1.5rem, 3vw, 2.1rem); max-width: 20em; margin-bottom: 18px; }
-  .posture-quote em { color: #9a5b28; font-style: normal; }
+  .assistant-layout {
+    display: grid;
+    gap: 68px;
+    grid-template-columns: .78fr 1.22fr;
+  }
+  .assistant-copy h2 { margin-bottom: 23px; }
+  .assistant-copy > p { color: var(--muted-light); max-width: 32rem; }
+  .dial { border-top: 1px solid rgba(253, 252, 234, .2); }
+  .level {
+    border-bottom: 1px solid rgba(253, 252, 234, .2);
+    display: grid;
+    gap: 24px;
+    grid-template-columns: 110px 1fr;
+    padding: 25px 0;
+  }
+  .level h3 { color: var(--orange); font-family: var(--mono); font-size: .9rem; }
+  .level p { color: var(--muted-light); font-size: .91rem; }
+  .engine-note {
+    border-left: 3px solid var(--orange);
+    color: #E5E9E4;
+    font-size: .91rem;
+    margin-top: 31px;
+    padding-left: 18px;
+  }
+  .engine-note strong { color: var(--cream); }
 
-  /* Download */
-  .dl-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; margin-top: 8px; }
-  .dl-cards .card p { margin-bottom: 16px; }
-  .fine { font-size: .85rem; opacity: .7; margin-top: 26px; max-width: 52em; }
+  .security-grid {
+    display: grid;
+    gap: 34px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 52px;
+  }
+  .security-item { border-top: 2px solid rgba(11, 26, 31, .22); padding-top: 22px; }
+  .security-item .code { color: #91511E; font-family: var(--mono); font-size: .74rem; }
+  .security-item h3 { font-size: 1.05rem; margin: 9px 0 8px; }
+  .security-item p { color: var(--muted-dark); font-size: .89rem; }
 
-  footer { padding: 44px 0 60px; border-top: 1px solid rgba(253,252,234,.1); font-size: .9rem; }
-  footer .row { display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
-  footer .links { display: flex; gap: 20px; }
-  footer p { opacity: .65; margin-top: 14px; }
+  .posture {
+    align-items: end;
+    display: grid;
+    gap: 60px;
+    grid-template-columns: 1fr 1fr;
+  }
+  .quote { font-size: clamp(2.4rem, 5.8vw, 4.7rem); letter-spacing: -.03em; line-height: 1.02; }
+  .quote em { color: var(--orange); font-style: normal; }
+  .posture p { color: var(--muted-light); max-width: 37rem; }
 
-  @media (max-width: 860px) {
-    .hero { grid-template-columns: minmax(0, 1fr); }
-    .grid, .grid.two, .dial, .dl-cards { grid-template-columns: minmax(0, 1fr); }
-    nav .links { display: none; }
+  .download-head {
+    align-items: end;
+    display: flex;
+    gap: 50px;
+    justify-content: space-between;
+    margin-bottom: 52px;
+  }
+  .download-head p { color: var(--muted-light); max-width: 40rem; }
+  .download-grid { border-top: 1px solid rgba(253, 252, 234, .17); display: grid; grid-template-columns: 1fr 1fr; }
+  .download-option { padding: 34px 40px 10px 0; }
+  .download-option + .download-option { border-left: 1px solid rgba(253, 252, 234, .17); padding-left: 40px; }
+  .download-option h3 { font-family: var(--display); font-size: 1.8rem; }
+  .download-option p { color: var(--muted-light); margin: 8px 0 22px; max-width: 30rem; }
+  .fine { color: #9FB0AC; font-size: .78rem; margin-top: 35px; max-width: 60rem; }
+
+  footer { border-top: 1px solid rgba(253, 252, 234, .12); padding: 42px 0 58px; }
+  .footer-top { align-items: center; display: flex; gap: 25px; justify-content: space-between; }
+  footer .brand { font-size: 1.12rem; }
+  footer .brand img { height: 32px; width: 32px; }
+  .footer-links { display: flex; flex-wrap: wrap; gap: 22px; }
+  .footer-links a { color: var(--muted-light); font-size: .84rem; }
+  footer .credit { color: #91A29E; font-size: .78rem; margin-top: 18px; }
+
+  @media (max-width: 980px) {
+    .hero { grid-template-columns: 1fr; }
+    .hero-copy { max-width: 46rem; }
+    .hero h1 { max-width: 12ch; }
+    .proof-list { grid-template-columns: repeat(2, 1fr); }
+    .proof-item:nth-child(3) { border-left: 0; border-top: 1px solid rgba(253, 252, 234, .12); }
+    .proof-item:nth-child(4) { border-top: 1px solid rgba(253, 252, 234, .12); }
+    .section-intro, .download-head { align-items: start; flex-direction: column; }
+    .capabilities, .assistant-layout { grid-template-columns: 1fr; }
+    .capabilities h2 { position: static; }
+    .workflow-grid { grid-template-columns: repeat(2, 1fr); row-gap: 36px; }
+    .workflow-step:nth-child(3) { padding-left: 0; }
+  }
+
+  @media (max-width: 720px) {
+    .wrap { width: min(100% - 30px, 1180px); }
+    .site-nav { min-height: 70px; }
+    .nav-links a:not(.nav-download) { display: none; }
+    .nav-links { gap: 0; }
+    .hero { gap: 42px; padding: 66px 0 54px; }
+    h1 { font-size: clamp(2.9rem, 15vw, 4.3rem); }
+    section { padding: 78px 0; }
+    .proof-list, .tour-secondary, .workflow-grid, .security-grid, .posture, .download-grid { grid-template-columns: 1fr; }
+    .proof-item + .proof-item { border-left: 0; border-top: 1px solid rgba(253, 252, 234, .12); }
+    figcaption, .capability, .level { grid-template-columns: 1fr; }
+    figcaption { gap: 9px; }
+    .workflow-step, .workflow-step + .workflow-step { padding-left: 0; }
+    .download-option { padding-right: 0; }
+    .download-option + .download-option { border-left: 0; border-top: 1px solid rgba(253, 252, 234, .17); margin-top: 30px; padding-left: 0; padding-top: 30px; }
+    .footer-top { align-items: start; flex-direction: column; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
   }
 </style>
 </head>
@@ -117,218 +366,304 @@
 
 <header>
   <div class="wrap">
-    <nav>
-      <a class="brand" href="#">
-        <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <rect width="256" height="256" rx="56" fill="#1D434E"/>
-          <rect x="48" y="54" width="160" height="20" rx="3" fill="#E8913A"/>
-          <rect x="118" y="54" width="20" height="118" rx="3" fill="#E8913A"/>
-          <rect x="60" y="92" width="46" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="60" y="116" width="34" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="60" y="140" width="42" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="150" y="92" width="38" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="150" y="116" width="46" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="150" y="140" width="30" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="60" y="186" width="136" height="6" rx="2" fill="#FDFCEA"/>
-          <rect x="60" y="198" width="136" height="6" rx="2" fill="#FDFCEA"/>
-        </svg>
+    <nav class="site-nav" aria-label="Main navigation">
+      <a class="brand" href="#top" aria-label="LedgerTB home">
+        <img src="mark.svg" alt="">
         <span>Ledger<span class="tb">TB</span></span>
       </a>
-      <div class="links">
-        <a href="#features">Features</a>
+      <div class="nav-links">
+        <a href="#product">Inside the app</a>
+        <a href="#workflow">Workflow</a>
         <a href="#assistant">AI assistant</a>
         <a href="#security">Security</a>
-        <a href="#download">Download</a>
-        <a href="https://github.com/charliebarmore/LedgerTB">GitHub</a>
+        <a class="nav-download" href="#download">Download</a>
       </div>
     </nav>
 
-    <div class="hero">
-      <div>
-        <h1>Books that <span class="tie">tie</span>.<br>A file you own.</h1>
-        <p class="lede">LedgerTB is desktop double-entry bookkeeping for client
-        work — trial balance to close, in one encrypted file on your machine.
-        No server. No subscription. No one else holding your clients' data.</p>
+    <div class="hero" id="top">
+      <div class="hero-copy">
+        <div class="eyebrow">Local-first bookkeeping for client work</div>
+        <h1>From raw transactions to books that <em>tie.</em></h1>
+        <p class="lede">LedgerTB is a desktop double-entry system built around
+        the trial balance: import the activity, make the adjustments, review the
+        work, and close in one encrypted file you own.</p>
         <div class="cta-row">
-          <a class="btn primary" href="#download">Download — free</a>
-          <a class="btn ghost" href="https://github.com/charliebarmore/LedgerTB">Read the source</a>
+          <a class="btn primary" href="#download">Download free</a>
+          <a class="btn secondary" href="https://github.com/charliebarmore/LedgerTB">Read the source</a>
         </div>
-        <p class="cta-note">Open source under MIT · macOS (notarized) and Windows · built by a practicing CPA</p>
+        <p class="hero-note">MIT licensed · macOS and Windows · built by a practicing CPA</p>
       </div>
-      <div class="tb-card" aria-hidden="true">
-        <h3>Trial Balance</h3>
-        <div class="period">Northline Digital LLC · December 31, 2026</div>
-        <table>
-          <tr><td>Total debits</td><td>184,220.00</td></tr>
-          <tr><td>Total credits</td><td>184,220.00</td></tr>
-          <tr class="total"><td>Difference</td><td>0.00</td></tr>
-        </table>
-        <div class="rule"></div>
-        <div class="ties"><span class="dot"></span> Ties — ready to close</div>
-      </div>
+
+      <figure class="product-frame">
+        <img src="images/app-dashboard.png" width="1600" height="1100"
+             alt="LedgerTB dashboard showing assets, liabilities, net income, pending imports, recent activity, and quick actions for the fictional Northline Studio sample book">
+        <figcaption class="product-label">Actual app · fictional sample data</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="proof-strip" aria-label="Product facts">
+    <div class="wrap proof-list">
+      <div class="proof-item"><strong>One local book file</strong><span>No hosted database or mandatory account</span></div>
+      <div class="proof-item"><strong>Real double-entry</strong><span>Unbalanced entries never post</span></div>
+      <div class="proof-item"><strong>Workpaper-ready</strong><span>Trial balance through close package</span></div>
+      <div class="proof-item"><strong>Free and open source</strong><span>No subscription and no telemetry</span></div>
     </div>
   </div>
 </header>
 
-<section id="features" class="deep">
-  <div class="wrap">
-    <div class="kicker">What it does</div>
-    <h2>The bookkeeping workflow, whole.</h2>
-    <p class="sub">Clients in, transactions in, judgments made, statements out —
-    with the trial balance worksheet at the center, the way working papers
-    actually flow.</p>
-    <div class="grid">
-      <div class="card"><h3>Charts that import whole</h3><p>Per-client books with
-        entity-type templates, or bring your own chart — QuickBooks type names
-        understood, numberless charts get numbers assigned by type range, and
-        unmappable rows are reported, never silently dropped.</p></div>
-      <div class="card"><h3>Bank imports with verification</h3><p>CSV imports with
-        saved per-bank formats, duplicate detection, and row-continuity checks —
-        because a balanced trial balance is not proof an import was complete.</p></div>
-      <div class="card"><h3>AI categorization</h3><p>Claude suggests the account
-        for each imported transaction and learns your patterns. Suggestions only:
-        you review, you post, and the audit trail records both.</p></div>
-      <div class="card"><h3>The trial balance worksheet</h3><p>Unadjusted balances,
-        adjusting entries, adjusted balances — the working paper CPAs actually
-        use, not a report bolted on afterward.</p></div>
-      <div class="card"><h3>Reports and the close</h3><p>Trial balance, income
-        statement, balance sheet, general ledger, bank reconciliation — and an
-        exportable close package (PDF + Excel) carrying your firm's branding.</p></div>
-      <div class="card"><h3>Book Review</h3><p>A deterministic integrity sweep —
-        unbalanced entries, unposted imports, broken links, date problems, quiet
-        accounts — plus an AI category-consistency review under your own
-        per-client policy notes.</p></div>
-      <div class="card"><h3>An audit trail that means it</h3><p>Every change is
-        logged with the OS account that made it. Assistant actions are stamped
-        "(AI)" — automated work is never presented as yours.</p></div>
-      <div class="card"><h3>Firm mode</h3><p>Book files can live on a shared
-        drive. The app installs locally, each book has its own passphrase, and
-        an in-use lock keeps two writers out of one book.</p></div>
-      <div class="card"><h3>Unbalanced entries never post</h3><p>Validation lives
-        in the engine, not the screen. If it doesn't balance, it doesn't post —
-        no matter who, or what, is typing.</p></div>
-    </div>
-  </div>
-</section>
-
-<section id="assistant">
-  <div class="wrap">
-    <div class="kicker">AI assistant</div>
-    <h2>An assistant with a permission dial.</h2>
-    <p class="sub">Connect Claude (or any MCP client) to the book you have open.
-    You choose how much it can do — and the database engine enforces the choice,
-    not a promise in a prompt.</p>
-    <div class="dial">
-      <div class="level"><h3>read</h3><p>Query everything: trial balance,
-        statements, ledgers, entry search, the integrity sweep. Nothing is
-        written but the audit trail.</p></div>
-      <div class="level"><h3>propose</h3><p>Set up clients and charts, stage
-        imports from any statement format, file draft entries — all into inboxes
-        that wait for your review.</p></div>
-      <div class="level"><h3>post</h3><p>Post balanced entries directly, with an
-        explicit warning before you turn it on. Append-only: nothing can ever be
-        edited or deleted from here.</p></div>
-    </div>
-    <div class="assurance">Each book is authorized separately, and the access
-    level lives in your OS credential vault — <strong>outside the assistant's
-    reach</strong>. Every assistant action lands on the Assistant Review page,
-    attributed "(AI)", queued for an append-only, audit-logged human sign-off.</div>
-  </div>
-</section>
-
-<section id="security" class="deep">
-  <div class="wrap">
-    <div class="kicker">Security</div>
-    <h2>Local first. Encrypted always.</h2>
-    <p class="sub">Client books are professional records. LedgerTB treats them
-    that way by default.</p>
-    <div class="grid">
-      <div class="card"><span class="m">SQLCipher</span><h3>Encrypted at rest</h3>
-        <p>The book file is encrypted behind a launch passphrase only you hold.
-        Backups are encrypted the same way, and verified before they count.
-        Two things you can turn on — "remember on this computer" and assistant
-        access — store the unlock key in your operating system's credential
-        vault, so anyone who can sign in to that computer account opens the
-        book without the passphrase. Both are off unless you choose them.</p></div>
-      <div class="card"><span class="m">127.0.0.1</span><h3>Nothing listens</h3>
-        <p>The app binds to your machine only. The one outbound call is Anthropic
-        categorization, and only if you enable it. No telemetry.</p></div>
-      <div class="card"><span class="m">MIT</span><h3>Open source</h3>
-        <p>The whole application is readable, auditable, and yours to keep.
-        Signed and notarized builds for macOS; CI-built installers for Windows.</p></div>
-    </div>
-  </div>
-</section>
-
-<section class="paper">
-  <div class="wrap">
-    <div class="kicker" style="color:#9a5b28">The posture</div>
-    <div class="posture-quote">AI drafts. <em>The professional decides.</em></div>
-    <p style="max-width:46em; opacity:.85">LedgerTB is software, not accounting
-    advice. It enforces the mechanics — balanced entries, an append-only ledger,
-    an audit trail — but every judgment in the books is yours, whether you made
-    it directly or accepted a suggestion. That's not a disclaimer; it's the
-    design. The tool keeps the record honest, and the professional stays the
-    professional.</p>
-  </div>
-</section>
-
-<section id="download">
-  <div class="wrap">
-    <div class="kicker">Download</div>
-    <h2>Free, open source, yours.</h2>
-    <p class="sub">Both downloads are built from the tagged source. Windows is
-    built by GitHub Actions; macOS is signed and notarized on Apple Silicon.
-    Your books live under your user profile, never inside the app — upgrading
-    keeps your data, uninstalling doesn't delete it.</p>
-    <div class="dl-cards">
-      <div class="card">
-        <h3>macOS</h3>
-        <p>Apple Silicon. Signed and notarized — it opens with no warnings.
-        Unzip and drag to Applications.</p>
-        <a class="btn primary" href="https://github.com/charliebarmore/LedgerTB/releases/latest/download/LedgerTB-mac.zip">Download for Mac</a>
+<main>
+  <section class="paper" id="product">
+    <div class="wrap">
+      <div class="section-intro">
+        <div>
+          <div class="kicker">Inside the app</div>
+          <h2>The working screens, not a sales mockup.</h2>
+        </div>
+        <p class="sub">LedgerTB keeps the accountant's workflow visible: what
+        changed, what still needs judgment, and whether the books actually tie.
+        These are screenshots from the released desktop application.</p>
       </div>
-      <div class="card">
-        <h3>Windows</h3>
-        <p>Installs for you alone — no administrator password, so it works on a
-        locked-down firm laptop.</p>
-        <a class="btn primary" href="https://github.com/charliebarmore/LedgerTB/releases/latest/download/LedgerTB-windows-x64-setup.exe">Download for Windows</a>
+
+      <figure class="tour-primary">
+        <div class="shot">
+          <img src="images/app-trial-balance.png" width="1600" height="1100" loading="lazy"
+               alt="LedgerTB trial balance worksheet showing a balanced year-close checklist and debit and credit columns for a fictional sample client">
+        </div>
+        <figcaption>
+          <strong>The trial balance stays at the center.</strong>
+          <p>Beginning balances, period activity, unadjusted balances, AJEs, and
+          adjusted balances live in one working paper. The close checklist calls
+          out pending imports and integrity issues before the year is locked.</p>
+        </figcaption>
+      </figure>
+
+      <div class="tour-secondary">
+        <figure>
+          <div class="shot">
+            <img src="images/app-dashboard.png" width="1600" height="1100" loading="lazy"
+                 alt="LedgerTB client dashboard with account totals, recent activity, and quick actions">
+          </div>
+          <figcaption>
+            <strong>See the state of the books immediately.</strong>
+            <p>Client totals, pending work, recent imports, adjusting entries,
+            and who performed them are visible before you touch the ledger.</p>
+          </figcaption>
+        </figure>
+
+        <figure>
+          <div class="shot">
+            <img src="images/app-assistant-review.png" width="1600" height="1100" loading="lazy"
+                 alt="LedgerTB Assistant Review page showing one proposed draft, four staged imports, and AI-attributed audit activity">
+          </div>
+          <figcaption>
+            <strong>AI work has its own review surface.</strong>
+            <p>Drafts and staged imports wait for a professional decision. Every
+            assistant action is marked “(AI)” and remains visible until you sign
+            off with an append-only checkpoint.</p>
+          </figcaption>
+        </figure>
+      </div>
+
+      <p class="sample-note">Screens shown with a fictional Northline Studio sample book; no real client data is pictured.</p>
+    </div>
+  </section>
+
+  <section id="workflow">
+    <div class="wrap">
+      <div class="kicker">The workflow</div>
+      <h2>One path from source activity to a finished close.</h2>
+      <div class="workflow-grid">
+        <div class="workflow-step">
+          <span class="number">01 / SET UP</span>
+          <h3>Start with the chart</h3>
+          <p>Use an entity-aware template or import the full client chart. Rows
+          that cannot map are reported instead of disappearing silently.</p>
+        </div>
+        <div class="workflow-step">
+          <span class="number">02 / IMPORT</span>
+          <h3>Bring in the activity</h3>
+          <p>Save bank formats, check row continuity, catch duplicates, and
+          review category suggestions before anything reaches the ledger.</p>
+        </div>
+        <div class="workflow-step">
+          <span class="number">03 / ADJUST</span>
+          <h3>Make the judgments</h3>
+          <p>Post balanced journal entries and AJEs against the same trial
+          balance worksheet used to evaluate the accounts.</p>
+        </div>
+        <div class="workflow-step">
+          <span class="number">04 / CLOSE</span>
+          <h3>Review, lock, and export</h3>
+          <p>Run deterministic book checks, reconcile, lock the fiscal year,
+          and produce branded PDF and Excel close packages.</p>
+        </div>
       </div>
     </div>
-    <p class="fine">Windows shows a SmartScreen warning because this build's
-    publisher identity isn't verified yet — click <strong>More info → Run
-    anyway</strong>. That warning is about identity, not safety: the source is
-    public and every build comes from CI. A signed build is planned.</p>
-  </div>
-</section>
+  </section>
+
+  <section class="teal">
+    <div class="wrap capabilities">
+      <div>
+        <div class="kicker">Built for client work</div>
+        <h2>The whole bookkeeping loop, without the hosted platform.</h2>
+      </div>
+      <div class="capability-list">
+        <div class="capability">
+          <h3>Per-client books</h3>
+          <p>Keep separate charts, entries, reports, policies, and history for
+          every client inside the encrypted book file.</p>
+        </div>
+        <div class="capability">
+          <h3>Verified imports</h3>
+          <p>Saved bank formats, duplicate detection, source-row identity, and
+          continuity checks protect against incomplete or repeated imports.</p>
+        </div>
+        <div class="capability">
+          <h3>Workpaper reports</h3>
+          <p>Trial balance, income statement, balance sheet, general ledger,
+          reconciliation, and firm-branded close packages in Excel and PDF.</p>
+        </div>
+        <div class="capability">
+          <h3>Book Review</h3>
+          <p>A deterministic sweep for broken links, date problems, open items,
+          unbalanced records, and unusual account activity before close.</p>
+        </div>
+        <div class="capability">
+          <h3>Audit history</h3>
+          <p>Every change carries the operating-system account that made it.
+          Automated work is attributed separately and never presented as yours.</p>
+        </div>
+        <div class="capability">
+          <h3>Firm mode</h3>
+          <p>Keep books on a shared drive while the app stays installed locally.
+          An in-use lock prevents two writers from opening the same book.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="assistant">
+    <div class="wrap assistant-layout">
+      <div class="assistant-copy">
+        <div class="kicker">AI assistant</div>
+        <h2>Useful access, with a hard ceiling.</h2>
+        <p>Connect Claude or another MCP client to the book you have open. You
+        choose the access level for that book, and the database engine enforces
+        the boundary.</p>
+      </div>
+      <div>
+        <div class="dial">
+          <div class="level">
+            <h3>read</h3>
+            <p>Query trial balances, statements, ledgers, entries, and book-review
+            findings. The ledger remains untouched.</p>
+          </div>
+          <div class="level">
+            <h3>propose</h3>
+            <p>Set up clients and charts, stage statement rows, and file draft
+            entries into inboxes that wait for human review.</p>
+          </div>
+          <div class="level">
+            <h3>post</h3>
+            <p>Append balanced entries directly after an explicit warning.
+            Assistant access can never update or delete ledger history.</p>
+          </div>
+        </div>
+        <p class="engine-note"><strong>The access level lives outside the
+        assistant's reach</strong> in the operating system's credential vault.
+        Each book is authorized separately, and every assistant action is
+        audit-attributed “(AI).”</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="paper" id="security">
+    <div class="wrap">
+      <div class="kicker">Security</div>
+      <h2>Local first, with the controls visible.</h2>
+      <div class="security-grid">
+        <div class="security-item">
+          <span class="code">SQLCIPHER</span>
+          <h3>Encrypted at rest</h3>
+          <p>The book file is protected by a launch passphrase only you hold.
+          Backups use the same encryption and are verified before they count.</p>
+        </div>
+        <div class="security-item">
+          <span class="code">127.0.0.1</span>
+          <h3>Bound to this computer</h3>
+          <p>The app listens only on loopback. No cloud account is required, no
+          telemetry is collected, and categorization is opt-in.</p>
+        </div>
+        <div class="security-item">
+          <span class="code">MIT</span>
+          <h3>Open to inspection</h3>
+          <p>The full application and build workflows are public. macOS builds
+          are signed and notarized; Windows installers are produced by CI.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap posture">
+      <div class="quote">AI drafts.<br><em>The professional decides.</em></div>
+      <p>LedgerTB enforces the mechanics—balanced entries, append-only assistant
+      posting, attribution, and an audit trail—but it does not outsource the
+      judgment. Every accounting conclusion remains yours, whether you entered
+      it directly or accepted a suggestion.</p>
+    </div>
+  </section>
+
+  <section class="teal" id="download">
+    <div class="wrap">
+      <div class="download-head">
+        <div>
+          <div class="kicker">Download</div>
+          <h2>Free, open source, yours.</h2>
+        </div>
+        <p>Both downloads are built from the tagged source. Your books live
+        under your user profile, never inside the app, so upgrading preserves
+        the data and uninstalling does not delete it.</p>
+      </div>
+
+      <div class="download-grid">
+        <div class="download-option">
+          <h3>macOS</h3>
+          <p>Apple Silicon. Signed and notarized by Apple. Unzip the download
+          and drag LedgerTB to Applications.</p>
+          <a class="btn primary" href="https://github.com/charliebarmore/LedgerTB/releases/latest/download/LedgerTB-mac.zip">Download for Mac</a>
+        </div>
+        <div class="download-option">
+          <h3>Windows</h3>
+          <p>Installs for your account only, with no administrator password
+          required—suitable for a locked-down firm laptop.</p>
+          <a class="btn primary" href="https://github.com/charliebarmore/LedgerTB/releases/latest/download/LedgerTB-windows-x64-setup.exe">Download for Windows</a>
+        </div>
+      </div>
+
+      <p class="fine">Windows may show a SmartScreen warning because the
+      publisher identity is not yet verified. Choose <strong>More info → Run
+      anyway</strong>. The source and CI build workflow are public; a
+      publisher-signed Windows build is planned.</p>
+    </div>
+  </section>
+</main>
 
 <footer>
   <div class="wrap">
-    <div class="row">
-      <a class="brand" href="#" style="font-size:1.15rem">
-        <svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="width:30px;height:30px">
-          <rect width="256" height="256" rx="56" fill="#1D434E"/>
-          <rect x="48" y="54" width="160" height="20" rx="3" fill="#E8913A"/>
-          <rect x="118" y="54" width="20" height="118" rx="3" fill="#E8913A"/>
-          <rect x="60" y="92" width="46" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="60" y="116" width="34" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="60" y="140" width="42" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="150" y="92" width="38" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="150" y="116" width="46" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="150" y="140" width="30" height="12" rx="3" fill="#FDFCEA"/>
-          <rect x="60" y="186" width="136" height="6" rx="2" fill="#FDFCEA"/>
-          <rect x="60" y="198" width="136" height="6" rx="2" fill="#FDFCEA"/>
-        </svg>
+    <div class="footer-top">
+      <a class="brand" href="#top" aria-label="LedgerTB home">
+        <img src="mark.svg" alt="">
         <span>Ledger<span class="tb">TB</span></span>
       </a>
-      <div class="links">
+      <div class="footer-links">
         <a href="https://github.com/charliebarmore/LedgerTB">GitHub</a>
         <a href="https://ledgerlabs.co">Ledger Labs</a>
         <a href="https://ailabforaccountants.com">AI Lab for Accountants</a>
       </div>
     </div>
-    <p>A Ledger Labs product, built by Charlie Barmore, CPA — with Claude Code.
-    © 2026 Ledger Labs LLC · MIT license.</p>
+    <p class="credit">A Ledger Labs product, built by Charlie Barmore, CPA — with Claude Code. © 2026 Ledger Labs LLC · MIT license.</p>
   </div>
 </footer>
 
