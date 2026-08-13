@@ -3,16 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LedgerTB — local-first bookkeeping built around the trial balance</title>
-<meta name="description" content="Desktop double-entry bookkeeping for client work, from imports and adjustments through a trial balance that ties. One encrypted file on your machine. Free and open source.">
+<title>LedgerTB — local-first bookkeeping from trial balance through signoff</title>
+<meta name="description" content="Desktop double-entry bookkeeping for client work. Compare prior year, support and sign off every balance, and export the close package from one encrypted local file.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="favicon.ico">
-<meta property="og:title" content="LedgerTB — local-first bookkeeping built around the trial balance">
-<meta property="og:description" content="Desktop double-entry bookkeeping for client work, from imports and adjustments through a trial balance that ties. Free and open source.">
-<meta property="og:image" content="https://ledgertb.com/og-image.png">
+<meta property="og:title" content="LedgerTB — local-first bookkeeping from trial balance through signoff">
+<meta property="og:description" content="Compare prior year, support and sign off every balance, and export the close package from one encrypted local file.">
+<meta property="og:image" content="https://ledgertb.com/og-image-v1.2.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="LedgerTB Close Map — Balanced is the start. Reviewed is the finish.">
 <meta property="og:url" content="https://ledgertb.com">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://ledgertb.com/og-image-v1.2.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
@@ -223,6 +227,34 @@
     margin-top: 34px;
   }
 
+  .close-feature { overflow: hidden; }
+  .close-feature .section-intro { margin-bottom: 46px; }
+  .close-visual .shot {
+    border-color: rgba(253, 252, 234, .22);
+    box-shadow: 0 32px 80px rgba(0, 0, 0, .38);
+  }
+  .close-feature .sample-note { color: var(--muted-light); margin-top: 16px; }
+  .close-proof {
+    border-top: 1px solid rgba(253, 252, 234, .18);
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 48px;
+  }
+  .close-proof-item { padding: 27px 30px 0 0; }
+  .close-proof-item + .close-proof-item {
+    border-left: 1px solid rgba(253, 252, 234, .18);
+    padding-left: 30px;
+  }
+  .close-proof-item .number {
+    color: var(--orange);
+    display: block;
+    font-family: var(--mono);
+    font-size: .73rem;
+    margin-bottom: 11px;
+  }
+  .close-proof-item h3 { font-size: 1.02rem; margin-bottom: 7px; }
+  .close-proof-item p { color: var(--muted-light); font-size: .88rem; }
+
   .workflow-grid {
     display: grid;
     gap: 0;
@@ -352,8 +384,9 @@
     .hero { gap: 42px; padding: 66px 0 54px; }
     h1 { font-size: clamp(2.9rem, 15vw, 4.3rem); }
     section { padding: 78px 0; }
-    .proof-list, .workflow-grid, .security-grid, .posture, .download-grid { grid-template-columns: 1fr; }
+    .proof-list, .close-proof, .workflow-grid, .security-grid, .posture, .download-grid { grid-template-columns: 1fr; }
     .proof-item + .proof-item { border-left: 0; border-top: 1px solid rgba(253, 252, 234, .12); }
+    .close-proof-item + .close-proof-item { border-left: 0; border-top: 1px solid rgba(253, 252, 234, .18); margin-top: 25px; padding-left: 0; }
     .tour-row, .tour-row.reverse { gap: 25px; grid-template-columns: 1fr; padding: 40px 0; }
     .tour-row figcaption { order: 0; }
     .tour-row .shot { order: 1; }
@@ -379,6 +412,7 @@
         <span>Ledger<span class="tb">TB</span></span>
       </a>
       <div class="nav-links">
+        <a href="#close-map">Close Map</a>
         <a href="#product">Inside the app</a>
         <a href="#workflow">Workflow</a>
         <a href="#assistant">AI assistant</a>
@@ -392,8 +426,9 @@
         <div class="eyebrow">Local-first bookkeeping for client work</div>
         <h1>From raw transactions to books that <em>tie.</em></h1>
         <p class="lede">LedgerTB is a desktop double-entry system built around
-        the trial balance: import the activity, make the adjustments, review the
-        work, and close in one encrypted file you own.</p>
+        the trial balance: import the activity, make the adjustments, explain
+        and sign off each balance, and export the close package from one
+        encrypted file you own.</p>
         <div class="cta-row">
           <a class="btn primary" href="#download">Download free</a>
           <a class="btn secondary" href="https://github.com/charliebarmore/LedgerTB">Read the source</a>
@@ -413,13 +448,56 @@
     <div class="wrap proof-list">
       <div class="proof-item"><strong>One local book file</strong><span>No hosted database or mandatory account</span></div>
       <div class="proof-item"><strong>Real double-entry</strong><span>Unbalanced entries never post</span></div>
-      <div class="proof-item"><strong>Workpaper-ready</strong><span>Trial balance through close package</span></div>
+      <div class="proof-item"><strong>Account-level close</strong><span>Evidence, notes, and two-stage signoff</span></div>
       <div class="proof-item"><strong>Free and open source</strong><span>No subscription and no telemetry</span></div>
     </div>
   </div>
 </header>
 
 <main>
+  <section class="close-feature" id="close-map">
+    <div class="wrap">
+      <div class="section-intro">
+        <div>
+          <div class="kicker">New in v1.2</div>
+          <h2>Balanced is the start. Reviewed is the finish.</h2>
+        </div>
+        <p class="sub">Close Map turns the trial balance into an account-by-account
+        close plan. Compare prior year, keep support beside the balance, and see
+        exactly what is ready for review—and what changed afterward.</p>
+      </div>
+
+      <figure class="close-visual">
+        <div class="shot">
+          <img src="images/app-close-map.png" width="1600" height="1100" loading="lazy"
+               alt="LedgerTB Close Map showing prior-year comparisons, lead-sheet assignments, evidence counts, and review status for the fictional Northline Studio sample book">
+        </div>
+        <figcaption class="sample-note">Actual Close Map screen · fictional sample data · released in v1.2.0</figcaption>
+      </figure>
+
+      <div class="close-proof">
+        <div class="close-proof-item">
+          <span class="number">01 / SUPPORT</span>
+          <h3>Keep the conclusion with the balance.</h3>
+          <p>Store the explanation, lead-sheet assignment, evidence references,
+          and review notes where the account is evaluated.</p>
+        </div>
+        <div class="close-proof-item">
+          <span class="number">02 / SIGN OFF</span>
+          <h3>Separate preparation from review.</h3>
+          <p>Preparer and reviewer states are explicit, and an account cannot
+          skip the required review sequence.</p>
+        </div>
+        <div class="close-proof-item">
+          <span class="number">03 / STAY CURRENT</span>
+          <h3>Know when finished work moved.</h3>
+          <p>A later entry affecting a signed-off account automatically returns
+          it to Changed so stale review cannot look complete.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="paper" id="product">
     <div class="wrap">
       <div class="section-intro">
@@ -438,8 +516,8 @@
             <strong>The trial balance stays at the center.</strong>
             <p>Beginning balances, period activity, unadjusted balances, AJEs,
             and adjusted balances live in one working paper. The close checklist
-            calls out pending imports and integrity issues before the year is
-            locked.</p>
+            calls out pending imports, integrity issues, and incomplete Close
+            Map reviews before the year is locked.</p>
           </figcaption>
           <div class="shot">
             <img src="images/app-trial-balance.png" width="3200" height="2200" loading="lazy"
@@ -491,8 +569,8 @@
         <div class="workflow-step">
           <span class="number">04 / CLOSE</span>
           <h3>Review, lock, and export</h3>
-          <p>Run deterministic book checks, reconcile, lock the fiscal year,
-          and produce branded PDF and Excel close packages.</p>
+          <p>Run deterministic book checks, finish the Close Map, reconcile,
+          lock the fiscal year, and produce branded PDF and Excel close packages.</p>
         </div>
       </div>
     </div>
@@ -519,6 +597,11 @@
           <h3>Workpaper reports</h3>
           <p>Trial balance, income statement, balance sheet, general ledger,
           reconciliation, and firm-branded close packages in Excel and PDF.</p>
+        </div>
+        <div class="capability">
+          <h3>Close Map</h3>
+          <p>Organize balances by lead sheet, compare prior year, attach support,
+          resolve notes, and record separate preparer and reviewer signoffs.</p>
         </div>
         <div class="capability">
           <h3>Book Review</h3>
@@ -552,13 +635,13 @@
         <div class="dial">
           <div class="level">
             <h3>read</h3>
-            <p>Query trial balances, statements, ledgers, entries, and book-review
-            findings. The ledger remains untouched.</p>
+            <p>Query trial balances, statements, ledgers, entries, book-review
+            findings, and Close Map readiness. The ledger remains untouched.</p>
           </div>
           <div class="level">
             <h3>propose</h3>
-            <p>Set up clients and charts, stage statement rows, and file draft
-            entries into inboxes that wait for human review.</p>
+            <p>Set up clients and charts, stage statement rows, file draft
+            entries, and propose Close Map explanations for human review.</p>
           </div>
           <div class="level">
             <h3>post</h3>
@@ -618,7 +701,8 @@
           <div class="kicker">Download</div>
           <h2>Free, open source, yours.</h2>
         </div>
-        <p>Both downloads are built from the tagged source. Your books live
+        <p>Version 1.2.0 adds Close Map account support and signoff. Both
+        downloads are built from the tagged source. Your books live
         under your user profile, never inside the app, so upgrading preserves
         the data and uninstalling does not delete it.</p>
       </div>
