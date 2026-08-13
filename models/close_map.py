@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from constants import AccountType
@@ -438,6 +438,12 @@ def signoff(client_id: int, period_id: int, account_id: int, role: str) -> int:
         ).fetchone()["explanation"]
         if not (explanation or "").strip():
             raise ValueError("Explain the balance and its prior-year change before signing off.")
+        evidence_count = cursor.execute(
+            "SELECT COUNT(*) n FROM account_close_evidence WHERE review_id = ?",
+            (review_id,),
+        ).fetchone()["n"]
+        if not evidence_count:
+            raise ValueError("Add current-year evidence before signing off.")
         current_hash, snapshot = _fingerprint_with_cursor(
             cursor, client_id, period_id, account_id
         )
@@ -597,6 +603,62 @@ def readiness(client_id: int, period_id: int) -> dict:
         return _readiness_with_cursor(cursor, client_id, period_id)
 
 
+def _prior_year_context_with_cursor(cursor, client_id: int, period,
+                                    account_id: int) -> Optional[dict]:
+    """Return the immediately preceding year's work as read-only context.
+
+    Review work remains period-specific: this deliberately does not create a
+    current-year review, copy evidence, or copy signoffs. The adjacent-period
+    check also prevents an old review from silently jumping across a missing
+    fiscal year.
+    """
+    previous_end = (
+        date.fromisoformat(period["start_date"]) - timedelta(days=1)
+    ).isoformat()
+    previous_period = cursor.execute(
+        "SELECT * FROM fiscal_periods WHERE client_id = ? "
+        "AND period_type = 'Year' AND end_date = ? "
+        "ORDER BY start_date DESC, id DESC LIMIT 1",
+        (client_id, previous_end),
+    ).fetchone()
+    if not previous_period:
+        return None
+
+    review = cursor.execute(
+        "SELECT * FROM account_close_reviews WHERE client_id = ? "
+        "AND fiscal_period_id = ? AND account_id = ?",
+        (client_id, previous_period["id"], account_id),
+    ).fetchone()
+    evidence, notes, signoffs = [], [], {}
+    if review:
+        evidence = [dict(item) for item in cursor.execute(
+            "SELECT * FROM account_close_evidence WHERE review_id = ? ORDER BY id",
+            (review["id"],),
+        ).fetchall()]
+        notes = [dict(item) for item in cursor.execute(
+            "SELECT * FROM account_review_notes WHERE review_id = ? ORDER BY id",
+            (review["id"],),
+        ).fetchall()]
+        signoffs = _latest_signoffs(cursor, review["id"])
+
+    preparer = signoffs.get("preparer")
+    reviewer = signoffs.get("reviewer")
+    return {
+        "period_id": previous_period["id"],
+        "period_name": previous_period["period_name"],
+        "period_start": previous_period["start_date"],
+        "period_end": previous_period["end_date"],
+        "had_review": bool(review),
+        "explanation": (review["explanation"] or "") if review else "",
+        "evidence": evidence,
+        "notes": notes,
+        "prepared_by": preparer["signed_by"] if preparer else "",
+        "prepared_at": preparer["signed_at"] if preparer else "",
+        "reviewed_by": reviewer["signed_by"] if reviewer else "",
+        "reviewed_at": reviewer["signed_at"] if reviewer else "",
+    }
+
+
 def account_detail(client_id: int, period_id: int, account_id: int) -> dict:
     with get_cursor() as cursor:
         summary = _readiness_with_cursor(cursor, client_id, period_id)
@@ -623,9 +685,13 @@ def account_detail(client_id: int, period_id: int, account_id: int) -> dict:
             "ORDER BY statement_end_date DESC", (client_id, account_id, summary["period_end"]),
         ).fetchall()]
         _, snapshot = _fingerprint_with_cursor(cursor, client_id, period_id, account_id)
+        period = _period(cursor, client_id, period_id)
+        prior_year_context = _prior_year_context_with_cursor(
+            cursor, client_id, period, account_id
+        )
     return {"row": row, "evidence": evidence, "notes": notes,
             "proposals": proposals, "reconciliations": reconciliations,
-            "snapshot": snapshot}
+            "snapshot": snapshot, "prior_year_context": prior_year_context}
 
 
 def propose_explanation(client_id: int, period_id: int, account_id: int,

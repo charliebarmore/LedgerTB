@@ -146,6 +146,10 @@ def test_close_map_gaps_are_acknowledged_close_warnings(client_id, accounts):
         close_map.save_explanation(
             client_id, period.id, account_id, "Reviewed against year-end activity."
         )
+        close_map.add_evidence(
+            client_id, period.id, account_id, "workpaper",
+            f"CM-{account_id}", "Year-end account support",
+        )
         close_map.signoff(client_id, period.id, account_id, "preparer")
         close_map.signoff(client_id, period.id, account_id, "reviewer")
     ready = FiscalPeriod.get_close_checklist(period.id, client_id)

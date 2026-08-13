@@ -234,7 +234,8 @@ def close_readiness(client_id: int, fiscal_year: int) -> dict:
 def account_close_detail(client_id: int, fiscal_year: int,
                          account_id: int) -> dict:
     """Detailed Close Map record for one account, including its explanation,
-    evidence references, notes, AJE effect, and signoff status."""
+    evidence references, notes, AJE effect, signoff status, and reference-only
+    context from the immediately preceding fiscal year."""
     _require_level("read")
     return mcp_tools.account_close_detail(client_id, fiscal_year, account_id)
 

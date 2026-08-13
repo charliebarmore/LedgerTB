@@ -157,11 +157,12 @@ def close_readiness(client_id: int, fiscal_year: int) -> dict:
 
 
 def account_close_detail(client_id: int, fiscal_year: int, account_id: int) -> dict:
-    """One Close Map account with explanations, evidence, and review notes."""
+    """One Close Map account with current work and prior-year context."""
     from models import close_map
 
     period = _resolve_year_period(client_id, fiscal_year)
     detail = close_map.account_detail(client_id, period.id, int(account_id))
+    prior = detail["prior_year_context"]
     return {
         **_close_row(detail["row"]),
         "explanation": detail["row"].explanation,
@@ -182,6 +183,31 @@ def account_close_detail(client_id: int, fiscal_year: int, account_id: int) -> d
              "rationale": item["rationale"], "created_by": item["created_by"]}
             for item in detail["proposals"]
         ],
+        "prior_year_context": ({
+            "fiscal_year": date.fromisoformat(prior["period_end"]).year,
+            "period_name": prior["period_name"],
+            "period": {"start": prior["period_start"], "end": prior["period_end"]},
+            "had_review": prior["had_review"],
+            "explanation": prior["explanation"],
+            "evidence": [
+                {"type": item["evidence_type"], "reference": item["reference"],
+                 "description": item["description"], "created_by": item["created_by"]}
+                for item in prior["evidence"]
+            ],
+            "review_notes": [
+                {"body": item["body"], "status": item["status"],
+                 "created_by": item["created_by"], "resolution": item["resolution"]}
+                for item in prior["notes"]
+            ],
+            "prepared_by": prior["prepared_by"] or None,
+            "prepared_at": prior["prepared_at"] or None,
+            "reviewed_by": prior["reviewed_by"] or None,
+            "reviewed_at": prior["reviewed_at"] or None,
+            "current_year_requirement": (
+                "Reference only: add fresh support and complete new preparer and "
+                "reviewer signoffs for this fiscal year."
+            ),
+        } if prior else None),
     }
 
 

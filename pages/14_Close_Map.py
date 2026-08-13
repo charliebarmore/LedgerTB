@@ -225,6 +225,61 @@ st.caption(
     f"{summary['period_end']} · Status: {row.status}"
 )
 
+prior_context = detail["prior_year_context"]
+if prior_context:
+    with st.expander(
+        f"Prior-year review context — {prior_context['period_name']}",
+        expanded=not bool(row.explanation),
+    ):
+        st.caption(
+            "Reference only. The lead-sheet mapping carries forward, but prior-year "
+            "evidence and signoffs do not count for this fiscal year. Add current "
+            "support and complete fresh preparer and reviewer signoffs below."
+        )
+        if not prior_context["had_review"]:
+            st.info("No account review was recorded for the prior fiscal year.")
+        else:
+            st.markdown("**Prior-year explanation**")
+            st.write(prior_context["explanation"] or "No explanation was recorded.")
+
+            prior_support, prior_notes = st.columns(2)
+            with prior_support:
+                st.markdown("**Prior-year support**")
+                if prior_context["evidence"]:
+                    for item in prior_context["evidence"]:
+                        st.markdown(
+                            f"- **{item['reference']}** · "
+                            f"{item['evidence_type'].replace('ledgerpdf', 'LedgerPDF').title()}"
+                            f" — {item['description'] or 'No description'}"
+                        )
+                else:
+                    st.caption("No evidence references were recorded.")
+            with prior_notes:
+                st.markdown("**Prior-year review notes**")
+                if prior_context["notes"]:
+                    for note in prior_context["notes"]:
+                        resolution = (
+                            f" — Resolved: {note['resolution']}"
+                            if note["status"] == "resolved" else " — Open"
+                        )
+                        st.markdown(f"- {note['body']}{resolution}")
+                else:
+                    st.caption("No review notes were recorded.")
+
+            signoff_parts = []
+            if prior_context["prepared_by"]:
+                signoff_parts.append(
+                    f"Prepared by {prior_context['prepared_by']} · "
+                    f"{prior_context['prepared_at']}"
+                )
+            if prior_context["reviewed_by"]:
+                signoff_parts.append(
+                    f"Reviewed by {prior_context['reviewed_by']} · "
+                    f"{prior_context['reviewed_at']}"
+                )
+            if signoff_parts:
+                st.caption("  \n".join(signoff_parts))
+
 groups = close_map.list_groups(client_id)
 group_ids = [None] + [group["id"] for group in groups]
 group_labels = {None: "Unassigned"}
@@ -346,8 +401,21 @@ if row.reviewed_by:
     st.caption(f"Latest reviewer signoff: {row.reviewed_by} · {row.reviewed_at}")
 if row.status == close_map.CHANGED:
     st.warning("The balance or its support changed after signoff. Prepare and review it again.")
+prepare_blockers = []
+if row.required:
+    if not row.explanation.strip():
+        prepare_blockers.append("save a current-year balance and variance explanation")
+    if not detail["evidence"]:
+        prepare_blockers.append("add at least one current-year evidence reference")
+    if row.open_note_count:
+        prepare_blockers.append("resolve all open review notes")
+if prepare_blockers:
+    st.caption("Before preparation: " + "; ".join(prepare_blockers) + ".")
 sign1, sign2, _ = st.columns([1, 1, 4])
-if sign1.button("Mark prepared", type="primary", disabled=not row.required):
+if sign1.button(
+    "Mark prepared", type="primary",
+    disabled=(not row.required or bool(prepare_blockers)),
+):
     try:
         close_map.signoff(client_id, period_id, selected_account_id, "preparer")
     except Exception as exc:

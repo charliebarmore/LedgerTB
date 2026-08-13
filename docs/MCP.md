@@ -63,7 +63,10 @@ from an already-running MCP process.
   rows; their identity and audit history remain, but they leave the queue.
 - **Close Map stays human-controlled.** `close_readiness` and
   `account_close_detail` let the assistant identify unsupported, changed, or
-  unexplained balances. At propose level it may call
+  unexplained balances. Account detail also exposes the immediately preceding
+  fiscal year's explanation, support references, notes, and signoff history as
+  reference-only context; none of it counts as current-year support or signoff.
+  At propose level the assistant may call
   `propose_close_explanation`, which lands in the selected account's Close Map
   panel. The assistant cannot accept its proposal or create preparer/reviewer
   signoffs; no signoff tool exists, and the model rejects assistant-attributed

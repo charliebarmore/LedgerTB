@@ -147,6 +147,48 @@ def test_close_map_tools_read_and_propose_without_signing(client_id, accounts):
     assert detail["pending_explanation_proposals"][0]["proposal_id"] == proposal["proposal_id"]
 
 
+def test_close_detail_exposes_prior_year_context_without_counting_it_as_current(
+    client_id, accounts
+):
+    from models import close_map
+
+    prior = FiscalPeriod(
+        client_id=client_id, period_name="FY 2025", period_type="Year",
+        start_date=date(2025, 1, 1), end_date=date(2025, 12, 31),
+    )
+    prior.save()
+    FiscalPeriod(
+        client_id=client_id, period_name="FY 2026", period_type="Year",
+        start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
+    ).save()
+    post_entry(client_id, date(2025, 6, 1), [
+        (accounts["cash"], 200, 0), (accounts["revenue"], 0, 200),
+    ])
+    close_map.save_explanation(
+        client_id, prior.id, accounts["cash"], "Cash agreed to 2025 support."
+    )
+    close_map.add_evidence(
+        client_id, prior.id, accounts["cash"], "workpaper", "A-1",
+        "2025 reconciliation",
+    )
+    close_map.signoff(client_id, prior.id, accounts["cash"], "preparer")
+    close_map.signoff(client_id, prior.id, accounts["cash"], "reviewer")
+    post_entry(client_id, date(2026, 1, 2), [
+        (accounts["cash"], 25, 0), (accounts["revenue"], 0, 25),
+    ])
+
+    detail = mcp_tools.account_close_detail(client_id, 2026, accounts["cash"])
+    assert detail["explanation"] == ""
+    assert detail["evidence"] == []
+    assert detail["prepared_by"] is None
+    assert detail["reviewed_by"] is None
+    assert detail["prior_year_context"]["fiscal_year"] == 2025
+    assert detail["prior_year_context"]["period_name"] == "FY 2025"
+    assert detail["prior_year_context"]["evidence"][0]["reference"] == "A-1"
+    assert detail["prior_year_context"]["reviewed_by"]
+    assert "fresh support" in detail["prior_year_context"]["current_year_requirement"]
+
+
 def test_integrity_sweep_treats_prior_year_entries_as_history(client_id, accounts):
     post_entry(client_id, date(2025, 6, 15), [
         (accounts["cash"], 100, 0),

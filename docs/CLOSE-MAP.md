@@ -16,8 +16,26 @@ and requires review by default. A reviewer can:
 4. open and resolve review notes;
 5. mark the account prepared, then reviewed.
 
+LedgerTB requires a current-period explanation and at least one current-period
+evidence reference before the preparer can sign off. An account cannot reuse a
+prior-year reference to satisfy that control.
+
 An account can be marked **Not required**, but only with a written reason. The
 reason is retained in the audit trail and close package.
+
+## Year-to-year roll-forward
+
+Lead-sheet groups and account assignments are reusable client settings, so they
+are already in place when a new fiscal year is created. The immediately
+preceding fiscal year's explanation, evidence references, review notes, and
+preparer/reviewer history appear in the account panel as read-only context.
+
+That context is there to help the current-year team understand what was done
+and what changed. It does not create a current-year review, copy evidence, or
+carry a signature forward. The new year starts **Not started** until a person
+saves a current explanation, adds fresh support, and completes new preparer and
+reviewer signoffs. If the adjacent prior fiscal year does not exist, LedgerTB
+does not pull older context across the gap.
 
 ## Signoffs do not hide later changes
 

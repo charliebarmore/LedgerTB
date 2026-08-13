@@ -11,10 +11,10 @@ from models.journal_entry import JournalEntry, JournalEntryLine
 from tests.conftest import page_path
 
 
-def _period(client_id):
+def _period(client_id, year=2026):
     period = FiscalPeriod(
-        client_id=client_id, period_name="FY 2026", period_type="Year",
-        start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
+        client_id=client_id, period_name=f"FY {year}", period_type="Year",
+        start_date=date(year, 1, 1), end_date=date(year, 12, 31),
     )
     period.save()
     return period
@@ -44,6 +44,10 @@ def test_review_lifecycle_and_account_scoped_invalidation(client_id, accounts):
 
     close_map.save_explanation(
         client_id, period.id, accounts["cash"], "Agrees to the year-end statement."
+    )
+    close_map.add_evidence(
+        client_id, period.id, accounts["cash"], "workpaper", "A-1",
+        "Year-end bank reconciliation",
     )
     close_map.signoff(client_id, period.id, accounts["cash"], "preparer")
     assert _row(close_map.readiness(client_id, period.id), accounts["cash"]).status == close_map.PREPARED
@@ -96,6 +100,10 @@ def test_reviewer_requires_current_preparer_and_assistant_cannot_sign(
     _post(client_id, date(2026, 1, 2), accounts["cash"], accounts["revenue"])
     close_map.save_explanation(
         client_id, period.id, accounts["cash"], "Agrees to year-end support."
+    )
+    close_map.add_evidence(
+        client_id, period.id, accounts["cash"], "workpaper", "A-1",
+        "Year-end support",
     )
     with pytest.raises(ValueError, match="preparer signoff"):
         close_map.signoff(client_id, period.id, accounts["cash"], "reviewer")
@@ -161,6 +169,80 @@ def test_group_assignment_is_client_scoped(client_id, accounts):
     assert {row.group_code for row in grouped if row.account_id in {accounts["cash"], other.id}} == {"A1"}
 
 
+def test_prior_year_context_rolls_forward_without_support_or_signoff(
+    client_id, accounts
+):
+    prior = _period(client_id, 2025)
+    current = _period(client_id, 2026)
+    _post(client_id, date(2025, 1, 2), accounts["cash"], accounts["revenue"], 100)
+
+    group_id = close_map.create_group(client_id, "A", "Cash")
+    close_map.save_mapping(client_id, accounts["cash"], group_id, True)
+    close_map.save_explanation(
+        client_id, prior.id, accounts["cash"],
+        "Agrees to the 2025 bank reconciliation; variance reflects collections.",
+    )
+    close_map.add_evidence(
+        client_id, prior.id, accounts["cash"], "workpaper", "A-1",
+        "2025 year-end bank reconciliation",
+    )
+    note_id = close_map.add_note(
+        client_id, prior.id, accounts["cash"], "Confirm the outstanding deposit."
+    )
+    close_map.resolve_note(client_id, note_id, "Deposit cleared in January 2026.")
+    close_map.signoff(client_id, prior.id, accounts["cash"], "preparer")
+    close_map.signoff(client_id, prior.id, accounts["cash"], "reviewer")
+
+    _post(client_id, date(2026, 1, 2), accounts["cash"], accounts["revenue"], 25)
+    detail = close_map.account_detail(client_id, current.id, accounts["cash"])
+
+    # The reusable lead-sheet mapping carries forward automatically.
+    assert detail["row"].group_code == "A"
+
+    # Period-specific work starts clean and therefore needs fresh support and signoff.
+    assert detail["row"].explanation == ""
+    assert detail["row"].status == close_map.NOT_STARTED
+    assert detail["evidence"] == []
+    assert detail["notes"] == []
+    assert detail["row"].prepared_by == ""
+    assert detail["row"].reviewed_by == ""
+
+    # Last year's work remains visible as reference-only review context.
+    context = detail["prior_year_context"]
+    assert context["period_name"] == "FY 2025"
+    assert context["explanation"].startswith("Agrees to the 2025")
+    assert context["evidence"][0]["reference"] == "A-1"
+    assert context["notes"][0]["status"] == "resolved"
+    assert context["notes"][0]["resolution"] == "Deposit cleared in January 2026."
+    assert context["prepared_by"]
+    assert context["reviewed_by"]
+
+    close_map.save_explanation(
+        client_id, current.id, accounts["cash"], "Agrees to the 2026 reconciliation."
+    )
+    with pytest.raises(ValueError, match="current-year evidence"):
+        close_map.signoff(client_id, current.id, accounts["cash"], "preparer")
+    close_map.add_evidence(
+        client_id, current.id, accounts["cash"], "workpaper", "A-1-2026",
+        "2026 year-end bank reconciliation",
+    )
+    close_map.signoff(client_id, current.id, accounts["cash"], "preparer")
+    assert _row(
+        close_map.readiness(client_id, current.id), accounts["cash"]
+    ).status == close_map.PREPARED
+
+
+def test_prior_year_context_requires_an_adjacent_fiscal_year(client_id, accounts):
+    old = _period(client_id, 2024)
+    current = _period(client_id, 2026)
+    _post(client_id, date(2024, 1, 2), accounts["cash"], accounts["revenue"])
+    close_map.save_explanation(client_id, old.id, accounts["cash"], "Old context.")
+    _post(client_id, date(2026, 1, 2), accounts["cash"], accounts["revenue"])
+
+    detail = close_map.account_detail(client_id, current.id, accounts["cash"])
+    assert detail["prior_year_context"] is None
+
+
 def test_preparer_signoff_requires_an_explanation(client_id, accounts):
     period = _period(client_id)
     _post(client_id, date(2026, 1, 2), accounts["cash"], accounts["revenue"])
@@ -179,7 +261,12 @@ def test_close_map_tables_are_migrated(db):
 
 
 def test_close_map_page_renders_account_readiness(client_id, accounts, monkeypatch):
-    _period(client_id)
+    prior = _period(client_id, 2025)
+    _period(client_id, 2026)
+    _post(client_id, date(2025, 1, 2), accounts["cash"], accounts["revenue"])
+    close_map.save_explanation(
+        client_id, prior.id, accounts["cash"], "Prior-year cash explanation."
+    )
     _post(client_id, date(2026, 1, 2), accounts["cash"], accounts["revenue"])
     import utils.client_selector as selector
     monkeypatch.setattr(selector, "render_client_selector", lambda: client_id)
@@ -191,3 +278,8 @@ def test_close_map_page_renders_account_readiness(client_id, accounts, monkeypat
     assert not at.exception
     assert any("Close Map" in title.value for title in at.title)
     assert any("1000" in option for option in at.selectbox(key="close_map_account").options)
+    assert any(
+        "Prior-year review context — FY 2025" in expander.label
+        for expander in at.expander
+    )
+    assert any("Reference only" in caption.value for caption in at.caption)
