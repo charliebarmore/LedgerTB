@@ -6,6 +6,8 @@ from database.connection import get_connection
 from models.audit_log import AuditLog
 from models.fiscal_period import FiscalPeriod
 from models.transaction import ImportedTransaction
+from models import close_map
+from conftest import post_entry
 
 
 def _period(client_id):
@@ -113,3 +115,63 @@ def test_reasoned_duplicate_override_is_not_an_unresolved_close_item(client_id, 
 
     checklist = FiscalPeriod.get_close_checklist(period.id, client_id)
     assert checklist["unresolved_duplicates"] == 0
+
+
+def test_close_map_gaps_are_acknowledged_close_warnings(client_id, accounts):
+    period = _period(client_id)
+    post_entry(
+        client_id, date(2026, 4, 1),
+        [(accounts["cash"], 100, 0), (accounts["revenue"], 0, 100)],
+    )
+    checklist = FiscalPeriod.get_close_checklist(period.id, client_id)
+    assert checklist["close_map_required"] == 2
+    assert checklist["close_map_incomplete"] == 2
+    assert checklist["close_map_ready"] is False
+
+    with pytest.raises(ValueError, match="acknowledge"):
+        FiscalPeriod.set_closed(
+            period.id, True, client_id,
+            confirmation={"explicit_confirmation": True,
+                          "warnings_acknowledged": False},
+        )
+
+    with pytest.raises(ValueError, match="Explain why"):
+        FiscalPeriod.set_closed(
+            period.id, True, client_id,
+            confirmation={"explicit_confirmation": True,
+                          "warnings_acknowledged": True},
+        )
+
+    for account_id in (accounts["cash"], accounts["revenue"]):
+        close_map.save_explanation(
+            client_id, period.id, account_id, "Reviewed against year-end activity."
+        )
+        close_map.signoff(client_id, period.id, account_id, "preparer")
+        close_map.signoff(client_id, period.id, account_id, "reviewer")
+    ready = FiscalPeriod.get_close_checklist(period.id, client_id)
+    assert ready["close_map_ready"] is True
+    assert ready["close_map_incomplete"] == 0
+
+
+def test_close_with_incomplete_map_records_exception_reason(client_id, accounts):
+    period = _period(client_id)
+    post_entry(
+        client_id, date(2026, 5, 1),
+        [(accounts["cash"], 80, 0), (accounts["revenue"], 0, 80)],
+    )
+    FiscalPeriod.set_closed(
+        period.id, True, client_id,
+        confirmation={
+            "explicit_confirmation": True,
+            "warnings_acknowledged": True,
+            "close_map_exception_reason": "Client support will arrive after filing.",
+        },
+    )
+    close_event = next(
+        log for log in AuditLog.get_history("fiscal_periods", period.id)
+        if log.action == "CLOSE"
+    )
+    assert close_event.new_values["close_map_exception_reason"] == (
+        "Client support will arrive after filing."
+    )
+    assert close_event.new_values["close_checklist"]["close_map_incomplete"] == 2

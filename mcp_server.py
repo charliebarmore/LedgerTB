@@ -223,6 +223,35 @@ def entry_detail(client_id: int, entry_id: int) -> dict:
 
 
 @server.tool()
+def close_readiness(client_id: int, fiscal_year: int) -> dict:
+    """Close Map status for a fiscal year: account balances, PY changes,
+    evidence counts, exceptions, and human preparer/reviewer signoffs."""
+    _require_level("read")
+    return mcp_tools.close_readiness(client_id, fiscal_year)
+
+
+@server.tool()
+def account_close_detail(client_id: int, fiscal_year: int,
+                         account_id: int) -> dict:
+    """Detailed Close Map record for one account, including its explanation,
+    evidence references, notes, AJE effect, and signoff status."""
+    _require_level("read")
+    return mcp_tools.account_close_detail(client_id, fiscal_year, account_id)
+
+
+@server.tool()
+def propose_close_explanation(client_id: int, fiscal_year: int, account_id: int,
+                              explanation: str, rationale: str = "") -> dict:
+    """Propose a balance/variance explanation for human review in Close Map.
+    This cannot accept the explanation or sign off the account. Needs assistant
+    access level "propose" or higher."""
+    _require_level("propose")
+    return mcp_tools.propose_close_explanation(
+        client_id, fiscal_year, account_id, explanation, rationale
+    )
+
+
+@server.tool()
 def propose_entry(client_id: int, entry_date: str, description: str,
                   lines: list, rationale: str = "",
                   entry_type: str = "Regular") -> dict:

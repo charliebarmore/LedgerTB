@@ -15,7 +15,7 @@ connections cannot reach it — the dial is physically outside its world.
 | Level | The assistant can… |
 |---|---|
 | **Read only** | query everything, change nothing |
-| **Read + propose** *(default)* | file draft entries and stage imports; you post everything |
+| **Read + propose** *(default)* | file draft entries, stage imports, and propose Close Map explanations; you approve everything |
 | **Read + propose + post** | additionally post balanced journal entries — **append-only** |
 
 Even at the highest level the engine refuses every edit and delete: an
@@ -61,6 +61,13 @@ from an already-running MCP process.
   Review & Categorize** exactly as with a CSV upload. Re-proposing the
   same statement stages nothing twice. A person can dismiss unwanted staged
   rows; their identity and audit history remain, but they leave the queue.
+- **Close Map stays human-controlled.** `close_readiness` and
+  `account_close_detail` let the assistant identify unsupported, changed, or
+  unexplained balances. At propose level it may call
+  `propose_close_explanation`, which lands in the selected account's Close Map
+  panel. The assistant cannot accept its proposal or create preparer/reviewer
+  signoffs; no signoff tool exists, and the model rejects assistant-attributed
+  actors as defense in depth.
 - **Shared/custom book files are read-only.** The separate MCP process does
   not yet participate in firm mode's one-writer sidecar lock, so books outside
   LedgerTB's local managed-data folder are capped at read access even if the

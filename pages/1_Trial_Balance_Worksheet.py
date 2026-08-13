@@ -190,7 +190,7 @@ year_period = next((p for p in year_periods if p.period_type == "Year"), None)
 if year_period:
     checklist = FiscalPeriod.get_close_checklist(year_period.id, client_id)
     st.subheader("Year-close checklist")
-    check_cols = st.columns(4)
+    check_cols = st.columns(5)
     with check_cols[0]:
         if checklist["trial_balance_balanced"]:
             st.success("Trial balance balanced")
@@ -216,13 +216,22 @@ if year_period:
             st.warning(f"{checklist['unresolved_duplicates']} potential duplicates")
         else:
             st.success("No potential duplicates")
+    with check_cols[4]:
+        if checklist["close_map_incomplete"]:
+            st.warning(f"{checklist['close_map_incomplete']} balances need review")
+        else:
+            st.success("Close Map ready")
 
     if checklist["warning_count"]:
         st.warning(
             "Outstanding items should be resolved before close. If they are understood and "
             "intentional, the close requires a separate acknowledgement."
         )
-        st.page_link("pages/4_Import_Transactions.py", label="Review imports")
+        if (checklist["pending_imports"] or checklist["uncategorized_items"] or
+                checklist["unresolved_duplicates"]):
+            st.page_link("pages/4_Import_Transactions.py", label="Review imports")
+        if checklist["close_map_incomplete"]:
+            st.page_link("pages/14_Close_Map.py", label="Review Close Map")
 
     if year_period.is_closed:
         lock_cols = st.columns([3, 1])
@@ -246,10 +255,22 @@ if year_period:
                 "I reviewed the outstanding items and accept closing with these warnings.",
                 key="close_warning_acknowledgement",
             )
+            close_map_exception_reason = ""
+            if checklist["close_map_incomplete"]:
+                close_map_exception_reason = st.text_area(
+                    "Reason for closing with incomplete Close Map reviews",
+                    key="close_map_exception_reason",
+                    placeholder="Explain why these balances are intentionally being closed before review is complete.",
+                )
+            exception_reason_complete = (
+                not checklist["close_map_incomplete"] or
+                bool(close_map_exception_reason.strip())
+            )
             explicitly_confirmed = close_confirmation.strip().upper() == confirmation_phrase
             if st.button(
                 "Close fiscal year", key="close_year", type="primary",
-                disabled=not explicitly_confirmed or not warnings_acknowledged,
+                disabled=(not explicitly_confirmed or not warnings_acknowledged or
+                          not exception_reason_complete),
             ):
                 try:
                     FiscalPeriod.set_closed(
@@ -257,6 +278,7 @@ if year_period:
                         confirmation={
                             "explicit_confirmation": explicitly_confirmed,
                             "warnings_acknowledged": warnings_acknowledged,
+                            "close_map_exception_reason": close_map_exception_reason,
                         },
                     )
                     st.rerun()

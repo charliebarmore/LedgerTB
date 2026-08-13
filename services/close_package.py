@@ -85,6 +85,7 @@ class ClosePackageSnapshot:
     comparative_income_statement: Dict
     comparative_balance_sheet: Dict
     comparative_trial_balance: Dict
+    close_map: Optional[Dict]
     branding: FirmBranding
     generated_at: datetime
 
@@ -173,6 +174,16 @@ def load_close_package_snapshot(
     client_id: int, period_start: date, period_end: date
 ) -> ClosePackageSnapshot:
     """Capture the non-TB inputs once so PDF and Excel cannot drift apart."""
+    close_map = None
+    with get_cursor() as cursor:
+        year = cursor.execute(
+            "SELECT id FROM fiscal_periods WHERE client_id = ? AND period_type = 'Year' "
+            "AND start_date = ? AND end_date = ? ORDER BY id DESC LIMIT 1",
+            (client_id, period_start.isoformat(), period_end.isoformat()),
+        ).fetchone()
+    if year:
+        from models.close_map import readiness
+        close_map = readiness(client_id, year["id"])
     return ClosePackageSnapshot(
         transactions=get_period_transactions(client_id, period_start, period_end),
         cash=get_cash_activity(client_id, period_start, period_end),
@@ -189,6 +200,7 @@ def load_close_package_snapshot(
         comparative_trial_balance=ReportGenerator.comparative_trial_balance(
             client_id, period_end
         ),
+        close_map=close_map,
         branding=get_branding(),
         generated_at=datetime.now(),
     )
@@ -339,6 +351,7 @@ def build_close_package(
     comparative_income = snapshot.comparative_income_statement
     comparative_balance = snapshot.comparative_balance_sheet
     comparative_tb = snapshot.comparative_trial_balance
+    close_map = snapshot.close_map
 
     wb = openpyxl.Workbook()
 
@@ -376,6 +389,9 @@ def build_close_package(
          else "OUT OF BALANCE"),
         ("Journal lines in period", len(transactions)),
         ("Adjusting entry lines", len(ajes)),
+        ("Close Map",
+         (f"{close_map['reviewed_count']} of {close_map['required_count']} required balances reviewed"
+          if close_map else "Not available for this period")),
         ("", ""),
         ("Cash accounts", "Receipts / Disbursements"),
     ]
@@ -515,6 +531,35 @@ def build_close_package(
         cell.font = _HEADER_FONT
         cell.number_format = _MONEY_FMT
 
+    # ---- Close Map (annual packages only)
+    if close_map is not None:
+        ws = wb.create_sheet("Close Map")
+        _write_table(
+            ws,
+            ["Acct #", "Account", "Type", "Adjusted", "Prior Year", "$ Change",
+             "% Change", "Lead Sheet", "Evidence", "Evidence References",
+             "Open Notes", "Open Review Notes", "Status",
+             "Prepared By", "Prepared At", "Reviewed By", "Reviewed At",
+             "Explanation", "Exclusion Reason"],
+            [
+                [row.account_number, row.account_name, row.account_type,
+                 row.current_balance, row.prior_balance, row.change,
+                 row.change_percent,
+                 (f"{row.group_code} - {row.group_name}" if row.group_code else ""),
+                 row.evidence_count, row.evidence_references,
+                 row.open_note_count, row.open_notes, row.status,
+                 row.prepared_by, row.prepared_at, row.reviewed_by, row.reviewed_at,
+                 row.explanation, row.exclusion_reason]
+                for row in close_map["rows"]
+            ],
+            money_cols=(4, 5, 6),
+        )
+        ws.column_dimensions["B"].width = 30
+        ws.column_dimensions["J"].width = 45
+        ws.column_dimensions["L"].width = 60
+        ws.column_dimensions["R"].width = 60
+        ws.column_dimensions["S"].width = 45
+
     # ---- Transactions
     ws = wb.create_sheet("Transactions")
     _write_table(
@@ -621,7 +666,7 @@ def _wrap(text: str) -> Paragraph:
     return Paragraph((text or "").replace("&", "&amp;").replace("<", "&lt;"), _PDF_BODY)
 
 
-def _pdf_table(headers, data_rows, col_widths, money_from: int,
+def _pdf_table(headers, data_rows, col_widths, money_from: Optional[int],
                totals_row=None) -> Table:
     """A report table: bold repeating header, right-aligned money columns."""
     rows = [headers] + data_rows
@@ -633,13 +678,14 @@ def _pdf_table(headers, data_rows, col_widths, money_from: int,
         ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("LINEBELOW", (0, 0), (-1, 0), 0.75, colors.black),
-        ("ALIGN", (money_from, 0), (-1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1),
          [colors.white, colors.HexColor("#F4F4F0")]),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]
+    if money_from is not None:
+        style.append(("ALIGN", (money_from, 0), (-1, -1), "RIGHT"))
     if totals_row is not None:
         style += [
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
@@ -683,6 +729,7 @@ def build_close_package_pdf(
     comparative_income = snapshot.comparative_income_statement
     comparative_balance = snapshot.comparative_balance_sheet
     comparative_tb = snapshot.comparative_trial_balance
+    close_map = snapshot.close_map
     period_label = f"{long_date(period_start)} to {long_date(period_end)}"
 
     branding = snapshot.branding
@@ -742,6 +789,9 @@ def build_close_package_pdf(
                 ["In balance", "Yes" if balanced else "OUT OF BALANCE"],
                 ["Journal lines in period", str(len(transactions))],
                 ["Adjusting entry lines", str(len(ajes))],
+                ["Close Map",
+                 (f"{close_map['reviewed_count']} of {close_map['required_count']} required balances reviewed"
+                  if close_map else "Not available for this period")],
             ],
             [3.4 * inch, 1.6 * inch], money_from=1,
         ),
@@ -922,6 +972,46 @@ def build_close_package_pdf(
                     _money(comparative_tb['prior_total_credits'])],
     ))
     story.append(PageBreak())
+
+    # ---- Close Map (annual packages only)
+    if close_map is not None:
+        story += [
+            Paragraph("Close Map", heading_2),
+            Paragraph(
+                ("All required balances were reviewed and current."
+                 if close_map["ready"] else
+                 f"{close_map['incomplete_count']} required balances still needed attention."),
+                _PDF_META,
+            ),
+            Spacer(1, 10),
+            _pdf_table(
+                ["Acct #", "Account", "Adjusted", "PY", "$ Change", "% Change",
+                 "Lead", "Evidence", "Notes", "Status", "Prepared", "Reviewed"],
+                [[row.account_number, _wrap(row.account_name), _money(row.current_balance),
+                  _money(row.prior_balance), _money(row.change),
+                  _percent(row.change_percent), row.group_code,
+                  str(row.evidence_count), str(row.open_note_count), row.status,
+                  row.prepared_by, row.reviewed_by]
+                 for row in close_map["rows"]],
+                [0.55 * inch, 1.75 * inch, 0.8 * inch, 0.8 * inch, 0.8 * inch,
+                 0.65 * inch, 0.45 * inch, 0.55 * inch, 0.45 * inch,
+                 0.8 * inch, 1.0 * inch, 1.0 * inch],
+                money_from=2,
+            ),
+            Spacer(1, 14),
+            Paragraph("Support and explanations", heading_2),
+            _pdf_table(
+                ["Account", "Evidence References", "Explanation", "Open Review Notes"],
+                [[_wrap(f"{row.account_number} - {row.account_name}"),
+                  _wrap(row.evidence_references or "None recorded"),
+                  _wrap(row.explanation or "None recorded"),
+                  _wrap(row.open_notes or "None")]
+                 for row in close_map["rows"]],
+                [2.0 * inch, 2.4 * inch, 4.0 * inch, 1.2 * inch],
+                money_from=None,
+            ),
+            PageBreak(),
+        ]
 
     # ---- Transactions
     story.append(Paragraph("Transactions", heading_2))

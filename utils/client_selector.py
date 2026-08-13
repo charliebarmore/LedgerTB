@@ -201,6 +201,7 @@ def render_client_selector() -> Optional[int]:
         st.sidebar.page_link("pages/5_Reports.py", label="Reports", icon=icons.REPORTS)
         st.sidebar.page_link("pages/6_Transactions.py", label="Transactions", icon=icons.TRANSACTIONS)
         st.sidebar.page_link("pages/10_Bank_Reconciliation.py", label="Bank Reconciliation", icon=icons.RECONCILIATION)
+        st.sidebar.page_link("pages/14_Close_Map.py", label="Close Map", icon=icons.CLOSE_MAP)
         st.sidebar.page_link("pages/11_Book_Review.py", label="Book Review", icon=icons.REVIEW)
         ar_label = "Assistant Review"
         try:

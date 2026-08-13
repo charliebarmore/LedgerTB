@@ -196,6 +196,46 @@ def test_close_package_includes_line_by_line_prior_year_comparisons(
         doc.close()
 
 
+def test_annual_close_package_includes_close_map(client_id, accounts):
+    from models import close_map
+    from models.fiscal_period import FiscalPeriod
+
+    period = FiscalPeriod(
+        client_id=client_id, period_name="FY 2026", period_type="Year",
+        start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
+    )
+    period.save()
+    post_entry(
+        client_id, date(2026, 2, 1),
+        [(accounts["cash"], 250, 0), (accounts["revenue"], 0, 250)],
+    )
+    close_map.save_explanation(
+        client_id, period.id, accounts["cash"], "Agrees to year-end support."
+    )
+    close_map.add_evidence(
+        client_id, period.id, accounts["cash"], "workpaper", "A-1",
+        "Year-end bank reconciliation",
+    )
+    close_map.signoff(client_id, period.id, accounts["cash"], "preparer")
+    close_map.signoff(client_id, period.id, accounts["cash"], "reviewer")
+
+    rows, _ = ReportGenerator.trial_balance_worksheet(
+        client_id, period.start_date, period.end_date
+    )
+    workbook = openpyxl.load_workbook(BytesIO(build_close_package(
+        client_id, "Test Co", period.start_date, period.end_date, rows
+    ).read()))
+    assert "Close Map" in workbook.sheetnames
+    close_sheet = workbook["Close Map"]
+    headers = [cell.value for cell in close_sheet[1]]
+    assert "Status" in headers
+    cash_row = next(
+        row for row in close_sheet.iter_rows(values_only=True) if row[0] == "1000"
+    )
+    assert "Reviewed" in cash_row
+    assert "A-1 (workpaper)" in cash_row
+
+
 def test_workbook_stores_untrusted_text_as_literals(client_id, accounts):
     dangerous_client = "=CLIENT()"
     dangerous_account = "+CASH()"

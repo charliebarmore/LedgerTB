@@ -7,6 +7,7 @@ import pytest
 from database import connection as dbconn
 from database.connection import get_cursor
 from models.transaction import ImportedTransaction
+from models.fiscal_period import FiscalPeriod
 from services import mcp_tools
 from tests.conftest import post_entry
 
@@ -121,6 +122,29 @@ def test_integrity_sweep_reports_clean_books_explicitly(client_id, accounts):
         "clean": True,
         "findings": [],
     }
+
+
+def test_close_map_tools_read_and_propose_without_signing(client_id, accounts):
+    FiscalPeriod(
+        client_id=client_id, period_name="FY 2026", period_type="Year",
+        start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
+    ).save()
+    _seed(client_id, accounts)
+
+    readiness = mcp_tools.close_readiness(client_id, 2026)
+    assert readiness["ready"] is False
+    cash = next(row for row in readiness["accounts"] if row["account_number"] == "1000")
+    assert cash["status"] == "Not started"
+
+    proposal = mcp_tools.propose_close_explanation(
+        client_id, 2026, cash["account_id"],
+        "Cash agrees to the completed reconciliation.",
+        "Compared ledger and statement ending balances.",
+    )
+    assert proposal["status"] == "pending"
+    detail = mcp_tools.account_close_detail(client_id, 2026, cash["account_id"])
+    assert detail["explanation"] == ""
+    assert detail["pending_explanation_proposals"][0]["proposal_id"] == proposal["proposal_id"]
 
 
 def test_integrity_sweep_treats_prior_year_entries_as_history(client_id, accounts):

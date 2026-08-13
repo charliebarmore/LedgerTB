@@ -11,6 +11,7 @@ A **Ledger Labs LLC** product — the software studio of [Charlie Barmore, CPA](
 - **Bank imports**: bring in transactions from CSV with saved per-bank formats, duplicate detection, and an import verification step (including row-continuity checks — a balanced trial balance is *not* proof an import was complete). New accounts can be created right in the category dropdown. **Or skip the format question entirely**: hand any statement — CSV, PDF, a pasted table — to your assistant, which normalizes and stages it into the same review flow (see Assistant access below).
 - **AI categorization**: Claude suggests the account for each imported transaction and learns your patterns over time. Suggestions only: you review, you post. The audit trail records what happened either way.
 - **Book Review**: a deterministic integrity sweep (unbalanced entries, unposted imports, broken links, date problems, quiet accounts) plus an AI category-consistency review governed by your own per-client policy notes, and an analytical memo.
+- **Close Map**: every year-end balance gets a reusable lead-sheet assignment, supporting references, variance explanation, review notes, and append-only preparer/reviewer signoffs. A later ledger, reconciliation, or evidence change automatically reopens only the affected account. The map is included in annual close-package PDF and Excel exports.
 - **Reports & the close**: trial balance, income statement, balance sheet, general ledger (whole-book view), trial balance worksheet, bank reconciliation — and an exportable **close package** (PDF + Excel) carrying your firm's branding from Firm Settings.
 - **Assistant access (MCP)**: opt-in MCP server so Claude Desktop or Claude Code can work the currently open book — query everything (trial balance, ledgers, entry search, the integrity sweep), **set up a new client and its chart**, file **draft entries**, **stage imports from any statement format**, export the close package to your workpaper tool, and — only if you turn the dial up — post balanced entries itself. **Each book is authorized separately**, with its own access level and export folder on Data Safety. The setting lives outside the assistant's reach, and every level is enforced by the database engine, not by promises: even at full access the assistant is append-only and can never edit or delete anything. See `docs/MCP.md`.
 - **Assistant Review**: one page gathering everything the assistant has done — proposals waiting on you, plus every AI-attributed action since your last sign-off, with an append-only, audit-logged "reviewed through here" checkpoint. The sidebar badges what's unreviewed; nothing the assistant does can look pre-approved.
@@ -101,7 +102,7 @@ python -m pytest -q -m "not performance"
 ```
 
 (Dropping the marker filter also runs the slower volume baselines described in
-`PERFORMANCE.md`.) More than 370 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the assistant review checkpoint, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
+`PERFORMANCE.md`.) More than 430 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the Close Map and assistant review checkpoints, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
 
 ## More documentation
 
@@ -110,6 +111,7 @@ python -m pytest -q -m "not performance"
 - `CODE_OF_CONDUCT.md` — community participation standards
 - `DESKTOP.md` — desktop builds, packaging, notarization
 - `docs/MCP.md` — assistant access setup and security model
+- `docs/CLOSE-MAP.md` — account support, review, signoff, and stale-change rules
 - `docs/LEDGERPDF-PAIRING.md` — books-to-binder workflow with LedgerPDF
 - `docs/FIRM-MODE.md` — shared-drive book files and the in-use lock
 - `docs/WINDOWS-TESTING.md` — the Windows smoke-test checklist

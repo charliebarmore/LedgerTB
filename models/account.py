@@ -200,6 +200,15 @@ class Account:
             )
             if imp:
                 blockers["imported transactions"] = imp
+            close_map = count(
+                "SELECT COUNT(*) FROM account_close_mappings WHERE account_id = ?",
+                account_id,
+            ) + count(
+                "SELECT COUNT(*) FROM account_close_reviews WHERE account_id = ?",
+                account_id,
+            )
+            if close_map:
+                blockers["close-map records"] = close_map
             return blockers
         finally:
             if owns_conn:

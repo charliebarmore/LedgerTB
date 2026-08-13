@@ -19,6 +19,7 @@ from models.account import Account
 from models.client import Client
 from models.journal_entry import JournalEntry
 from models.reports import ReportGenerator
+from money import to_dollars
 from services.book_review import run_integrity_sweep
 
 
@@ -84,6 +85,7 @@ def list_accounts(client_id: int) -> list:
     _require_client(client_id)
     return [
         {
+            "account_id": a.id,
             "number": a.account_number,
             "name": a.name,
             "type": a.type,
@@ -92,6 +94,112 @@ def list_accounts(client_id: int) -> list:
         }
         for a in Account.get_all(client_id, active_only=False)
     ]
+
+
+def _resolve_year_period(client_id: int, fiscal_year: int):
+    from models.fiscal_period import FiscalPeriod
+
+    _require_client(client_id)
+    label = f"FY {int(fiscal_year)}"
+    period = next(
+        (item for item in FiscalPeriod.get_all(client_id, period_type="Year")
+         if item.period_name == label),
+        None,
+    )
+    if period is None:
+        raise ValueError(
+            f"No {label} for this client. Add the fiscal year in LedgerTB first."
+        )
+    return period
+
+
+def _close_row(row) -> dict:
+    return {
+        "account_id": row.account_id,
+        "account_number": row.account_number,
+        "account_name": row.account_name,
+        "account_type": row.account_type,
+        "adjusted_balance": row.current_balance,
+        "prior_year_balance": row.prior_balance,
+        "change": row.change,
+        "change_percent": row.change_percent,
+        "lead_sheet": ({"code": row.group_code, "name": row.group_name}
+                       if row.group_code else None),
+        "required": row.required,
+        "exclusion_reason": row.exclusion_reason,
+        "evidence_count": row.evidence_count,
+        "open_note_count": row.open_note_count,
+        "pending_proposal_count": row.pending_proposal_count,
+        "status": row.status,
+        "prepared_by": row.prepared_by or None,
+        "prepared_at": row.prepared_at or None,
+        "reviewed_by": row.reviewed_by or None,
+        "reviewed_at": row.reviewed_at or None,
+    }
+
+
+def close_readiness(client_id: int, fiscal_year: int) -> dict:
+    """Account-by-account support and signoff status for a fiscal year."""
+    from models import close_map
+
+    period = _resolve_year_period(client_id, fiscal_year)
+    result = close_map.readiness(client_id, period.id)
+    return {
+        "fiscal_year": int(fiscal_year),
+        "period": {"start": result["period_start"], "end": result["period_end"]},
+        "ready": result["ready"],
+        "required_count": result["required_count"],
+        "reviewed_count": result["reviewed_count"],
+        "incomplete_count": result["incomplete_count"],
+        "status_counts": result["counts"],
+        "accounts": [_close_row(row) for row in result["rows"]],
+    }
+
+
+def account_close_detail(client_id: int, fiscal_year: int, account_id: int) -> dict:
+    """One Close Map account with explanations, evidence, and review notes."""
+    from models import close_map
+
+    period = _resolve_year_period(client_id, fiscal_year)
+    detail = close_map.account_detail(client_id, period.id, int(account_id))
+    return {
+        **_close_row(detail["row"]),
+        "explanation": detail["row"].explanation,
+        "ledger_line_count": detail["snapshot"]["ledger_line_count"],
+        "aje_effect": to_dollars(detail["snapshot"]["aje_cents"]),
+        "evidence": [
+            {"type": item["evidence_type"], "reference": item["reference"],
+             "description": item["description"], "created_by": item["created_by"]}
+            for item in detail["evidence"]
+        ],
+        "review_notes": [
+            {"body": item["body"], "status": item["status"],
+             "created_by": item["created_by"], "resolution": item["resolution"]}
+            for item in detail["notes"]
+        ],
+        "pending_explanation_proposals": [
+            {"proposal_id": item["id"], "explanation": item["explanation"],
+             "rationale": item["rationale"], "created_by": item["created_by"]}
+            for item in detail["proposals"]
+        ],
+    }
+
+
+def propose_close_explanation(client_id: int, fiscal_year: int, account_id: int,
+                              explanation: str, rationale: str = "") -> dict:
+    """File an explanation proposal; only a person can accept or sign it."""
+    from models import close_map
+
+    period = _resolve_year_period(client_id, fiscal_year)
+    proposal_id = close_map.propose_explanation(
+        client_id, period.id, int(account_id), explanation, rationale
+    )
+    return {
+        "proposal_id": proposal_id,
+        "status": "pending",
+        "note": ("Filed for human review in Close Map. It does not change the "
+                 "account explanation and cannot sign off the balance."),
+    }
 
 
 def trial_balance(

@@ -61,6 +61,27 @@ def test_propose_level_cannot_post(client_id, accounts, monkeypatch):
                              BALANCED(cash_no, rev_no))
 
 
+def test_close_explanation_proposal_respects_access_dial(client_id, accounts, monkeypatch):
+    from models.fiscal_period import FiscalPeriod
+
+    period = FiscalPeriod(
+        client_id=client_id, period_name="FY 2026", period_type="Year",
+        start_date=date(2026, 1, 1), end_date=date(2026, 12, 31),
+    )
+    period.save()
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "read")
+    with pytest.raises(Exception):
+        mcp_tools.propose_close_explanation(
+            client_id, 2026, accounts["cash"], "Proposed explanation"
+        )
+
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "propose")
+    result = mcp_tools.propose_close_explanation(
+        client_id, 2026, accounts["cash"], "Proposed explanation"
+    )
+    assert result["status"] == "pending"
+
+
 def test_post_level_is_append_only(client_id, accounts, monkeypatch):
     cash_no, rev_no = _numbers(client_id, accounts)
     monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "post")

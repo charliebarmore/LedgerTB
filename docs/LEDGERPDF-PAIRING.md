@@ -11,14 +11,18 @@ in the other, with a human reviewing at both ends.
 
 1. **Close in LedgerTB.** Post the period (or review your assistant's drafts
    and staged imports), run Book Review, verify the trial balance.
-2. **Export for the binder.** The assistant calls LedgerTB's
+2. **Complete the Close Map.** Tie each required balance to its support,
+   resolve review notes, and record the human preparer/reviewer signoffs. A
+   later ledger or evidence change automatically reopens the affected account.
+3. **Export for the binder.** The assistant calls LedgerTB's
    `export_close_package` — the branded close-package **PDF** plus the
-   **Excel workbook** (Summary, Trial Balance, Transactions, Adjusting
-   Entries, Receipts & Disbursements) land in a folder you approved.
-3. **Assemble in LedgerPDF.** The assistant ingests that folder
+   **Excel workbook** (Summary, statements, Trial Balance, Close Map,
+   Transactions, Adjusting Entries, Receipts & Disbursements) land in a folder
+   you approved.
+4. **Assemble in LedgerPDF.** The assistant ingests that folder
    (`binder_add_folder`), together with whatever else the engagement has —
    bank statement PDFs, receipts, memos.
-4. **Tie it out.** LedgerPDF reads spreadsheet cells exactly
+5. **Tie it out.** LedgerPDF reads spreadsheet cells exactly
    (`binder_read_cells` — the Excel totals are computed values, never
    uncalculated formulas), so the assistant can foot columns
    (`binder_foot`), tie figures across documents (`binder_tie`), place
@@ -27,7 +31,7 @@ in the other, with a human reviewing at both ends.
    (`binder_add_note`) — while cross-checking any number against the live
    books through LedgerTB's `trial_balance` / `general_ledger` /
    `entry_detail`.
-5. **Cover and review.** `binder_add_cover` writes the summary as page 1 —
+6. **Cover and review.** `binder_add_cover` writes the summary as page 1 —
    facts read from the binder, narrative by the assistant — and the
    review queue lists what's waiting on a human. Every agent mark exports
    attributed (e.g. `CJB (AI)`), and both apps keep their own audit

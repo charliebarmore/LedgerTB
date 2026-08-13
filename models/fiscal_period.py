@@ -116,6 +116,12 @@ class FiscalPeriod:
                     raise ValueError(
                         "Review and acknowledge the outstanding close-checklist warnings first."
                     )
+                if (checklist["close_map_incomplete"] and
+                        not str(confirmation.get("close_map_exception_reason", "")).strip()):
+                    raise ValueError(
+                        "Explain why the fiscal year is being closed with incomplete "
+                        "Close Map reviews."
+                    )
             cursor.execute(
                 "UPDATE fiscal_periods SET is_closed = ? WHERE id = ? AND client_id = ?",
                 (1 if is_closed else 0, period_id, period["client_id"])
@@ -143,6 +149,10 @@ class FiscalPeriod:
                     ),
                     "warnings_acknowledged": bool(
                         confirmation and confirmation.get("warnings_acknowledged")
+                    ),
+                    "close_map_exception_reason": (
+                        str(confirmation.get("close_map_exception_reason", "")).strip()
+                        if confirmation else ""
                     ),
                 },
             )
@@ -200,7 +210,21 @@ class FiscalPeriod:
         credits = int(trial_balance["total_credits"] or 0)
         pending = int(imports["pending_imports"] or 0)
         uncategorized = int(imports["uncategorized_items"] or 0)
-        warning_count = pending + uncategorized + duplicates
+        period_row = cursor.execute(
+            "SELECT id FROM fiscal_periods WHERE client_id = ? AND period_type = 'Year' "
+            "AND start_date = ? AND end_date = ? ORDER BY id DESC LIMIT 1",
+            (client_id, start, end),
+        ).fetchone()
+        close_map = {
+            "required_count": 0, "reviewed_count": 0,
+            "incomplete_count": 0, "ready": True, "counts": {},
+        }
+        if period_row:
+            # Use the caller's transaction so the readiness recorded in the
+            # close audit event describes the same committed ledger snapshot.
+            from models.close_map import _readiness_with_cursor
+            close_map = _readiness_with_cursor(cursor, client_id, period_row["id"])
+        warning_count = pending + uncategorized + duplicates + close_map["incomplete_count"]
         return {
             "period_start": start,
             "period_end": end,
@@ -211,6 +235,11 @@ class FiscalPeriod:
             "pending_imports": pending,
             "uncategorized_items": uncategorized,
             "unresolved_duplicates": duplicates,
+            "close_map_required": close_map["required_count"],
+            "close_map_reviewed": close_map["reviewed_count"],
+            "close_map_incomplete": close_map["incomplete_count"],
+            "close_map_ready": close_map["ready"],
+            "close_map_status_counts": close_map["counts"],
             "warning_count": warning_count,
         }
 
