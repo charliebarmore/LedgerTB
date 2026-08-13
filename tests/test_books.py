@@ -80,6 +80,9 @@ def test_lock_acquire_conflict_takeover_release(settings, tmp_path):
     result = book_lock.acquire(book)
     assert result["acquired"] is False
     assert "colleague on OFFICE-PC" in book_lock.describe(result["holder"])
+    description = book_lock.describe(result["holder"])
+    assert "T15:00:00+00:00" not in description
+    assert " at " in description
 
     # release() never removes someone else's lock…
     book_lock.release(book)

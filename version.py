@@ -1,3 +1,3 @@
 """Single source of truth for application release metadata."""
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"

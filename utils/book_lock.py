@@ -90,5 +90,15 @@ def release(book) -> None:
 
 def describe(holder: dict) -> str:
     opened = holder.get("opened_at", "")
+    if opened:
+        try:
+            local = datetime.fromisoformat(opened).astimezone()
+            hour = local.strftime("%I").lstrip("0") or "0"
+            opened = (
+                f"{local.strftime('%b')} {local.day} at "
+                f"{hour}:{local.strftime('%M %p')}"
+            )
+        except (TypeError, ValueError):
+            pass
     return (f"{holder.get('user', '?')} on {holder.get('host', '?')}"
             + (f" since {opened}" if opened else ""))

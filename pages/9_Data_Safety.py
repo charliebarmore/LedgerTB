@@ -24,6 +24,7 @@ from services.migration_safety import (
     remove_active_plaintext_backup,
 )
 from utils.client_selector import render_client_selector
+from utils.folder_picker import choose_folder
 from utils.unlock import require_unlock
 from utils import books, icons
 from utils.assistant_access import credential_names, revoke_legacy_credentials
@@ -376,18 +377,40 @@ if _mcp_enabled:
     # the vault beside the level, so the assistant cannot change it and the
     # user never edits a config file to set it.
     _export_root = _mcp_get(_mcp_names.export_roots) or ""
-    _ec1, _ec2 = st.columns([3, 1])
+    _export_scope = _mcp_names.export_roots.split(":")[1]
+    _export_widget_key = f"mcp_export_root_pick_{_export_scope}"
+    _export_error_key = f"mcp_export_root_error_{_export_scope}"
+    if _export_widget_key not in st.session_state:
+        st.session_state[_export_widget_key] = _export_root
+
+    def _choose_export_folder():
+        try:
+            picked = choose_folder(st.session_state.get(_export_widget_key))
+        except Exception as exc:
+            st.session_state[_export_error_key] = str(exc)
+        else:
+            st.session_state.pop(_export_error_key, None)
+            if picked:
+                st.session_state[_export_widget_key] = picked
+
+    _ec1, _ec2, _ec3 = st.columns([3, 1, 1])
     with _ec1:
         _export_pick = st.text_input(
             "Export folder (assistant may write close packages here)",
-            value=_export_root,
             placeholder=str(Path.home() / "Documents" / "LedgerTB Exports"),
             help="The only place export_close_package can write files. Leave "
                  "blank to keep file export off. Point it at the same folder "
                  "as your workpaper tool's root to pass files between them.",
-            key="mcp_export_root_pick",
+            key=_export_widget_key,
         )
     with _ec2:
+        st.write("")
+        st.button(
+            "Choose folder…",
+            on_click=_choose_export_folder,
+            use_container_width=True,
+        )
+    with _ec3:
         st.write("")
         if st.button("Save folder", disabled=_export_pick.strip() == _export_root):
             _picked = _export_pick.strip()
@@ -406,6 +429,8 @@ if _mcp_enabled:
                 _mcp_delete(_mcp_names.export_roots)
                 audit_safety_event("EXPORT", "mcp_export_root_cleared", {})
                 st.rerun()
+    if st.session_state.get(_export_error_key):
+        st.error(st.session_state[_export_error_key])
     if not _export_root:
         st.caption("File export is **off** — the assistant can read the books "
                    "but cannot write any files until a folder is chosen.")
@@ -416,13 +441,25 @@ if _mcp_enabled:
     else:
         _mcp_config = {"command": sys.executable,
                        "args": [str(Path(__file__).resolve().parent.parent / "mcp_server.py")]}
+    _platform_label = (
+        "this Mac" if sys.platform == "darwin"
+        else "this Windows PC" if sys.platform == "win32"
+        else "this computer"
+    )
     st.caption(
-        "Add this to your MCP client's configuration (Claude Desktop: "
+        f"Generated for {_platform_label}. Add this to your MCP client's "
+        "configuration (Claude Desktop: "
         "Settings → Developer → Edit Config, inside `mcpServers`). It "
         "contains no personal paths beyond the app's own location — the "
         "access level and export folder are read from this page's settings:"
     )
     st.code(json.dumps({"ledgertb": _mcp_config}, indent=2), language="json")
+    st.caption(
+        "Setting up another operating system? Open this page in LedgerTB on "
+        "that computer and copy the configuration it generates there. The "
+        "Windows build uses its installed `LedgerTB.exe` path instead of the "
+        "macOS application path shown here."
+    )
 
 st.divider()
 st.caption(

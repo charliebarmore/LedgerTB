@@ -20,6 +20,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -82,6 +83,19 @@ def _find_free_port() -> int:
 
 def _run_server() -> int:
     """Child process: run Streamlit as the main thread via its CLI."""
+    parent_pid = _app_env("PARENT_PID")
+    if parent_pid:
+        try:
+            expected_parent = int(parent_pid)
+        except ValueError:
+            expected_parent = 0
+        if expected_parent > 0:
+            threading.Thread(
+                target=_exit_when_parent_dies,
+                args=(expected_parent,),
+                name="ledgertb-parent-watch",
+                daemon=True,
+            ).start()
     port = _app_env("PORT", "8501")
     os.chdir(BUNDLE)  # so Streamlit finds pages/ and .streamlit/config.toml
     sys.argv = [
@@ -100,6 +114,53 @@ def _run_server() -> int:
     ]
     from streamlit.web import cli as stcli
     return stcli.main()
+
+
+def _parent_is_alive(expected_pid: int) -> bool:
+    """Whether the desktop process that launched this server still exists.
+
+    A pywebview/backend crash can bypass the parent's ``finally`` block. The
+    server must not then remain alive invisibly, holding the current book's
+    one-writer lock. On POSIX, re-parenting gives a reliable answer. Windows
+    keeps the original parent id, so query the process handle instead.
+    """
+    if os.name == "posix":
+        return os.getppid() == expected_pid
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            synchronize = 0x00100000
+            wait_timeout = 0x00000102
+            handle = ctypes.windll.kernel32.OpenProcess(
+                synchronize, False, expected_pid
+            )
+            if not handle:
+                return False
+            try:
+                return (
+                    ctypes.windll.kernel32.WaitForSingleObject(handle, 0)
+                    == wait_timeout
+                )
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            return True  # Cannot prove it died; do not kill a healthy server.
+    return True
+
+
+def _exit_when_parent_dies(expected_pid: int) -> None:
+    """Release this server's book lock and exit if its window process dies."""
+    while _parent_is_alive(expected_pid):
+        time.sleep(1)
+    try:
+        from database import connection as dbconn
+        from utils import book_lock
+
+        book_lock.release(dbconn.DATABASE_PATH)
+    except Exception:
+        pass
+    os._exit(0)
 
 
 def _child_command(port: int) -> list:
@@ -323,6 +384,12 @@ def _place_window(window, wx, wy):
 
 def main() -> int:
     mode = _app_env("MODE")
+    # Keep the environment modes used by the release scripts, but make the
+    # diagnostic safe when a human naturally writes ``LedgerTB --selfcheck``.
+    # Without this, that command launches a second full app and can leave the
+    # current book looking as though another user has it open.
+    if len(sys.argv) == 2 and sys.argv[1] == "--selfcheck":
+        mode = "selfcheck"
     if mode == "selfcheck":
         return _selfcheck()
     if mode == "server":
@@ -344,7 +411,7 @@ def main() -> int:
     window_url = f"{url}/?t={ui_token}"
 
     env = dict(os.environ, LEDGERTB_MODE="server", LEDGERTB_PORT=str(port),
-               LEDGERTB_UI_TOKEN=ui_token)
+               LEDGERTB_UI_TOKEN=ui_token, LEDGERTB_PARENT_PID=str(os.getpid()))
     kwargs = {"env": env}
     if os.name == "posix":
         kwargs["start_new_session"] = True

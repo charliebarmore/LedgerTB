@@ -113,3 +113,35 @@ def test_legacy_backups_can_be_adopted_from_data_safety(db, monkeypatch):
     assert not at.exception
     assert calls, "the Adopt button never reached the adoption service"
     assert any("Adopted 2 backup(s)" in s.value for s in at.success)
+
+
+def test_assistant_export_folder_can_be_chosen_natively(db, monkeypatch, tmp_path):
+    """The desktop control should fill the path; users need not type it."""
+    from utils import books, folder_picker
+
+    _patched(monkeypatch)
+    monkeypatch.setattr(books, "is_local_book", lambda _path: True)
+    picked = tmp_path / "Close Packages"
+    picked.mkdir()
+    calls = []
+    monkeypatch.setattr(
+        folder_picker,
+        "choose_folder",
+        lambda initial=None: calls.append(initial) or str(picked),
+    )
+
+    at = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30)
+    at.run()
+    next(b for b in at.button if b.label == "Enable assistant access").click().run()
+
+    choose = next(b for b in at.button if b.label == "Choose folder…")
+    choose.click().run()
+
+    assert calls
+    export_input = next(
+        ti for ti in at.text_input if ti.key.startswith("mcp_export_root_pick_")
+    )
+    assert export_input.value == str(picked)
+    captions = " ".join(c.value for c in at.caption)
+    assert "Generated for this" in captions
+    assert "Windows build" in captions
