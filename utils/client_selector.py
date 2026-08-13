@@ -119,6 +119,7 @@ def render_safety_status():
         reason = "Encryption is off." if not encryption_ready else health["reason"]
         st.sidebar.caption(f"Safety: {reason}")
     st.sidebar.page_link("pages/12_Firm_Settings.py", label="Firm Settings", icon=icons.FIRM)
+    st.sidebar.page_link("pages/15_Legal.py", label="Legal & Disclosures", icon=icons.LEGAL)
 
 
 def render_client_selector() -> Optional[int]:

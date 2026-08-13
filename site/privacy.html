@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy &amp; Data Practices — LedgerTB</title>
+<meta name="description" content="How LedgerTB stores book data and how optional AI, MCP, website, and download providers process information.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="legal.css">
+</head>
+<body>
+<header><div class="wrap"><nav class="site-nav" aria-label="Legal page navigation">
+  <a class="brand" href="/" aria-label="LedgerTB home"><img src="mark.svg" alt=""><span>Ledger<span class="tb">TB</span></span></a>
+  <a class="back" href="/">Back to LedgerTB</a>
+</nav></div></header>
+<main><div class="wrap">
+  <div class="eyebrow">Legal</div>
+  <h1>Privacy &amp; Data Practices</h1>
+  <p class="effective">Effective August 13, 2026</p>
+  <p class="summary">LedgerTB has no Ledger Labs cloud account or hosted
+  bookkeeping database. Official builds keep the active book in an encrypted
+  database at a location the user controls. Optional AI and MCP features can
+  send selected data to providers the user configures.</p>
+
+  <article>
+    <section>
+      <h2>Desktop data</h2>
+      <p>LedgerTB stores records, client details, attachments, audit history,
+      branding, and settings in the active book file. The user chooses whether
+      that file is in LedgerTB's local data folder or another location,
+      including shared storage. Backups and exports go to user-chosen locations.</p>
+      <p>Official release builds encrypt books and LedgerTB-created backups at
+      rest with SQLCipher. A source build without SQLCipher displays an
+      unencrypted-mode warning and should not be used for real books. Ledger
+      Labs LLC does not receive a book merely because LedgerTB is used and
+      cannot recover a lost passphrase or retrieve a user-controlled book.</p>
+      <p>If “Remember on this computer” is enabled, a derived unlock key is kept
+      in the operating-system credential vault. Enabling MCP stores a
+      book-specific derived key, identity, access level, and approved export
+      folder in that vault so the local MCP process can enforce the user's choices.</p>
+    </section>
+
+    <section>
+      <h2>Optional AI features</h2>
+      <p>LedgerTB operates without an AI key. When Anthropic-powered features
+      are enabled, LedgerTB sends the information described beside that feature.
+      Depending on the feature, this may include dates, descriptions, amounts,
+      account names and numbers, transaction details, or statement text. A key
+      saved in LedgerTB is kept in the operating-system credential vault.</p>
+      <p>Requests go directly from the user's computer to Anthropic under the
+      user's Anthropic account, agreement, and service settings. Ledger Labs
+      LLC does not receive those requests.</p>
+    </section>
+
+    <section>
+      <h2>Optional MCP access</h2>
+      <p>MCP is off until enabled separately for a book. LedgerTB's MCP server
+      uses local standard input/output and does not listen on a network port.
+      The connected MCP client may nevertheless send tool requests and data
+      returned by LedgerTB to the AI provider configured in that client.</p>
+      <p>Before enabling MCP for client information, the user should approve the
+      client and provider, including retention, training, confidentiality,
+      security, location, and incident-response terms. A level change or
+      revocation takes effect on the next LedgerTB tool call.</p>
+    </section>
+
+    <section>
+      <h2>Website and downloads</h2>
+      <p>The static marketing site is hosted by Cloudflare Pages. Ledger Labs
+      LLC does not add analytics scripts, advertising pixels, accounts, or
+      contact forms. Cloudflare may process ordinary request data—such as IP
+      address, browser information, URL, timestamp, and security signals—to
+      deliver and protect the site. The site requests Google Fonts, so a
+      visitor's browser may connect to Google while loading a page.</p>
+      <p>GitHub hosts source code and release downloads. Cloudflare, Google, and
+      GitHub apply their own terms and privacy practices. Links to Ledger Labs,
+      AI Lab for Accountants, Anthropic, and other services lead to third-party sites.</p>
+    </section>
+
+    <section>
+      <h2>Messages and security reports</h2>
+      <p>If someone contacts Ledger Labs LLC, we receive the address, message,
+      attachments, and details they provide. We use them to respond,
+      investigate, secure LedgerTB, maintain necessary records, and comply with
+      law. Do not send live credentials or client records in an initial report.</p>
+      <p>Correspondence is retained only as reasonably necessary for those
+      purposes, subject to legal, security, and recordkeeping needs.</p>
+    </section>
+
+    <section>
+      <h2>Choices and responsibilities</h2>
+      <p>The user controls book and backup locations, exports, the AI key, MCP
+      enablement and level, approved export folders, and connected providers.
+      MCP and saved credentials can be removed in LedgerTB. Uninstalling the
+      app does not remove book files.</p>
+      <p>Ledger Labs LLC does not sell personal information received through
+      LedgerTB or use it for cross-context behavioral advertising. LedgerTB is
+      intended for professional use and is not directed to children.</p>
+      <p>The person or firm controlling a book is responsible for authority,
+      required notices, provider configuration, retention, and requests to
+      access or delete information in that book.</p>
+    </section>
+
+    <section>
+      <h2>Changes and contact</h2>
+      <p>Material revisions will update the effective date. Questions or
+      requests concerning information held by Ledger Labs LLC may be sent to
+      <a href="mailto:info@ledgerlabs.co">info@ledgerlabs.co</a>. Because Ledger
+      Labs LLC generally does not receive desktop book data, requests concerning
+      a local book ordinarily belong with the person or firm controlling it.</p>
+    </section>
+  </article>
+
+  <div class="related"><strong>Related documents</strong>
+    <a href="terms.html">Terms</a> · <a href="disclaimer.html">Disclaimer</a> ·
+    <a href="https://github.com/charliebarmore/LedgerTB/blob/main/PRIVACY.md">Repository copy</a>
+  </div>
+</div></main>
+<footer><div class="wrap">
+  <div class="footer-links"><a href="/">LedgerTB</a><a href="terms.html">Terms</a>
+    <a href="disclaimer.html">Disclaimer</a><a href="https://github.com/charliebarmore/LedgerTB">GitHub</a></div>
+  <p class="credit">© 2026 Ledger Labs LLC · LedgerTB source code is MIT licensed.</p>
+</div></footer>
+</body>
+</html>

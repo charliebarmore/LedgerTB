@@ -413,6 +413,17 @@ def _render_gate(state: str):
     else:  # "absent"
         _setup_form()
     _render_book_chooser()
+    st.divider()
+    st.caption(
+        "LedgerTB is software, not accounting, tax, legal, audit, assurance, "
+        "or other professional advice. You are responsible for verifying its "
+        "outputs, protecting client data, and maintaining recovery copies."
+    )
+    st.page_link(
+        "pages/15_Legal.py",
+        label="Read Legal & Disclosures",
+        icon=":material/gavel:",
+    )
 
 
 def _unlock_form():

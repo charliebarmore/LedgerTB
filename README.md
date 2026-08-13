@@ -128,6 +128,11 @@ is a substitute for professional judgment on questions that matter. Your books
 and their accuracy remain your responsibility, and the software is provided
 as-is, without warranty of any kind (see `LICENSE`).
 
+See the full [Disclaimer](DISCLAIMER.md), [Privacy & Data Practices](PRIVACY.md),
+and [Website and Distribution Terms](TERMS.md). In particular, optional AI and
+MCP features can send selected data to providers you configure; approve those
+providers and their data practices before using client information.
+
 ## License
 
 MIT. See `LICENSE`. Third-party components retain their own terms; see
