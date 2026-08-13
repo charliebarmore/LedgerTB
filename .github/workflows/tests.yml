@@ -1,19 +1,18 @@
-# Functional signal on every contribution: the full non-performance suite on
-# the same open-range install a source user gets. Fork PRs run this with a
-# read-only token and no secrets.
+# Functional signal on every proposed contribution: the full non-performance
+# suite on the same open-range install a source user gets. The PR result is the
+# merge gate, so merging that already-tested commit does not spend the same
+# Actions minutes a second time. Direct-to-main changes can still use the
+# manual dispatch while branch protection keeps the normal path honest.
 name: Tests
 
-# The landing page and brand assets ship in this repo so the marketing claims
-# stay next to the code they describe — but nothing under them can affect a
-# test, so editing copy should not run the suite. Markdown deliberately still
+# The landing page, brand assets, and docs ship in this repo so their claims
+# stay next to the code they describe — but no test reads those directories,
+# so editing them should not run the suite. Root Markdown deliberately still
 # does: tests/test_streamlit_config.py reads README.md to check the documented
 # run command still pins the server to loopback.
 on:
   pull_request:
-    paths-ignore: ['site/**', 'branding/**']
-  push:
-    branches: [main]
-    paths-ignore: ['site/**', 'branding/**']
+    paths-ignore: ['site/**', 'branding/**', 'docs/**']
   workflow_dispatch:
 
 permissions:
@@ -35,6 +34,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
       - name: Install SQLCipher headers
         # sqlcipher3 has no Linux wheel, so it builds from source here; without
         # the library the app would fall back to an unencrypted database and
