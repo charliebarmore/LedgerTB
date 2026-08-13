@@ -15,7 +15,7 @@ connections cannot reach it — the dial is physically outside its world.
 | Level | The assistant can… |
 |---|---|
 | **Read only** | query everything, change nothing |
-| **Read + propose** *(default)* | file draft entries, stage imports, and propose Close Map explanations; you approve everything |
+| **Read + propose** *(default)* | file draft entries, stage imports, and propose Close Map explanations or client-brand text/colors; you approve everything |
 | **Read + propose + post** | additionally post balanced journal entries — **append-only** |
 
 Even at the highest level the engine refuses every edit and delete: an
@@ -71,6 +71,14 @@ from an already-running MCP process.
   panel. The assistant cannot accept its proposal or create preparer/reviewer
   signoffs; no signoff tool exists, and the model rejects assistant-attributed
   actors as defense in depth.
+- **Client branding stays human-controlled.** `client_branding_detail` shows
+  the effective deliverable name, tagline, accent, whether a logo is present,
+  and pending proposals; it never returns the logo bytes. At propose level,
+  `propose_client_branding` may suggest a display name, tagline, or accent
+  color. The suggestion waits in **Firm Settings** and **Assistant Review** and
+  changes no report until a person accepts it. Logo upload and removal exist
+  only in the app. Close packages then use the client identity as the primary
+  brand and the firm identity as the preparer.
 - **Shared/custom book files are read-only.** The separate MCP process does
   not yet participate in firm mode's one-writer sidecar lock, so books outside
   LedgerTB's local managed-data folder are capped at read access even if the

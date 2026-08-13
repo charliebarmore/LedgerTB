@@ -96,6 +96,52 @@ def list_accounts(client_id: int) -> list:
     ]
 
 
+def client_branding_detail(client_id: int) -> dict:
+    """Client deliverable identity and pending human-review proposals."""
+    from services import branding
+
+    client = _require_client(client_id)
+    current = branding.get_client_branding(client_id)
+    return {
+        "client_id": client_id,
+        "legal_name": client.name,
+        "display_name": current.display_name or client.dba_name or client.name,
+        "tagline": current.tagline,
+        "accent_hex": current.accent_hex or None,
+        "logo_present": bool(current.logo),
+        "pending_proposals": [
+            {"proposal_id": item["id"], "display_name": item["display_name"],
+             "tagline": item["tagline"], "accent_hex": item["accent_hex"],
+             "rationale": item["rationale"], "created_by": item["created_by"]}
+            for item in branding.pending_client_branding_proposals(client_id)
+        ],
+    }
+
+
+def propose_client_branding(
+    client_id: int,
+    display_name: Optional[str] = None,
+    tagline: Optional[str] = None,
+    accent_hex: Optional[str] = None,
+    rationale: str = "",
+) -> dict:
+    """Propose client identity text/color; a human approves and uploads logos."""
+    from services import branding
+
+    _require_client(client_id)
+    proposal_id = branding.propose_client_branding(
+        client_id, display_name, tagline, accent_hex, rationale
+    )
+    return {
+        "proposal_id": proposal_id,
+        "status": "pending",
+        "note": (
+            "Filed for human approval in Firm Settings. This does not change "
+            "deliverables yet. Logo upload remains human-controlled."
+        ),
+    }
+
+
 def _resolve_year_period(client_id: int, fiscal_year: int):
     from models.fiscal_period import FiscalPeriod
 

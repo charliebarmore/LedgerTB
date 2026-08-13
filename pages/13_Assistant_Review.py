@@ -15,6 +15,7 @@ from database import init_database
 from models import assistant_review
 from models.draft_entry import DraftEntry
 from models.transaction import ImportedTransaction
+from services.branding import pending_client_branding_count
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
@@ -42,8 +43,9 @@ st.caption(
 st.subheader("Waiting on you")
 pending_drafts = DraftEntry.pending_count(client_id)
 pending_staged = len(ImportedTransaction.get_by_status(client_id, "Pending"))
+pending_branding = pending_client_branding_count(client_id)
 
-na1, na2, na3 = st.columns([1, 1, 2])
+na1, na2, na3, na4 = st.columns([1, 1, 1, 1])
 with na1:
     st.metric("Draft entries", pending_drafts)
     if pending_drafts and st.button("Review drafts →", key="ar_goto_drafts"):
@@ -55,7 +57,11 @@ with na2:
         st.session_state.import_active_tab = "Review & Categorize"
         st.switch_page("pages/4_Import_Transactions.py")
 with na3:
-    if not pending_drafts and not pending_staged:
+    st.metric("Branding proposals", pending_branding)
+    if pending_branding and st.button("Review branding →", key="ar_goto_branding"):
+        st.switch_page("pages/12_Firm_Settings.py")
+with na4:
+    if not pending_drafts and not pending_staged and not pending_branding:
         st.success("Nothing is waiting for a decision.")
 
 st.divider()
@@ -76,6 +82,7 @@ _LABELS = {
     ("INSERT", "imported_transactions"): "Staged import row",
     ("INSERT", "accounts"): "Created account",
     ("INSERT", "clients"): "Created client",
+    ("INSERT", "client_branding_proposals"): "Proposed client branding",
     ("EXPORT", "audit_log"): "Exported files",
 }
 

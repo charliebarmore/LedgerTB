@@ -13,6 +13,7 @@ from io import BytesIO
 from typing import Dict, List, Optional
 
 import openpyxl
+from openpyxl.drawing.image import Image as ExcelImage
 from openpyxl.styles import Border, Font, Side
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
@@ -33,7 +34,12 @@ from database import connection as dbconn
 from database.connection import get_connection, get_cursor
 from models.reports import ReportGenerator, TrialBalanceWorksheetRow
 from money import to_dollars
-from services.branding import FirmBranding, get_branding
+from services.branding import (
+    ClientBranding,
+    FirmBranding,
+    get_branding,
+    get_client_branding,
+)
 from utils.dates import long_date, long_datetime
 from utils.export import set_excel_literal
 
@@ -86,6 +92,7 @@ class ClosePackageSnapshot:
     comparative_balance_sheet: Dict
     comparative_trial_balance: Dict
     close_map: Optional[Dict]
+    client_branding: ClientBranding
     branding: FirmBranding
     generated_at: datetime
 
@@ -201,6 +208,7 @@ def load_close_package_snapshot(
             client_id, period_end
         ),
         close_map=close_map,
+        client_branding=get_client_branding(client_id),
         branding=get_branding(),
         generated_at=datetime.now(),
     )
@@ -249,10 +257,13 @@ def _statement_label(item: dict) -> str:
     return f"{number} - {item['name']}" if number else item["name"]
 
 
-def _start_statement_sheet(wb, title: str, client_name: str, period_label: str):
+def _start_statement_sheet(wb, title: str, client_name: str, period_label: str,
+                           accent_hex: str = ""):
     ws = wb.create_sheet(title)
     _append_literal_row(ws, [client_name, ""])
-    ws["A1"].font = Font(bold=True, size=14)
+    ws["A1"].font = Font(
+        bold=True, size=14, color=(accent_hex.lstrip("#") or "000000")
+    )
     _append_literal_row(ws, [title, period_label])
     ws["A2"].font = Font(bold=True, size=12)
     ws["B2"].font = _HEADER_FONT
@@ -261,6 +272,21 @@ def _start_statement_sheet(wb, title: str, client_name: str, period_label: str):
     ws.column_dimensions["B"].width = 18
     ws.sheet_view.showGridLines = False
     return ws
+
+
+def _add_excel_logo(ws, logo: Optional[bytes], anchor: str,
+                    max_width: float = 150, max_height: float = 55) -> None:
+    """Add a safely scaled in-memory logo; bad image data cannot block export."""
+    if not logo:
+        return
+    try:
+        image = ExcelImage(BytesIO(logo))
+        scale = min(max_width / image.width, max_height / image.height, 1)
+        image.width *= scale
+        image.height *= scale
+        ws.add_image(image, anchor)
+    except Exception:
+        pass
 
 
 def _append_statement_section(ws, title: str, items: List[dict],
@@ -352,6 +378,10 @@ def build_close_package(
     comparative_balance = snapshot.comparative_balance_sheet
     comparative_tb = snapshot.comparative_trial_balance
     close_map = snapshot.close_map
+    client_branding = snapshot.client_branding
+    firm_branding = snapshot.branding
+    display_name = client_branding.display_name or client_name
+    accent_hex = client_branding.accent_hex or firm_branding.accent_hex
 
     wb = openpyxl.Workbook()
 
@@ -360,14 +390,17 @@ def build_close_package(
     ws.title = "Summary"
     total_dr = round(sum(r.adjusted_dr for r in tb_rows), 2)
     total_cr = round(sum(r.adjusted_cr for r in tb_rows), 2)
-    branding = snapshot.branding
     lines = [
-        (client_name, ""),
+        (display_name, ""),
         ("Close package", f"{period_start.isoformat()} to {period_end.isoformat()}"),
         ("Generated", snapshot.generated_at.strftime("%Y-%m-%d %H:%M")),
     ]
-    if branding.firm_name:
-        lines.append(("Prepared by", branding.firm_name))
+    if client_branding.tagline:
+        lines.append(("Client", client_branding.tagline))
+    if firm_branding.firm_name:
+        lines.append(("Prepared by", firm_branding.firm_name))
+    if firm_branding.tagline:
+        lines.append(("Preparer details", firm_branding.tagline))
     lines += [
         ("", ""),
         ("Final trial balance — total debits", total_dr),
@@ -402,14 +435,22 @@ def build_close_package(
         ))
     for left, right in lines:
         _append_literal_row(ws, [left, right])
-    ws["A1"].font = _HEADER_FONT
+    ws["A1"].font = Font(
+        bold=True, size=14, color=(accent_hex.lstrip("#") or "000000")
+    )
     ws.column_dimensions["A"].width = 38
     ws.column_dimensions["B"].width = 28
+    ws.row_dimensions[1].height = 46
+    ws.column_dimensions["D"].width = 22
+    ws.column_dimensions["F"].width = 22
+    _add_excel_logo(ws, client_branding.logo, "D1")
+    _add_excel_logo(ws, firm_branding.logo, "F1", max_width=120, max_height=45)
 
     # ---- Income Statement
     ws = _start_statement_sheet(
-        wb, "Income Statement", client_name,
+        wb, "Income Statement", display_name,
         f"{period_start.isoformat()} to {period_end.isoformat()}",
+        accent_hex,
     )
     _prepare_comparative_statement_sheet(
         ws,
@@ -435,7 +476,8 @@ def build_close_package(
 
     # ---- Balance Sheet
     ws = _start_statement_sheet(
-        wb, "Balance Sheet", client_name, f"As of {period_end.isoformat()}",
+        wb, "Balance Sheet", display_name, f"As of {period_end.isoformat()}",
+        accent_hex,
     )
     _prepare_comparative_statement_sheet(
         ws,
@@ -622,6 +664,14 @@ def build_close_package(
             cell.font = _HEADER_FONT
             cell.number_format = _MONEY_FMT
 
+    for sheet in wb.worksheets:
+        sheet.oddFooter.left.text = display_name
+        sheet.oddFooter.center.text = (
+            f"Prepared by {firm_branding.firm_name}"
+            if firm_branding.firm_name else "Prepared by LedgerTB"
+        )
+        sheet.oddFooter.right.text = "Page &P of &N"
+
     output = BytesIO()
     wb.save(output)
     output.seek(0)
@@ -666,6 +716,11 @@ def _wrap(text: str) -> Paragraph:
     return Paragraph((text or "").replace("&", "&amp;").replace("<", "&lt;"), _PDF_BODY)
 
 
+def _safe_paragraph(text: str, style: ParagraphStyle) -> Paragraph:
+    escaped = (text or "").replace("&", "&amp;").replace("<", "&lt;")
+    return Paragraph(escaped, style)
+
+
 def _pdf_table(headers, data_rows, col_widths, money_from: Optional[int],
                totals_row=None) -> Table:
     """A report table: bold repeating header, right-aligned money columns."""
@@ -695,15 +750,15 @@ def _pdf_table(headers, data_rows, col_widths, money_from: Optional[int],
     return table
 
 
-def _logo_flowable(branding: FirmBranding, max_height: float):
-    """The firm logo scaled to the masthead, or None."""
-    if not branding.logo:
+def _logo_flowable(identity, max_height: float):
+    """A stored brand logo scaled to the masthead, or None."""
+    if not identity.logo:
         return None
     try:
-        reader = ImageReader(BytesIO(branding.logo))
+        reader = ImageReader(BytesIO(identity.logo))
         width, height = reader.getSize()
         scale = max_height / float(height)
-        return Image(BytesIO(branding.logo),
+        return Image(BytesIO(identity.logo),
                      width=width * scale, height=max_height)
     except Exception:
         return None  # a corrupt logo must never block the close package
@@ -732,8 +787,11 @@ def build_close_package_pdf(
     close_map = snapshot.close_map
     period_label = f"{long_date(period_start)} to {long_date(period_end)}"
 
-    branding = snapshot.branding
-    accent = colors.HexColor(branding.accent_hex) if branding.accent_hex else colors.black
+    client_branding = snapshot.client_branding
+    firm_branding = snapshot.branding
+    display_name = client_branding.display_name or client_name
+    accent_hex = client_branding.accent_hex or firm_branding.accent_hex
+    accent = colors.HexColor(accent_hex) if accent_hex else colors.black
     heading_1 = ParagraphStyle("bh1", parent=_PDF_H1, textColor=accent)
     heading_2 = ParagraphStyle("bh2", parent=_PDF_H2, textColor=accent)
 
@@ -742,13 +800,13 @@ def build_close_package_pdf(
         buffer, pagesize=landscape(letter),
         leftMargin=0.5 * inch, rightMargin=0.5 * inch,
         topMargin=0.6 * inch, bottomMargin=0.55 * inch,
-        title=f"Close Package — {client_name}",
-        author=branding.firm_name or "LedgerTB",
+        title=f"Close Package — {display_name}",
+        author=firm_branding.firm_name or "LedgerTB",
     )
 
-    footer_left = f"{client_name} — {period_label}"
-    if branding.firm_name:
-        footer_left = f"{branding.firm_name} · {footer_left}"
+    footer_left = f"{display_name} — {period_label}"
+    if firm_branding.firm_name:
+        footer_left = f"{footer_left} · Prepared by {firm_branding.firm_name}"
 
     def _footer(canvas, _doc):
         canvas.saveState()
@@ -765,20 +823,30 @@ def build_close_package_pdf(
     balanced = abs(total_dr - total_cr) < 0.01
 
     masthead = []
-    logo = _logo_flowable(branding, max_height=0.45 * inch)
-    if logo:
-        logo.hAlign = "LEFT"
-        masthead += [logo, Spacer(1, 6)]
-    if branding.firm_name:
-        firm_line = branding.firm_name + (f" · {branding.tagline}" if branding.tagline else "")
-        masthead.append(Paragraph(firm_line, _PDF_META))
-        masthead.append(Spacer(1, 10))
+    client_logo = _logo_flowable(client_branding, max_height=0.6 * inch)
+    if client_logo:
+        client_logo.hAlign = "LEFT"
+        masthead += [client_logo, Spacer(1, 6)]
 
-    story = masthead + [
-        Paragraph(client_name, heading_1),
+    story = masthead + [_safe_paragraph(display_name, heading_1)]
+    if client_branding.tagline:
+        story += [_safe_paragraph(client_branding.tagline, _PDF_META)]
+    story += [
         Paragraph("Close Package", _PDF_META),
         Paragraph(period_label, _PDF_META),
         Paragraph(f"Generated {long_datetime(snapshot.generated_at)}", _PDF_META),
+        Spacer(1, 10),
+    ]
+    firm_logo = _logo_flowable(firm_branding, max_height=0.32 * inch)
+    if firm_logo:
+        firm_logo.hAlign = "LEFT"
+        story += [firm_logo, Spacer(1, 4)]
+    if firm_branding.firm_name:
+        firm_line = "Prepared by " + firm_branding.firm_name
+        if firm_branding.tagline:
+            firm_line += f" · {firm_branding.tagline}"
+        story += [_safe_paragraph(firm_line, _PDF_META)]
+    story += [
         Spacer(1, 18),
         Paragraph("Summary", heading_2),
         _pdf_table(

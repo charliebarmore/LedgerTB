@@ -122,7 +122,8 @@ server = MCPServer(
         "Access to LedgerTB bookkeeping data. Start with list_clients to "
         "find the client_id; amounts are US dollars. What you may do is set "
         "by the user's chosen access level (Data Safety): read only; "
-        "propose (file draft entries and stage imports for human review); "
+        "propose (file draft entries, stage imports, and suggest client "
+        "branding text/colors for human review); "
         "or post (additionally post balanced entries, APPEND-ONLY — nothing "
         "can ever be edited or deleted from here). Tools tell you if the "
         "level is insufficient."
@@ -157,6 +158,31 @@ def list_accounts(client_id: int) -> list:
     """The client's chart of accounts: number, name, type, subtype, active."""
     _require_level("read")
     return mcp_tools.list_accounts(client_id)
+
+
+@server.tool()
+def client_branding_detail(client_id: int) -> dict:
+    """The client identity used on deliverables and any pending text/color
+    proposals. Reports whether a logo exists without exposing its contents."""
+    _require_level("read")
+    return mcp_tools.client_branding_detail(client_id)
+
+
+@server.tool()
+def propose_client_branding(client_id: int, display_name: str = "",
+                            tagline: str = "", accent_hex: str = "",
+                            rationale: str = "") -> dict:
+    """Suggest client display-name, tagline, or six-digit hex accent changes
+    for human approval. Blank fields are left unchanged; logo upload stays in
+    LedgerTB and is always human-controlled. Needs access level "propose"."""
+    _require_level("propose")
+    return mcp_tools.propose_client_branding(
+        client_id,
+        display_name.strip() or None,
+        tagline.strip() or None,
+        accent_hex.strip() or None,
+        rationale,
+    )
 
 
 @server.tool()

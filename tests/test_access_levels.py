@@ -82,6 +82,35 @@ def test_close_explanation_proposal_respects_access_dial(client_id, accounts, mo
     assert result["status"] == "pending"
 
 
+def test_client_branding_proposal_respects_access_dial(client_id, monkeypatch):
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "read")
+    with pytest.raises(Exception):
+        mcp_tools.propose_client_branding(
+            client_id, display_name="Northline Studio"
+        )
+
+    monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "propose")
+    result = mcp_tools.propose_client_branding(
+        client_id, display_name="Northline Studio", accent_hex="#1D434E"
+    )
+    assert result["status"] == "pending"
+
+    # The inbox is append-only and the approved identity is not writable by MCP.
+    with pytest.raises(Exception):
+        with get_cursor(commit=True) as cursor:
+            cursor.execute(
+                "UPDATE client_branding_proposals SET status = 'accepted' "
+                "WHERE id = ?", (result["proposal_id"],),
+            )
+    with pytest.raises(Exception):
+        with get_cursor(commit=True) as cursor:
+            cursor.execute(
+                "INSERT INTO client_branding "
+                "(client_id, display_name, tagline, accent_hex) "
+                "VALUES (?, 'Bypass', '', '')", (client_id,),
+            )
+
+
 def test_post_level_is_append_only(client_id, accounts, monkeypatch):
     cash_no, rev_no = _numbers(client_id, accounts)
     monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", "post")

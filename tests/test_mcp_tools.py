@@ -35,6 +35,35 @@ def test_clients_accounts_and_trial_balance_tie(client_id, accounts):
     assert cash_row["debit"] == 380.0  # 500 in - 120 out
 
 
+def test_client_branding_tool_proposes_but_does_not_apply(client_id):
+    detail = mcp_tools.client_branding_detail(client_id)
+    assert detail["display_name"] == "Test Co"
+    assert detail["logo_present"] is False
+    assert detail["pending_proposals"] == []
+
+    proposal = mcp_tools.propose_client_branding(
+        client_id,
+        display_name="Northline Studio",
+        tagline="Atlanta, GA",
+        accent_hex="#1D434E",
+        rationale="Matched client-provided identity.",
+    )
+    assert proposal["status"] == "pending"
+
+    detail = mcp_tools.client_branding_detail(client_id)
+    assert detail["display_name"] == "Test Co"
+    assert len(detail["pending_proposals"]) == 1
+    pending = detail["pending_proposals"][0]
+    assert pending.pop("created_by")
+    assert pending == {
+        "proposal_id": proposal["proposal_id"],
+        "display_name": "Northline Studio",
+        "tagline": "Atlanta, GA",
+        "accent_hex": "#1D434E",
+        "rationale": "Matched client-provided identity.",
+    }
+
+
 def test_statements_and_ledger(client_id, accounts):
     _seed(client_id, accounts)
 

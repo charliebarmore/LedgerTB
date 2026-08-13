@@ -48,7 +48,7 @@ READ_ONLY = False
 # not tool design, enforces the ceiling the user chose on Data Safety:
 #   "read"    — SELECT only
 #   "propose" — + INSERT into the proposal inboxes (drafts, staged imports,
-#               Close Map explanation proposals)
+#               Close Map explanations, client branding)
 #   "post"    — + INSERT into the ledger tables: APPEND-ONLY. At no level,
 #               ever, can an assistant connection UPDATE or DELETE ledger
 #               history; corrections happen the accounting way, with new
@@ -77,9 +77,11 @@ _ASSISTANT_INSERT_TABLES = {
     # and its chart (setup, not ledger); it still cannot alter either later
     # (no UPDATE/DELETE at any level).
     "propose": frozenset({"draft_entries", "imported_transactions", "audit_log",
-                          "clients", "accounts", "close_review_proposals"}),
+                          "clients", "accounts", "close_review_proposals",
+                          "client_branding_proposals"}),
     "post": frozenset({"draft_entries", "imported_transactions", "audit_log",
                        "clients", "accounts", "close_review_proposals",
+                       "client_branding_proposals",
                        "journal_entries", "journal_entry_lines"}),
 }
 

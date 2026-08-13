@@ -16,7 +16,7 @@ def test_create_tables_builds_full_schema(db):
         "journal_entry_lines", "schema_migrations", "vendors",
         "bank_reconciliations", "bank_reconciliation_items",
         "import_profiles", "review_policies", "firm_branding",
-        "book_identity",
+        "book_identity", "client_branding", "client_branding_proposals",
     }
     assert expected.issubset(tables)
 
@@ -32,7 +32,7 @@ def test_create_tables_records_migrations(db):
         "009_activity_actor", "010_review_policies",
         "011_firm_branding", "012_draft_entries", "013_import_dismissal",
         "014_assistant_review", "015_review_action", "016_book_identity",
-        "017_close_map"]
+        "017_close_map", "018_client_branding"]
     conn.close()
 
 
@@ -45,7 +45,7 @@ def test_create_tables_is_idempotent(db):
 
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM schema_migrations")
-    assert cur.fetchone()[0] == 17
+    assert cur.fetchone()[0] == 18
     conn.close()
 
 
