@@ -17,14 +17,4 @@ if [ ! -x "$PY" ]; then
 fi
 
 LOG="$HOME/Library/Logs/LedgerTB.log"
-
-# Apple Silicon: LaunchServices starts this bundle under Rosetta (the bundle
-# executable is a script, so there is no Mach-O slice for it to pick from), and
-# a repo venv's wheels are arm64-only -- numpy's C extension then refuses to
-# load and every page dies on `import pandas`. Force the native slice; on Intel
-# the check fails and nothing changes.
-ARCH=""
-if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
-    ARCH="arch -arm64"
-fi
-exec $ARCH "$PY" desktop.py >>"$LOG" 2>&1
+exec "$PY" desktop.py >>"$LOG" 2>&1
