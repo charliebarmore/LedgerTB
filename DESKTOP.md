@@ -31,6 +31,13 @@ window to shut the app (and its background server) down cleanly.
 > unsigned, locally-built app). Right-click `LedgerTB.app` → **Open** once, and
 > it will open normally thereafter.
 
+> If the window stops appearing after an update: on Apple Silicon, macOS
+> remembers how it started this app the first time, and older copies started it
+> in Intel compatibility mode. Pulling the fix does not clear that memory, so
+> the log still shows an architecture error. Run `touch LedgerTB.app` in the
+> project folder once, then open it again. A fresh copy of the project is not
+> affected.
+
 ## How it works
 
 `desktop.py` starts Streamlit headless on a private `127.0.0.1` port, waits for
