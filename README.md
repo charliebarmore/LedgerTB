@@ -47,6 +47,19 @@ The app is self-contained — no Python and no dependencies to install. Your boo
 live in an encrypted database under your user profile, never inside the app
 folder, so upgrading keeps your data and uninstalling does not delete it.
 
+### Updates and feedback
+
+The in-app **Help & Updates** page shows the installed version and provides
+safe upgrade instructions plus browser links to the latest release, guided bug
+report and feature request forms, and private security-report instructions. It
+does not call GitHub, check for updates in the background, or send telemetry;
+GitHub opens only after the user chooses a link.
+
+- [Latest release](../../releases/latest)
+- [Report a bug](../../issues/new?template=bug_report.yml)
+- [Request a feature](../../issues/new?template=feature_request.yml)
+- [Security policy](../../security/policy)
+
 ### If you ran a pre-release ProBooks build
 
 ProBooks was LedgerTB's pre-release name; it never shipped publicly. If you
