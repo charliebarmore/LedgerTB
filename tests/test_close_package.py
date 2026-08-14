@@ -280,6 +280,53 @@ def test_workbook_stores_untrusted_text_as_literals(client_id, accounts):
     assert all(data_type == "s" for data_type in found.values())
 
 
+def test_export_decodes_preescaped_entry_descriptions(client_id, accounts):
+    """HTML entities in source descriptions must print as ordinary text.
+
+    The PDF renderer still escapes the normalized value before giving it to
+    ReportLab; this only prevents already-escaped source text from being escaped
+    twice.  The ledger value itself remains untouched.
+    """
+    encoded_description = "Defer Lark &amp; Co. Studio advance"
+    readable_description = "Defer Lark & Co. Studio advance"
+    entry = JournalEntry(
+        client_id=client_id,
+        entry_date=date(2026, 1, 15),
+        description=encoded_description,
+        source_reference="AJE-HTML",
+        entry_type="Adjusting",
+        lines=[
+            JournalEntryLine(
+                account_id=accounts["cash"], debit=25.0, memo="Lark & Co."
+            ),
+            JournalEntryLine(account_id=accounts["revenue"], credit=25.0),
+        ],
+    )
+    entry.save()
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+
+    workbook = openpyxl.load_workbook(BytesIO(
+        build_close_package(client_id, "Test Co", *Q1, tb_rows).read()
+    ))
+    assert workbook["Transactions"]["D2"].value == readable_description
+    assert workbook["Adjusting Entries"]["D2"].value == readable_description
+    assert workbook["Transactions"]["I2"].value == "Lark & Co."
+
+    raw_pdf = build_close_package_pdf(
+        client_id, "Test Co", *Q1, tb_rows
+    ).read()
+    document = pdfium.PdfDocument(raw_pdf)
+    try:
+        text = "\n".join(
+            document[index].get_textpage().get_text_range()
+            for index in range(len(document))
+        )
+    finally:
+        document.close()
+    assert readable_description in text
+    assert "&amp;" not in text
+
+
 def test_pdf_package_contains_every_section(booked_period, accounts):
     client_id = booked_period
     tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
