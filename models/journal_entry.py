@@ -608,6 +608,18 @@ class JournalEntry:
                         "Reverse it instead so the source history remains intact."
                     )
 
+                cursor.execute(
+                    "SELECT id FROM draft_entries "
+                    "WHERE original_entry_id = ? ORDER BY id LIMIT 1",
+                    (entry_id,),
+                )
+                linked_draft = cursor.fetchone()
+                if linked_draft:
+                    raise ValueError(
+                        f"This entry is linked to correction draft #{linked_draft['id']}. "
+                        "Reverse it instead so the correction chain remains intact."
+                    )
+
                 cursor.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
                 AuditLog.write(
                     cursor, client_id, 'journal_entries', entry_id, 'DELETE',

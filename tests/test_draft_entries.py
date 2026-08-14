@@ -11,6 +11,7 @@ import pytest
 from database import connection as dbconn
 from models.account import Account
 from models.audit_log import AuditLog
+from models.client import Client
 from models.draft_entry import DraftEntry, DraftLine
 from models.journal_entry import JournalEntry
 from services import mcp_tools
@@ -74,6 +75,76 @@ def test_approve_posts_a_real_audited_entry(client_id, accounts):
     assert draft_logs[0].old_values["status"] == "pending"
     assert draft_logs[0].new_values["status"] == "approved"
     assert draft_logs[0].new_values["posted_entry_id"] == entry_id
+
+
+def test_correction_proposal_retains_original_to_posted_chain(client_id, accounts):
+    cash_no, rev_no = _numbers(client_id, accounts)
+    original = post_entry(
+        client_id, date(2026, 7, 30),
+        [(accounts["cash"], 125, 0), (accounts["revenue"], 0, 125)],
+    )
+
+    result = mcp_tools.propose_correction(
+        client_id=client_id,
+        original_entry_id=original.id,
+        entry_date="2026-07-31",
+        description="Reverse duplicate revenue posting",
+        lines=[
+            {"account_number": cash_no, "credit": 125},
+            {"account_number": rev_no, "debit": 125},
+        ],
+        rationale="The bank activity was imported twice.",
+    )
+    assert result["original_entry_id"] == original.id
+
+    draft = DraftEntry.get_by_id(result["draft_id"], client_id)
+    assert draft.original_entry_id == original.id
+    assert mcp_tools.list_drafts(client_id)[0]["original_entry_id"] == original.id
+    assert DraftEntry.get_for_originals(client_id, [original.id]) == {
+        original.id: [draft]
+    }
+
+    draft_log = next(
+        log for log in AuditLog.get_all(client_id)
+        if log.table_name == "draft_entries" and log.record_id == draft.id
+    )
+    assert draft_log.new_values["original_entry_id"] == original.id
+
+    correction_id = draft.approve()
+    correction = JournalEntry.get_by_id(correction_id, client_id=client_id)
+    assert correction.source_reference.startswith(
+        f"Correction of JE #{original.id} · Draft #{draft.id}"
+    )
+    stored = DraftEntry.get_by_id(draft.id, client_id)
+    assert stored.original_entry_id == original.id
+    assert stored.posted_entry_id == correction_id
+    assert JournalEntry.get_by_id(original.id, client_id=client_id) is not None
+
+    with pytest.raises(ValueError, match=f"correction draft #{draft.id}"):
+        JournalEntry.delete(original.id, client_id=client_id)
+
+
+def test_correction_proposal_rejects_cross_client_original(client_id, accounts):
+    cash_no, rev_no = _numbers(client_id, accounts)
+    original = post_entry(
+        client_id, date(2026, 7, 30),
+        [(accounts["cash"], 10, 0), (accounts["revenue"], 0, 10)],
+    )
+    other_client = Client(
+        name="Other Co", entity_type="LLC", fiscal_year_end_month=12
+    ).save(seed_accounts=False)
+
+    with pytest.raises(ValueError, match="must belong to the selected client"):
+        mcp_tools.propose_correction(
+            client_id=other_client,
+            original_entry_id=original.id,
+            entry_date="2026-07-31",
+            description="Invalid cross-client correction",
+            lines=[
+                {"account_number": cash_no, "credit": 10},
+                {"account_number": rev_no, "debit": 10},
+            ],
+        )
 
 
 def test_stale_draft_objects_cannot_double_post(client_id, accounts):

@@ -15,6 +15,16 @@ class AccountType:
     # Ordered for UI dropdowns (statement order: BS accounts then P&L).
     ALL = [ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE]
 
+    # Display labels cannot be formed by blindly appending "s": liability and
+    # equity both change spelling in the plural.
+    PLURAL_LABELS = {
+        ASSET: "Assets",
+        LIABILITY: "Liabilities",
+        EQUITY: "Equities",
+        REVENUE: "Revenues",
+        EXPENSE: "Expenses",
+    }
+
     # Accounts whose normal balance is a debit (assets, expenses); everything
     # else (liabilities, equity, revenue) is credit-normal.
     DEBIT_NORMAL = (ASSET, EXPENSE)
@@ -22,6 +32,10 @@ class AccountType:
     @staticmethod
     def is_debit_normal(account_type: str) -> bool:
         return account_type in AccountType.DEBIT_NORMAL
+
+    @staticmethod
+    def plural_label(account_type: str) -> str:
+        return AccountType.PLURAL_LABELS.get(account_type, f"{account_type}s")
 
 
 class EntryType:

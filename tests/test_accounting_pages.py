@@ -4,9 +4,11 @@ from streamlit.testing.v1 import AppTest
 import streamlit as st
 
 from models.account import Account
+from models.draft_entry import DraftEntry
 from models.journal_entry import JournalEntry
 from models.transaction import ImportedTransaction
 from services.posting import post_transaction
+from services import mcp_tools
 from tests.conftest import page_path, post_entry
 
 
@@ -51,6 +53,21 @@ def test_paginated_accounting_pages_render(client_id, accounts, monkeypatch):
     assert not audit.exception
     assert any(metric.label == "Total Changes" for metric in audit.metric)
     assert any(button.label == "Next" and not button.disabled for button in audit.button)
+
+
+def test_chart_of_accounts_uses_correct_plural_labels(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    page = AppTest.from_file(
+        page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30
+    ).run()
+    assert not page.exception
+    labels = " ".join(expander.label for expander in page.expander)
+    assert "Liabilities" in labels
+    assert "Equities" in labels
+    assert "Liabilitys" not in labels
+    assert "Equitys" not in labels
 
 
 def test_report_statements_render_with_balance_checks(client_id, accounts, monkeypatch):
@@ -331,6 +348,64 @@ def test_journal_delete_requires_confirmation(client_id, accounts, monkeypatch):
 
     journal.button(key=f"confirm_delete_entry_{entry.id}").click().run()
     assert JournalEntry.get_by_id(entry.id) is None
+
+
+def test_correction_draft_shows_original_and_retains_visible_chain(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    original = post_entry(
+        client_id,
+        date.today(),
+        [(accounts["cash"], 75, 0), (accounts["revenue"], 0, 75)],
+    )
+    cash = Account.get_by_id(accounts["cash"], client_id=client_id)
+    revenue = Account.get_by_id(accounts["revenue"], client_id=client_id)
+    result = mcp_tools.propose_correction(
+        client_id,
+        original.id,
+        date.today().isoformat(),
+        "Correct duplicate posting",
+        [
+            {"account_number": cash.account_number, "credit": 75},
+            {"account_number": revenue.account_number, "debit": 75},
+        ],
+        rationale="Duplicate identified during review.",
+    )
+
+    journal = AppTest.from_file(
+        page_path("pages/2_Journal_Entries.py"), default_timeout=30
+    )
+    journal.session_state["journal_active_tab"] = "Drafts"
+    journal.run()
+    assert not journal.exception
+    body = " ".join(str(item.value) for item in journal.markdown)
+    notices = " ".join(str(item.value) for item in journal.info)
+    assert f"Original · JE #{original.id}" in body
+    assert f"Proposed correction · Draft #{result['draft_id']}" in body
+    assert "Review both sides before deciding" in notices
+
+    reversal_page = AppTest.from_file(
+        page_path("pages/2_Journal_Entries.py"), default_timeout=30
+    )
+    reversal_page.session_state["journal_active_tab"] = "Reverse Entry"
+    reversal_page.run()
+    reversal_page.number_input(key="reversal_entry_id").set_value(original.id).run()
+    assert reversal_page.button(key="post_reversal").disabled
+    warnings = " ".join(str(item.value) for item in reversal_page.warning)
+    assert "Resolve pending correction draft" in warnings
+
+    journal.button(key=f"draft_approve_{result['draft_id']}").click().run()
+    stored = DraftEntry.get_by_id(result["draft_id"], client_id)
+    assert stored.status == "approved" and stored.posted_entry_id
+
+    journal.session_state["journal_active_tab"] = "View Entries"
+    journal.run()
+    captions = " ".join(str(item.value) for item in journal.caption)
+    assert (
+        f"JE #{original.id} → draft #{stored.id} → "
+        f"journal entry #{stored.posted_entry_id}"
+    ) in captions
 
 
 def test_imported_journal_uses_guided_category_correction(

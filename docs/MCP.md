@@ -49,10 +49,14 @@ from an already-running MCP process.
   staged-import inboxes; post additionally permits inserts into journal-entry
   tables. Every update and delete is denied at every assistant level.
 - **Drafts, not entries.** The assistant may *propose* a journal entry
-  (`propose_entry`). It lands in **Journal Entries → Drafts** for review;
-  approving posts a real, audited entry under the approver's name, and
-  rejecting marks it rejected while retaining its audit history. The sidebar
-  badges pending drafts.
+  (`propose_entry`). When correcting an existing posting it uses
+  `propose_correction`, which requires the original journal-entry ID and shows
+  the original and proposed lines together. It lands in **Journal Entries →
+  Drafts** for review; approving posts a real, audited entry under the
+  approver's name, and rejecting marks it rejected while retaining its audit
+  history. An approved correction retains the original → draft →
+  posted-correction chain; the assistant still cannot edit, delete, or
+  formally reverse the original. The sidebar badges pending drafts.
 - **Imports, normalized by the assistant.** Drop ANY statement — a weird
   CSV, a PDF, a pasted table — into the assistant and ask it to stage the
   transactions (`propose_import`). No column mapping, no format rules:

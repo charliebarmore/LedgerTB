@@ -281,16 +281,37 @@ def propose_close_explanation(client_id: int, fiscal_year: int, account_id: int,
 @server.tool()
 def propose_entry(client_id: int, entry_date: str, description: str,
                   lines: list, rationale: str = "",
-                  entry_type: str = "Regular") -> dict:
+                  entry_type: str = "Regular",
+                  original_entry_id: int | None = None) -> dict:
     """File a DRAFT journal entry for human review in LedgerTB. It does NOT
     touch the ledger — a person approves or rejects it in the app. lines:
     [{"account_number": "7300", "debit": 24.00}, {"account_number": "2000",
     "credit": 24.00}] (dollars; optional "memo"). Explain WHY in rationale.
     entry_type: "Regular" (default), "Adjusting", "Beginning Balance" (use
-    for opening-balance entries), or "Closing"."""
+    for opening-balance entries), or "Closing". When correcting an existing
+    posting, original_entry_id is required so LedgerTB presents the original
+    and proposal together and retains the review chain."""
     _require_level("propose")
     return mcp_tools.propose_entry(client_id, entry_date, description,
-                                   lines, rationale, entry_type)
+                                   lines, rationale, entry_type,
+                                   original_entry_id)
+
+
+@server.tool()
+def propose_correction(client_id: int, original_entry_id: int,
+                       entry_date: str, description: str, lines: list,
+                       rationale: str = "",
+                       entry_type: str = "Regular") -> dict:
+    """File a correction DRAFT linked to an existing journal entry. The
+    original and proposed lines are shown together for a person's review, and
+    approval retains the original -> draft -> posted-correction chain. This
+    never edits, deletes, or reverses the original itself. Use propose_entry
+    for a new entry that does not correct an existing posting."""
+    _require_level("propose")
+    return mcp_tools.propose_correction(
+        client_id, original_entry_id, entry_date, description, lines,
+        rationale, entry_type,
+    )
 
 
 @server.tool()
