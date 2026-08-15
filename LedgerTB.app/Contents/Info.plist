@@ -20,6 +20,11 @@
     <string>LedgerTB</string>
     <key>LSMinimumSystemVersion</key>
     <string>10.13</string>
+    <key>LSArchitecturePriority</key>
+    <array>
+        <string>arm64</string>
+        <string>x86_64</string>
+    </array>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSApplicationCategoryType</key>

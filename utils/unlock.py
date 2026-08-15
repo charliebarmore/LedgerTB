@@ -453,11 +453,19 @@ def _render_gate(state: str):
         "or other professional advice. You are responsible for verifying its "
         "outputs, protecting client data, and maintaining recovery copies."
     )
-    st.page_link(
-        "pages/15_Legal.py",
-        label="Read Legal & Disclosures",
-        icon=":material/gavel:",
-    )
+    gate_links = st.columns(2)
+    with gate_links[0]:
+        st.page_link(
+            "pages/16_Help_and_Updates.py",
+            label="Help & Updates",
+            icon=":material/help:",
+        )
+    with gate_links[1]:
+        st.page_link(
+            "pages/15_Legal.py",
+            label="Read Legal & Disclosures",
+            icon=":material/gavel:",
+        )
 
 
 def _unlock_form():

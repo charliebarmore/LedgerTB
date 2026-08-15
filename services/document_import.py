@@ -69,7 +69,10 @@ def _vision_ocr(image_bytes: bytes) -> str:
     request = request_class.alloc().init()
     request.setRecognitionLevel_(1)  # VNRequestTextRecognitionLevelAccurate
     request.setUsesLanguageCorrection_(True)
-    handler = handler_class.alloc().initWithCGImage_options_(image, {})
+    # Options must be nil, not an empty dict: macOS 27's Vision probes the
+    # bridged {} in a way that raises NSInvalidArgumentException
+    # ("key does not exist") before the request ever runs.
+    handler = handler_class.alloc().initWithCGImage_options_(image, None)
     if not handler.performRequests_error_([request], None):
         raise RuntimeError("macOS Vision could not recognize text on this page.")
 

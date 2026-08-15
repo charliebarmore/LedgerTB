@@ -34,6 +34,7 @@ class DraftEntry:
     description: str = ""
     rationale: str = ""
     lines: List[DraftLine] = field(default_factory=list)
+    original_entry_id: Optional[int] = None
     status: str = "pending"
     posted_entry_id: Optional[int] = None
     proposed_at: str = ""
@@ -49,6 +50,7 @@ class DraftEntry:
             "description": self.description,
             "rationale": self.rationale,
             "lines": [line.__dict__ for line in self.lines],
+            "original_entry_id": self.original_entry_id,
             "status": self.status,
             "resolved_at": self.resolved_at or None,
             "resolved_by": self.resolved_by or None,
@@ -68,6 +70,16 @@ class DraftEntry:
         if self.entry_type not in EntryType.ALL:
             raise ValueError(
                 "entry_type must be one of: " + ", ".join(EntryType.ALL) + ".")
+        if self.original_entry_id is not None:
+            with get_cursor() as cursor:
+                cursor.execute(
+                    "SELECT id FROM journal_entries WHERE id = ? AND client_id = ?",
+                    (self.original_entry_id, self.client_id),
+                )
+                if not cursor.fetchone():
+                    raise ValueError(
+                        "The original journal entry must belong to the selected client."
+                    )
         if len(self.lines) < 2:
             raise ValueError("A draft needs at least two lines.")
         debits = credits = 0
@@ -96,11 +108,12 @@ class DraftEntry:
             cursor.execute(
                 """INSERT INTO draft_entries
                    (client_id, proposed_by, entry_date, entry_type,
-                    description, rationale, lines_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    description, rationale, lines_json, original_entry_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (self.client_id, self.proposed_by, self.entry_date,
                  self.entry_type, self.description, self.rationale,
-                 json.dumps([line.__dict__ for line in self.lines])),
+                 json.dumps([line.__dict__ for line in self.lines]),
+                 self.original_entry_id),
             )
             self.id = cursor.lastrowid
             cursor.execute(
@@ -123,6 +136,8 @@ class DraftEntry:
             entry_type=row["entry_type"], description=row["description"],
             rationale=row["rationale"] or "",
             lines=[DraftLine(**l) for l in json.loads(row["lines_json"])],
+            original_entry_id=(row["original_entry_id"]
+                               if "original_entry_id" in row.keys() else None),
             status=row["status"], posted_entry_id=row["posted_entry_id"],
             proposed_at=(row["proposed_at_local"]
                          if "proposed_at_local" in row.keys()
@@ -176,6 +191,29 @@ class DraftEntry:
                 "AND status = 'pending'", (client_id,))
             return cursor.fetchone()["n"]
 
+    @staticmethod
+    def get_for_originals(client_id: int, entry_ids: List[int]) -> dict:
+        """Correction proposals grouped by the original journal entry."""
+        if not entry_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in entry_ids)
+        with get_cursor() as cursor:
+            cursor.execute(
+                f"""SELECT draft_entries.*,
+                           datetime(proposed_at, 'localtime') proposed_at_local
+                    FROM draft_entries
+                    WHERE client_id = ?
+                      AND original_entry_id IN ({placeholders})
+                    ORDER BY proposed_at, id""",
+                [client_id, *entry_ids],
+            )
+            rows = cursor.fetchall()
+        grouped = {}
+        for row in rows:
+            draft = DraftEntry._from_row(row)
+            grouped.setdefault(draft.original_entry_id, []).append(draft)
+        return grouped
+
     # ---------------------------------------------------------------- review
     def approve(self) -> int:
         """Post the draft as a real journal entry (normal validation, audit,
@@ -190,12 +228,20 @@ class DraftEntry:
                      for a in Account.get_all(self.client_id, active_only=False)}
         from datetime import date as _date
 
+        if self.original_entry_id is not None:
+            source_reference = (
+                f"Correction of JE #{self.original_entry_id} · Draft #{self.id} · "
+                f"proposed by {self.proposed_by}"
+            )
+        else:
+            source_reference = f"Draft #{self.id} · proposed by {self.proposed_by}"
+
         entry = JournalEntry(
             client_id=self.client_id,
             entry_date=_date.fromisoformat(self.entry_date),
             description=self.description,
             entry_type=self.entry_type,
-            source_reference=f"Draft #{self.id} · proposed by {self.proposed_by}",
+            source_reference=source_reference,
             lines=[JournalEntryLine(
                 account_id=by_number[str(l.account_number)],
                 debit=to_dollars(l.debit_cents),

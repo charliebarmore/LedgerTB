@@ -211,6 +211,28 @@ def render_entry_controls(entry: JournalEntry, import_link: dict | None):
     render_delete_control(entry.id)
 
 
+def render_correction_chain(entry_id: int, drafts: list[DraftEntry]):
+    """Show every proposal that names this entry as its original."""
+    if not drafts:
+        return
+    st.markdown("**Correction chain:**")
+    for draft in drafts:
+        if draft.status == "approved":
+            destination = (f"journal entry #{draft.posted_entry_id}"
+                           if draft.posted_entry_id else "posted correction")
+            st.caption(
+                f"JE #{entry_id} → draft #{draft.id} → {destination} "
+                f"(approved by {draft.resolved_by or 'a person'})"
+            )
+        elif draft.status == "rejected":
+            st.caption(
+                f"JE #{entry_id} → draft #{draft.id} → rejected by "
+                f"{draft.resolved_by or 'a person'}"
+            )
+        else:
+            st.caption(f"JE #{entry_id} → draft #{draft.id} → awaiting human review")
+
+
 correction_success = st.session_state.pop("import_correction_success", None)
 if correction_success:
     st.success(correction_success)
@@ -671,6 +693,9 @@ elif active_view == "View Entries":
     import_links = ImportedTransaction.get_links_for_journal_entries(
         client_id, [entry.id for entry in entries]
     )
+    correction_chains = DraftEntry.get_for_originals(
+        client_id, [entry.id for entry in entries]
+    )
 
     if not entries:
         st.info("No journal entries found for the selected filters.")
@@ -689,6 +714,9 @@ elif active_view == "View Entries":
             if entry.entry_type == 'Beginning Balance':
                 with st.expander(header, expanded=False):
                     st.success("**Beginning Balance Entry**")
+                    render_correction_chain(
+                        entry.id, correction_chains.get(entry.id, [])
+                    )
                     col1, col2 = st.columns([3, 1])
 
                     with col1:
@@ -710,6 +738,9 @@ elif active_view == "View Entries":
             elif entry.entry_type == 'Adjusting':
                 with st.expander(header, expanded=False):
                     st.info("**Adjusting Entry**")
+                    render_correction_chain(
+                        entry.id, correction_chains.get(entry.id, [])
+                    )
                     col1, col2 = st.columns([3, 1])
 
                     with col1:
@@ -732,6 +763,9 @@ elif active_view == "View Entries":
 
             else:
                 with st.expander(header):
+                    render_correction_chain(
+                        entry.id, correction_chains.get(entry.id, [])
+                    )
                     col1, col2 = st.columns([3, 1])
 
                     with col1:
@@ -774,6 +808,22 @@ elif active_view == "Reverse Entry":
             credit = f"${line.credit:,.2f}" if line.credit else "—"
             st.caption(f"{line.account_number} {line.account_name} · Debit {debit} · Credit {credit}")
 
+        linked_corrections = DraftEntry.get_for_originals(
+            client_id, [original.id]
+        ).get(original.id, [])
+        render_correction_chain(original.id, linked_corrections)
+        pending_corrections = [
+            draft for draft in linked_corrections if draft.status == "pending"
+        ]
+        if pending_corrections:
+            draft_numbers = ", ".join(
+                f"#{draft.id}" for draft in pending_corrections
+            )
+            st.warning(
+                f"Resolve pending correction draft {draft_numbers} before "
+                "reversing this entry, so the same issue is not corrected twice."
+            )
+
         reversal_date = st.date_input(
             "Reversal date", value=date.today(), key="reversal_date",
         )
@@ -782,7 +832,8 @@ elif active_view == "Reverse Entry":
             key="confirm_reversal",
         )
         if st.button(
-            "Post reversal", type="primary", disabled=not confirmed,
+            "Post reversal", type="primary",
+            disabled=not confirmed or bool(pending_corrections),
             key="post_reversal",
         ):
             try:
@@ -822,14 +873,46 @@ if active_view == "Drafts":
                     # hardest-reading text on the page.
                     st.markdown("**Why:** "
                                 + d.rationale.replace("\n", "  \n"))
-                st.table([
+                proposed_rows = [
                     {"Account": f"{l.account_number} - "
                                 f"{_names.get(str(l.account_number), '?')}",
                      "Debit": f"{l.debit_cents / 100:,.2f}" if l.debit_cents else "",
                      "Credit": f"{l.credit_cents / 100:,.2f}" if l.credit_cents else "",
                      "Memo": l.memo or ""}
                     for l in d.lines
-                ])
+                ]
+                if d.original_entry_id is not None:
+                    original = JournalEntry.get_by_id(
+                        d.original_entry_id, client_id=client_id
+                    )
+                    st.info(
+                        f"Correction proposal linked to original journal entry "
+                        f"#{d.original_entry_id}. Review both sides before deciding."
+                    )
+                    original_col, proposed_col = st.columns(2)
+                    with original_col:
+                        st.markdown(f"**Original · JE #{d.original_entry_id}**")
+                        if original:
+                            st.caption(
+                                f"{original.entry_date} · "
+                                f"{original.description or 'No description'}"
+                            )
+                            st.table([
+                                {"Account": f"{line.account_number} - "
+                                            f"{line.account_name or '?'}",
+                                 "Debit": f"{line.debit:,.2f}" if line.debit else "",
+                                 "Credit": f"{line.credit:,.2f}" if line.credit else "",
+                                 "Memo": line.memo or ""}
+                                for line in original.lines
+                            ])
+                        else:
+                            st.error("The linked original entry is unavailable.")
+                    with proposed_col:
+                        st.markdown(f"**Proposed correction · Draft #{d.id}**")
+                        st.caption(f"{d.entry_date} · {d.description}")
+                        st.table(proposed_rows)
+                else:
+                    st.table(proposed_rows)
                 _a1, _a2, _sp = st.columns([1, 1, 3])
                 with _a1:
                     if st.button("Approve & post", type="primary",
@@ -859,6 +942,8 @@ if active_view == "Drafts":
                     "Draft": f"#{d.id}",
                     "Entry date": d.entry_date,
                     "Description": d.description,
+                    "Corrects": (f"JE #{d.original_entry_id}"
+                                 if d.original_entry_id else "—"),
                     "Result": d.status.title(),
                     "Reviewed by": d.resolved_by or "—",
                     "Reviewed at": d.resolved_at or "—",

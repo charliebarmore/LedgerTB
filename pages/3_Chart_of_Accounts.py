@@ -60,7 +60,11 @@ with tab1:
             type_accounts = [a for a in accounts if a.type == account_type]
 
             if type_accounts:
-                with st.expander(f"**{account_type}s** ({len(type_accounts)} accounts)", expanded=True):
+                type_label = AccountType.plural_label(account_type)
+                with st.expander(
+                    f"**{type_label}** ({len(type_accounts)} accounts)",
+                    expanded=True,
+                ):
                     header_cols = st.columns([1, 3, 2, 1])
                     with header_cols[0]:
                         st.markdown("**Acct #**")

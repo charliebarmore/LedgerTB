@@ -9,6 +9,7 @@ Receipts & Disbursements per cash account.
 from dataclasses import dataclass
 from contextlib import contextmanager
 from datetime import date, datetime
+from html import unescape
 from io import BytesIO
 from typing import Dict, List, Optional
 
@@ -121,7 +122,12 @@ def get_period_transactions(client_id: int, period_start: date, period_end: date
             "entry_date": row["entry_date"],
             "entry_id": row["entry_id"],
             "entry_type": row["entry_type"],
-            "description": row["description"] or "",
+            # Descriptions can arrive through imported/assistant-authored source
+            # text with HTML entities already encoded.  The PDF layer must escape
+            # display text for ReportLab, so leaving ``&amp;`` here would escape it
+            # a second time and print the entity literally.  Normalize the export
+            # snapshot without rewriting the historical ledger value.
+            "description": unescape(row["description"] or ""),
             "source_reference": row["source_reference"] or "",
             "account_number": row["account_number"],
             "account_name": row["account_name"],

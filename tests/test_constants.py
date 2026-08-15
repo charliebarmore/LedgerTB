@@ -10,6 +10,9 @@ def test_account_types_and_debit_normal_rule():
     assert AccountType.is_debit_normal("Expense")
     for credit_normal in ("Liability", "Equity", "Revenue"):
         assert not AccountType.is_debit_normal(credit_normal)
+    assert [AccountType.plural_label(value) for value in AccountType.ALL] == [
+        "Assets", "Liabilities", "Equities", "Revenues", "Expenses"
+    ]
 
 
 def test_entry_types():

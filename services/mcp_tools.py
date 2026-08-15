@@ -518,10 +518,13 @@ def integrity_sweep(client_id: int, start: str, end: str) -> dict:
 
 def propose_entry(client_id: int, entry_date: str, description: str,
                   lines: list, rationale: str = "",
-                  entry_type: str = "Regular") -> dict:
+                  entry_type: str = "Regular",
+                  original_entry_id: int | None = None) -> dict:
     """File a DRAFT journal entry for human review. Never touches the ledger:
     a person approves or rejects it in LedgerTB. lines: dicts with
-    account_number and debit or credit in dollars (optional memo)."""
+    account_number and debit or credit in dollars (optional memo). Set
+    original_entry_id when this proposal corrects an existing entry so the
+    accountant can review the complete chain."""
     from models.draft_entry import DraftEntry, DraftLine
     from money import to_cents
 
@@ -534,6 +537,7 @@ def propose_entry(client_id: int, entry_date: str, description: str,
         entry_type=entry_type,
         description=description,
         rationale=rationale,
+        original_entry_id=original_entry_id,
         lines=[DraftLine(
             account_number=str(l.get("account_number", "")),
             debit_cents=to_cents(float(l.get("debit", 0) or 0)),
@@ -544,10 +548,27 @@ def propose_entry(client_id: int, entry_date: str, description: str,
     draft_id = draft.save()
     return {
         "draft_id": draft_id,
+        "original_entry_id": original_entry_id,
         "status": "pending",
         "note": ("Filed for human review — it posts only if approved in "
                  "LedgerTB (Journal Entries → Drafts)."),
     }
+
+
+def propose_correction(client_id: int, original_entry_id: int,
+                       entry_date: str, description: str, lines: list,
+                       rationale: str = "",
+                       entry_type: str = "Regular") -> dict:
+    """File a correction draft with a required, validated original entry."""
+    return propose_entry(
+        client_id=client_id,
+        entry_date=entry_date,
+        description=description,
+        lines=lines,
+        rationale=rationale,
+        entry_type=entry_type,
+        original_entry_id=original_entry_id,
+    )
 
 
 def list_drafts(client_id: int, status: str = "pending") -> list:
@@ -572,6 +593,7 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
             "entry_date": r["entry_date"],
             "description": r["description"],
             "rationale": r["rationale"] or "",
+            "original_entry_id": r["original_entry_id"],
             "posted_entry_id": r["posted_entry_id"],
             "lines": [
                 {"account_number": l["account_number"],
