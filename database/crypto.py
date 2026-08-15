@@ -107,6 +107,103 @@ def verify_passphrase(path: Path, passphrase: str) -> bool:
         return False
 
 
+def change_passphrase(path: Path, current_key_hex: str, new_passphrase: str) -> str:
+    """Re-encrypt an encrypted book under a new passphrase. Returns the new key.
+
+    Exports the whole database into a new file keyed with the new passphrase,
+    proves that file opens and passes an integrity check, and only then swaps it
+    in. That is the same shape as encrypt_plaintext_db, and for the same reason:
+    the only live copy is never replaced by something unproven.
+
+    ``PRAGMA rekey`` would be shorter and rewrites the live file in place, which
+    leaves no copy to fall back to if it fails partway. For a CPA's records that
+    trade is not worth the lines it saves.
+
+    The old file is deleted once the new one is verified in position. Keeping it
+    would leave every figure in the book readable with the passphrase you just
+    rotated away from, which defeats the point of rotating after a passphrase
+    has been seen by someone it should not have been.
+    """
+    if sqlcipher3 is None:
+        raise RuntimeError("SQLCipher (sqlcipher3) is not installed; cannot change the passphrase.")
+    path = Path(path)
+    if database_state(path) != "encrypted":
+        raise RuntimeError("Only an encrypted book has a passphrase to change.")
+    if not new_passphrase:
+        raise ValueError("The new passphrase cannot be empty.")
+
+    new_key = derive_key(new_passphrase)
+    if new_key == current_key_hex:
+        raise ValueError("The new passphrase is the same as the current one.")
+
+    current_pragma = key_pragma(current_key_hex)
+    new_pragma = key_pragma(new_key)
+
+    tmp_new = path.with_suffix(path.suffix + ".rekey.tmp")
+    previous = path.with_suffix(path.suffix + ".rekey.bak")
+    for stale in (tmp_new, previous):
+        if stale.exists() or stale.is_symlink():
+            stale.unlink()
+
+    try:
+        src = sqlcipher3.connect(str(path))
+        try:
+            src.execute(f"PRAGMA key = {current_pragma}")
+            # Fail here, before anything is written, if the key we were handed
+            # does not actually open the book.
+            src.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            src.execute(
+                f"ATTACH DATABASE {_sql_str(str(tmp_new))} AS rekeyed KEY {new_pragma}"
+            )
+            src.execute("SELECT sqlcipher_export('rekeyed')")
+            src.execute("DETACH DATABASE rekeyed")
+        finally:
+            src.close()
+
+        check = sqlcipher3.connect(str(tmp_new))
+        try:
+            check.execute(f"PRAGMA key = {new_pragma}")
+            result = check.execute("PRAGMA integrity_check").fetchone()[0]
+        finally:
+            check.close()
+        if result != "ok":
+            raise RuntimeError("The re-encrypted copy failed its integrity check.")
+
+        path.replace(previous)
+        try:
+            tmp_new.replace(path)
+        except Exception:
+            if not path.exists() and previous.exists():
+                previous.replace(path)
+            raise
+
+        # Prove the file now sitting at the book's own path opens with the new
+        # passphrase before the old one is destroyed.
+        confirm = sqlcipher3.connect(str(path))
+        try:
+            confirm.execute(f"PRAGMA key = {new_pragma}")
+            confirm.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        except Exception:
+            confirm.close()
+            path.unlink()
+            previous.replace(path)
+            raise
+        else:
+            confirm.close()
+
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        previous.unlink()
+    except Exception:
+        if tmp_new.exists():
+            tmp_new.unlink()
+        raise
+
+    return new_key
+
+
 def encrypt_plaintext_db(path: Path, passphrase: str) -> Path:
     """Convert a plaintext SQLite database to a SQLCipher-encrypted one in place.
 

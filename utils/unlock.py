@@ -26,6 +26,7 @@ import streamlit as st
 from config import APP_NAME
 from database import connection as dbconn
 from database.crypto import (
+    change_passphrase,
     database_state,
     derive_key,
     encrypt_plaintext_db,
@@ -101,6 +102,39 @@ def saved_key_name(book) -> str:
 
 def forget_saved_key(book) -> None:
     secure_store.delete_secret(saved_key_name(book))
+
+
+def change_book_passphrase(new_passphrase: str) -> None:
+    """Re-encrypt the open book under a new passphrase and keep this machine
+    working afterwards.
+
+    The current passphrase is not asked for. The book is already open, and on
+    the machine where it matters most the person rotating may never have known
+    it: an unlocked-by-saved-key session is exactly the situation this exists to
+    rescue. Requiring a passphrase nobody can produce would make the feature
+    useless in the only case where it is urgent.
+
+    That does mean anyone at an unlocked app can rotate. For a local
+    single-user desktop book whose contents that person can already read and
+    export, this adds no exposure they did not already have.
+    """
+    book = dbconn.DATABASE_PATH
+    current_key = dbconn.get_active_key()
+    if not current_key:
+        raise RuntimeError("The book must be unlocked before its passphrase can be changed.")
+    if len(new_passphrase) < MIN_PASSPHRASE_LEN:
+        raise ValueError(
+            f"The new passphrase must be at least {MIN_PASSPHRASE_LEN} characters."
+        )
+
+    new_key = change_passphrase(book, current_key, new_passphrase)
+    dbconn.set_active_key(new_key)
+
+    # A machine that remembered the old key holds one that no longer opens the
+    # book. Replacing it keeps the next launch silent; leaving it would make the
+    # app quietly drop the entry and start demanding a passphrase instead.
+    if secure_store.get_secret(saved_key_name(book)):
+        secure_store.set_secret(saved_key_name(book), new_key)
 
 
 def try_saved_key() -> bool:
