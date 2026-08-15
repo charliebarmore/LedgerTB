@@ -238,3 +238,54 @@ def test_the_rekey_action_can_actually_be_written(book):
 
     events = AuditLog.get_history("book_passphrase_changed", 0)
     assert events and events[0].action == "REKEY"
+
+
+# --- the event has to survive an empty book --------------------------------
+
+def test_a_rotation_is_recorded_on_a_book_with_no_clients(tmp_path, monkeypatch):
+    """The case that used to lose the event, and the worst one to lose it in:
+    a book still being set up or handed over."""
+    import streamlit as st
+    from streamlit.testing.v1 import AppTest
+    from models.audit_log import AuditLog
+    from models.client import Client
+    from tests.conftest import page_path
+    import utils.client_selector as selector
+
+    monkeypatch.setattr(dbconn, "DATABASE_PATH", tmp_path / "empty.ledgertb")
+    dbconn.set_active_key(derive_key(OLD))
+    from database import init_database
+    init_database()
+    assert Client.get_all() == [], "this test needs a book nobody has set up"
+
+    monkeypatch.setattr(selector, "render_client_selector", lambda: None)
+    monkeypatch.setattr(st, "page_link", lambda *a, **k: None)
+
+    page = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30).run()
+    page.text_input(key="rekey_new").set_value("a-recorded-passphrase")
+    page.text_input(key="rekey_confirm").set_value("a-recorded-passphrase")
+    next(b for b in page.button if "Change passphrase" in b.label).click().run()
+
+    assert not page.exception
+    events = AuditLog.get_history("book_passphrase_changed", 0)
+    assert events, "a passphrase change must leave a record"
+    assert events[0].action == "REKEY"
+    assert events[0].client_id is None, "the book owns this event, not a client"
+
+
+def test_a_book_level_event_shows_in_every_client_trail(book):
+    """It affected the book each client lives in, so it belongs in each view."""
+    from datetime import date, timedelta
+    from models.audit_log import AuditLog
+    from models.client import Client
+
+    first = Client.get_all()[0].id
+    second = Client(name="Second Co", entity_type="S-Corp",
+                    fiscal_year_end_month=12).save(seed_accounts=False)
+
+    AuditLog.log_event(None, "REKEY", "book_passphrase_changed", {"book": "x"})
+
+    window = (date.today() - timedelta(days=1), date.today() + timedelta(days=1))
+    for client_id in (first, second):
+        actions = [e.action for e in AuditLog.get_all(client_id, *window)]
+        assert "REKEY" in actions

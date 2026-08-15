@@ -44,15 +44,16 @@ client_id = render_client_selector()
 
 
 def audit_safety_event(action, event_name, details):
-    """Record a filesystem operation against a visible client audit stream."""
-    audit_client = Client.get_by_id(client_id) if client_id else None
-    if not audit_client:
-        audit_client = Client.get_first()
-    if not audit_client:
-        st.warning("Operation succeeded, but no client exists to receive its audit event.")
-        return
+    """Record a book-level operation in the audit trail.
+
+    These events belong to the book, not to a client, so they are recorded
+    against no client and shown alongside every client's trail. They used to be
+    pinned to whichever client happened to exist, and dropped entirely when a
+    book had none -- losing, among other things, the record of a passphrase
+    change on a book still being set up.
+    """
     try:
-        AuditLog.log_event(audit_client.id, action, event_name, details)
+        AuditLog.log_event(None, action, event_name, details)
     except Exception as exc:
         st.warning(f"Operation succeeded, but its audit event could not be recorded: {exc}")
 
