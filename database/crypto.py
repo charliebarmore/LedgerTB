@@ -107,22 +107,42 @@ def verify_passphrase(path: Path, passphrase: str) -> bool:
         return False
 
 
+def _data_version(conn) -> int:
+    """SQLite's counter of commits made by OTHER connections to this database.
+
+    The one signal available here for "did somebody else write while we were
+    working". It does not move for this connection's own writes, which is
+    exactly what makes it usable as a race detector.
+    """
+    return conn.execute("PRAGMA data_version").fetchone()[0]
+
+
 def change_passphrase(path: Path, current_key_hex: str, new_passphrase: str) -> str:
     """Re-encrypt an encrypted book under a new passphrase. Returns the new key.
 
     Exports the whole database into a new file keyed with the new passphrase,
-    proves that file opens and passes an integrity check, and only then swaps it
-    in. That is the same shape as encrypt_plaintext_db, and for the same reason:
-    the only live copy is never replaced by something unproven.
+    proves that file opens and passes an integrity check, and then replaces the
+    live file with it in one atomic rename.
 
-    ``PRAGMA rekey`` would be shorter and rewrites the live file in place, which
-    leaves no copy to fall back to if it fails partway. For a CPA's records that
-    trade is not worth the lines it saves.
+    One rename, not two. An earlier version moved the live file aside and then
+    moved the new one in, which left a window where the book did not exist at
+    its own path -- and a crash there looks to the unlock gate exactly like a
+    first run, so the app would offer to create a fresh empty book while the
+    real one sat beside it under a name nothing mentioned. os.replace onto the
+    live path is atomic on POSIX, so the path always resolves to a whole book,
+    either the old one or the new one. The caller is expected to have taken a
+    verified backup under the new key first; that, not a temporary sibling
+    file, is the fallback.
 
-    The old file is deleted once the new one is verified in position. Keeping it
-    would leave every figure in the book readable with the passphrase you just
-    rotated away from, which defeats the point of rotating after a passphrase
-    has been seen by someone it should not have been.
+    ``PRAGMA rekey`` would be shorter still and rewrites the live file in
+    place, which leaves nothing to fall back to at all.
+
+    Concurrency: this reads data_version before the export and again
+    immediately before the replace, and refuses if another connection committed
+    in between. That is detection, not exclusion. It cannot see a commit that
+    lands after the final read, and it cannot stop a process that keeps writing
+    to the displaced file after the replace. Callers must not present a
+    successful return as proof that nothing else was writing.
     """
     if sqlcipher3 is None:
         raise RuntimeError("SQLCipher (sqlcipher3) is not installed; cannot change the passphrase.")
@@ -138,27 +158,41 @@ def change_passphrase(path: Path, current_key_hex: str, new_passphrase: str) -> 
 
     current_pragma = key_pragma(current_key_hex)
     new_pragma = key_pragma(new_key)
-
     tmp_new = path.with_suffix(path.suffix + ".rekey.tmp")
-    previous = path.with_suffix(path.suffix + ".rekey.bak")
-    for stale in (tmp_new, previous):
-        if stale.exists() or stale.is_symlink():
-            stale.unlink()
+    if tmp_new.exists() or tmp_new.is_symlink():
+        tmp_new.unlink()
 
     try:
         src = sqlcipher3.connect(str(path))
         try:
             src.execute(f"PRAGMA key = {current_pragma}")
-            # Fail here, before anything is written, if the key we were handed
-            # does not actually open the book.
+            # Fails here, before anything is written, if the key we were handed
+            # does not open the book.
             src.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            page_size = src.execute("PRAGMA cipher_page_size").fetchone()[0]
+            before = _data_version(src)
+
             src.execute(
                 f"ATTACH DATABASE {_sql_str(str(tmp_new))} AS rekeyed KEY {new_pragma}"
             )
+            # Carry the source's page size across. sqlcipher_export does not,
+            # and a target left on the build's default would still open here
+            # while failing against a build compiled with a different one.
+            if page_size:
+                src.execute(f"PRAGMA rekeyed.cipher_page_size = {int(page_size)}")
             src.execute("SELECT sqlcipher_export('rekeyed')")
             src.execute("DETACH DATABASE rekeyed")
+
+            after = _data_version(src)
         finally:
             src.close()
+
+        if after != before:
+            raise RuntimeError(
+                "Another connection wrote to this book while its passphrase was "
+                "being changed, so nothing was changed. Close the book "
+                "everywhere else, including any assistant access, and try again."
+            )
 
         check = sqlcipher3.connect(str(tmp_new))
         try:
@@ -169,33 +203,27 @@ def change_passphrase(path: Path, current_key_hex: str, new_passphrase: str) -> 
         if result != "ok":
             raise RuntimeError("The re-encrypted copy failed its integrity check.")
 
-        path.replace(previous)
+        # Last look before the point of no return. Narrow, not closed: a commit
+        # landing after this and before the replace is still lost, which is why
+        # the caller takes a backup first and why the UI does not claim more.
+        final = sqlcipher3.connect(str(path))
         try:
-            tmp_new.replace(path)
-        except Exception:
-            if not path.exists() and previous.exists():
-                previous.replace(path)
-            raise
+            final.execute(f"PRAGMA key = {current_pragma}")
+            if _data_version(final) != before:
+                raise RuntimeError(
+                    "Another connection wrote to this book while its passphrase "
+                    "was being changed, so nothing was changed. Close the book "
+                    "everywhere else, including any assistant access, and try "
+                    "again."
+                )
+        finally:
+            final.close()
 
-        # Prove the file now sitting at the book's own path opens with the new
-        # passphrase before the old one is destroyed.
-        confirm = sqlcipher3.connect(str(path))
-        try:
-            confirm.execute(f"PRAGMA key = {new_pragma}")
-            confirm.execute("SELECT count(*) FROM sqlite_master").fetchone()
-        except Exception:
-            confirm.close()
-            path.unlink()
-            previous.replace(path)
-            raise
-        else:
-            confirm.close()
-
+        os.replace(tmp_new, path)
         try:
             os.chmod(path, 0o600)
         except OSError:
             pass
-        previous.unlink()
     except Exception:
         if tmp_new.exists():
             tmp_new.unlink()

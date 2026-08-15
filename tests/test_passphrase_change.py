@@ -122,52 +122,96 @@ def test_a_book_that_is_not_encrypted_has_nothing_to_rotate(tmp_path):
 
 # --- surviving a failure ----------------------------------------------------
 
-def test_a_failure_partway_leaves_the_book_openable(book, monkeypatch):
-    """If the swap explodes, the old book must still be there and still open.
-
-    An interrupted rotation that leaves nothing readable is the exact disaster
-    this feature exists to prevent.
-    """
+def test_a_failed_swap_leaves_the_original_untouched(book, monkeypatch):
+    """There is no partway any more. The replace either happens or it does not,
+    and a failure leaves the book exactly as it was."""
     import database.crypto as crypto
 
-    real_replace = Path.replace
-    calls = {"n": 0}
-
-    def exploding_replace(self, target):
-        calls["n"] += 1
-        if calls["n"] == 2:      # the temp file moving into place
-            raise OSError("simulated failure mid-swap")
-        return real_replace(self, target)
+    def refuse(src, dst):
+        raise OSError("simulated failure at the swap")
 
     # A scoped context, not monkeypatch.undo(): undo() unwinds every patch this
     # test's monkeypatch has made, including the book fixture's DATABASE_PATH,
     # which sends the assertions below at the real book instead of this one.
     with monkeypatch.context() as patched:
-        patched.setattr(Path, "replace", exploding_replace)
+        patched.setattr(crypto.os, "replace", refuse)
         with pytest.raises(OSError):
             crypto.change_passphrase(book, derive_key(OLD), NEW)
 
     assert book.exists()
     assert verify_passphrase(book, OLD) is True
+    assert verify_passphrase(book, NEW) is False
+    assert not (book.parent / (book.name + ".rekey.tmp")).exists()
 
     from models.client import Client
     dbconn.set_active_key(derive_key(OLD))
     assert [c.name for c in Client.get_all()] == ["Kettle Ridge Cabinetry"]
 
 
-def test_no_temp_file_is_left_behind_after_a_failure(book, monkeypatch):
+def test_the_live_path_is_never_absent(book, monkeypatch):
+    """The old two-rename swap left a window with no file at the book's path,
+    and a crash there reads to the unlock gate as a first run: it would offer
+    to create a fresh empty book while the real one sat beside it. One replace
+    onto the live path removes the window entirely."""
     import database.crypto as crypto
 
-    def refuse(self, target):
-        raise OSError("simulated failure")
+    calls = []
+    real = crypto.os.replace
+
+    def record(src, dst):
+        calls.append((str(src), str(dst)))
+        return real(src, dst)
 
     with monkeypatch.context() as patched:
-        patched.setattr(Path, "replace", refuse)
-        with pytest.raises(OSError):
+        patched.setattr(crypto.os, "replace", record)
+        crypto.change_passphrase(book, derive_key(OLD), NEW)
+
+    assert len(calls) == 1, "more than one rename reopens the window"
+    assert calls[0][1] == str(book), "the only replace must land on the book itself"
+    assert verify_passphrase(book, NEW) is True
+
+
+def test_a_concurrent_write_aborts_and_changes_nothing(book, monkeypatch):
+    """Another connection committing mid-rotation must abort it, not silently
+    discard that commit when the file is replaced."""
+    import database.crypto as crypto
+
+    seen = []
+    real = crypto._data_version
+
+    def moving(conn):
+        seen.append(1)
+        # First read is the baseline; the second reports someone else's commit.
+        return real(conn) + (1 if len(seen) > 1 else 0)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(crypto, "_data_version", moving)
+        with pytest.raises(RuntimeError, match="Another connection wrote"):
             crypto.change_passphrase(book, derive_key(OLD), NEW)
 
-    assert not (book.parent / (book.name + ".rekey.tmp")).exists()
     assert verify_passphrase(book, OLD) is True
+    assert verify_passphrase(book, NEW) is False
+    assert not (book.parent / (book.name + ".rekey.tmp")).exists()
+
+
+def test_the_cipher_page_size_is_carried_across(book):
+    """sqlcipher_export does not carry it, and a file left on a build's default
+    would open here while failing against a build compiled differently."""
+    import sqlcipher3
+    from database.crypto import key_pragma
+
+    def page_size(path, key):
+        conn = sqlcipher3.connect(str(path))
+        try:
+            conn.execute(f"PRAGMA key = {key_pragma(key)}")
+            return conn.execute("PRAGMA cipher_page_size").fetchone()[0]
+        finally:
+            conn.close()
+
+    before = page_size(book, derive_key(OLD))
+    change_passphrase(book, derive_key(OLD), NEW)
+
+    assert page_size(book, derive_key(NEW)) == before
 
 
 # --- the app-level wrapper --------------------------------------------------
