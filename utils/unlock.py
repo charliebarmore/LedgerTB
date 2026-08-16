@@ -104,37 +104,171 @@ def forget_saved_key(book) -> None:
     secure_store.delete_secret(saved_key_name(book))
 
 
-def change_book_passphrase(new_passphrase: str) -> None:
-    """Re-encrypt the open book under a new passphrase and keep this machine
-    working afterwards.
+class RotationResult:
+    """What a passphrase change actually achieved, including what it could not.
 
-    The current passphrase is not asked for. The book is already open, and on
-    the machine where it matters most the person rotating may never have known
-    it: an unlocked-by-saved-key session is exactly the situation this exists to
-    rescue. Requiring a passphrase nobody can produce would make the feature
-    useless in the only case where it is urgent.
+    Deliberately not a bare success flag. Once the new key is live the operation
+    has succeeded whatever else fails afterwards, and the caller still needs to
+    know which follow-ups did not happen and what this machine could and could
+    not verify.
+    """
 
-    That does mean anyone at an unlocked app can rotate. For a local
-    single-user desktop book whose contents that person can already read and
-    export, this adds no exposure they did not already have.
+    def __init__(self, new_key, backup_path=None):
+        self.new_key = new_key
+        self.backup_path = backup_path
+        self.warnings = []
+        self.new_key_opens = False
+        self.old_key_refused = False
+        self.integrity_ok = False
+
+    @property
+    def verified(self) -> bool:
+        """Every check this machine can actually run came back clean.
+
+        Says nothing about other machines, old backups, or credentials held by
+        other processes. See change_book_passphrase.
+        """
+        return self.new_key_opens and self.old_key_refused and self.integrity_ok
+
+
+def assistant_access_enabled(book) -> bool:
+    """Whether an assistant (MCP) is authorized for this book right now."""
+    from utils.assistant_access import credential_names
+
+    return bool(secure_store.get_secret(credential_names(Path(book)).key))
+
+
+def change_book_passphrase(new_passphrase: str) -> RotationResult:
+    """Re-encrypt the open book under a new passphrase.
+
+    Order matters here, so it is spelled out:
+
+    1. Refuse outright unless this session can reasonably claim the book: not
+       read-only, and no assistant authorized. An assistant's key lives in a
+       separate process that this one cannot stop, and rewriting its vault entry
+       would not invalidate a key already loaded in it, so the requirement is
+       that it be switched off first rather than fixed up afterwards.
+    2. Take a verified backup keyed with the NEW passphrase, before the live
+       book is touched. If anything later fails, that is a recovery point which
+       opens with the passphrase the user just chose. A backup under the old one
+       would be no help to the person this feature exists for, who may never
+       have known it.
+    3. Re-encrypt and swap (database.crypto.change_passphrase).
+    4. Only then publish the new key to this process, so no query can open the
+       new key against the old file or the reverse.
+    5. Everything after that point is a follow-up, not a precondition. A failure
+       there is a warning naming what to do, never a report that the passphrase
+       did not change: it did, and telling someone otherwise is how they end up
+       recording the wrong one.
+
+    The current passphrase is not requested. The session may have been opened
+    from a remembered key by someone who never knew it, which is the main
+    situation this rescues.
+
+    What a clean return does NOT prove: that no other machine was writing, that
+    old backups cannot still be opened with the previous passphrase, or that no
+    other process still holds the old key. Callers must not present it as such.
     """
     book = dbconn.DATABASE_PATH
     current_key = dbconn.get_active_key()
     if not current_key:
         raise RuntimeError("The book must be unlocked before its passphrase can be changed.")
+    if dbconn.READ_ONLY:
+        raise RuntimeError(
+            "This book is open read-only, so its passphrase cannot be changed "
+            "from here. The session holding it open for writing is the one that "
+            "can change it."
+        )
+    if assistant_access_enabled(book):
+        raise RuntimeError(
+            "Turn assistant access off for this book first, under Assistant "
+            "access below. It runs as a separate program holding its own copy "
+            "of the key, which this app cannot close or update from here. "
+            "Re-enable it afterwards and it will pick up the new passphrase."
+        )
     if len(new_passphrase) < MIN_PASSPHRASE_LEN:
         raise ValueError(
             f"The new passphrase must be at least {MIN_PASSPHRASE_LEN} characters."
         )
+    new_key = derive_key(new_passphrase)
+    if new_key == current_key:
+        raise ValueError("The new passphrase is the same as the current one.")
 
-    new_key = change_passphrase(book, current_key, new_passphrase)
+    from services.backups import create_backup
+
+    backup_path = None
+    try:
+        backup_path = create_backup(
+            reason="pre_passphrase_change", apply_retention=False,
+            target_key=new_key,
+        ).database_path
+    except Exception as exc:
+        raise RuntimeError(
+            f"No backup could be taken, so the passphrase was not changed: {exc}"
+        ) from exc
+
+    # Point of no return is inside this call, at its single atomic replace.
+    change_passphrase(book, current_key, new_passphrase)
+
     dbconn.set_active_key(new_key)
+    result = RotationResult(new_key, backup_path)
+
+    result.new_key_opens = verify_passphrase(book, new_passphrase)
+    result.old_key_refused = not _key_opens(book, current_key)
+    result.integrity_ok = _integrity_with_key(book, new_key)
+    if not result.verified:
+        result.warnings.append(
+            "The book was re-encrypted, but this machine could not confirm "
+            "every check on it afterwards. Take a backup now and verify it "
+            "opens before doing further work in this book."
+        )
 
     # A machine that remembered the old key holds one that no longer opens the
     # book. Replacing it keeps the next launch silent; leaving it would make the
     # app quietly drop the entry and start demanding a passphrase instead.
-    if secure_store.get_secret(saved_key_name(book)):
-        secure_store.set_secret(saved_key_name(book), new_key)
+    try:
+        if secure_store.get_secret(saved_key_name(book)):
+            secure_store.set_secret(saved_key_name(book), new_key)
+    except Exception as exc:
+        result.warnings.append(
+            "The passphrase was changed, but this computer's remembered key "
+            f"could not be updated ({exc}). You will be asked for the new "
+            "passphrase next time you open this book."
+        )
+    return result
+
+
+def _key_opens(book, key_hex) -> bool:
+    import sqlcipher3
+
+    from database.crypto import key_pragma
+
+    try:
+        conn = sqlcipher3.connect(str(book))
+        try:
+            conn.execute(f"PRAGMA key = {key_pragma(key_hex)}")
+            conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        finally:
+            conn.close()
+        return True
+    except Exception:
+        return False
+
+
+def _integrity_with_key(book, key_hex) -> bool:
+    import sqlcipher3
+
+    from database.crypto import key_pragma
+
+    try:
+        conn = sqlcipher3.connect(str(book))
+        try:
+            conn.execute(f"PRAGMA key = {key_pragma(key_hex)}")
+            return conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        finally:
+            conn.close()
+    except Exception:
+        return False
 
 
 def try_saved_key() -> bool:

@@ -31,10 +31,10 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _integrity(path: Path) -> bool:
+def _integrity(path: Path, key=None) -> bool:
     # Backups are SQLCipher-encrypted, so they must be opened with the active
     # key -- a plaintext sqlite3 open would fail on the encrypted header.
-    conn = db_connection.open_keyed(path)
+    conn = db_connection.open_keyed(path, key)
     try:
         return conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
@@ -116,7 +116,16 @@ def create_backup(
     *,
     reason: str = "manual",
     apply_retention: bool = True,
+    target_key: Optional[str] = None,
 ) -> BackupRecord:
+    """Write a verified encrypted copy of the live book.
+
+    ``target_key`` keys the copy with something other than the session's
+    current key. Used once: the backup taken immediately before a passphrase
+    change is written under the NEW passphrase, so the recovery point it leaves
+    opens with the passphrase the user just chose and recorded, rather than one
+    they may never have known.
+    """
     backup_root = Path(backup_dir)
     backup_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(backup_root, 0o700)
@@ -137,7 +146,7 @@ def create_backup(
         # Key the backup target with the same passphrase so the backup file is
         # itself encrypted (SQLCipher's online backup writes encrypted pages
         # when the target connection is keyed).
-        target = db_connection.open_keyed(temp_db)
+        target = db_connection.open_keyed(temp_db, target_key)
         try:
             source.backup(target)
         finally:
@@ -146,7 +155,7 @@ def create_backup(
         source.close()
 
     os.chmod(temp_db, 0o600)
-    if not _integrity(temp_db):
+    if not _integrity(temp_db, target_key):
         temp_db.unlink(missing_ok=True)
         raise RuntimeError("Backup failed SQLite integrity verification.")
 
@@ -154,7 +163,7 @@ def create_backup(
     digest = _sha256(temp_db)
     payload = {
         "app_version": APP_VERSION,
-        "schema_versions": _schema_versions(temp_db),
+        "schema_versions": _schema_versions(temp_db, target_key),
         "created_at": created_at.isoformat(),
         "reason": reason,
         "book_id": book_id,
@@ -177,8 +186,8 @@ def create_backup(
     )
 
 
-def _schema_versions(path: Path) -> list[str]:
-    conn = db_connection.open_keyed(path)
+def _schema_versions(path: Path, key=None) -> list[str]:
+    conn = db_connection.open_keyed(path, key)
     try:
         found = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"

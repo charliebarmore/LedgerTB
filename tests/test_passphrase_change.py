@@ -333,3 +333,94 @@ def test_a_book_level_event_shows_in_every_client_trail(book):
     for client_id in (first, second):
         actions = [e.action for e in AuditLog.get_all(client_id, *window)]
         assert "REKEY" in actions
+
+
+# --- preconditions and ordering --------------------------------------------
+
+def test_a_read_only_session_cannot_rotate(book, monkeypatch):
+    """A reader must not rekey the book underneath the session holding it."""
+    from utils.unlock import change_book_passphrase
+
+    monkeypatch.setattr(dbconn, "READ_ONLY", True)
+    with pytest.raises(RuntimeError, match="read-only"):
+        change_book_passphrase(NEW)
+
+    assert verify_passphrase(book, OLD) is True
+
+
+def test_assistant_access_must_be_turned_off_first(book):
+    """Its key lives in another process this one cannot stop, so updating the
+    vault entry afterwards would not invalidate what is already loaded."""
+    from utils import secure_store
+    from utils.assistant_access import credential_names
+    from utils.unlock import change_book_passphrase
+
+    secure_store.set_secret(credential_names(book).key, derive_key(OLD))
+
+    with pytest.raises(RuntimeError, match="assistant access off"):
+        change_book_passphrase(NEW)
+
+    assert verify_passphrase(book, OLD) is True
+
+
+def test_a_new_key_backup_is_taken_before_the_book_is_touched(book):
+    """The recovery point must open with the passphrase just chosen, not one
+    the person may never have known."""
+    from services.backups import list_backups
+    from utils.unlock import change_book_passphrase
+    import config
+
+    result = change_book_passphrase(NEW)
+
+    assert result.backup_path is not None and result.backup_path.exists()
+    # It opens with the NEW passphrase, though it was taken before the swap.
+    conn = dbconn.open_keyed(result.backup_path, derive_key(NEW))
+    try:
+        assert conn.execute("SELECT count(*) FROM clients").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_a_failed_backup_stops_the_rotation(book, monkeypatch):
+    """No recovery point, no rotation."""
+    import utils.unlock as unlock_mod
+    import services.backups as backups
+
+    monkeypatch.setattr(backups, "create_backup",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(RuntimeError, match="No backup could be taken"):
+        unlock_mod.change_book_passphrase(NEW)
+
+    assert verify_passphrase(book, OLD) is True
+
+
+def test_the_post_check_reports_what_this_machine_verified(book):
+    from utils.unlock import change_book_passphrase
+
+    result = change_book_passphrase(NEW)
+
+    assert result.new_key_opens is True
+    assert result.old_key_refused is True
+    assert result.integrity_ok is True
+    assert result.verified is True
+    assert result.warnings == []
+
+
+def test_a_vault_failure_after_the_swap_is_a_warning_not_a_failure(book, monkeypatch):
+    """The most dangerous message in the feature was reporting that nothing
+    changed when the new key was already live."""
+    from utils import secure_store
+    from utils.unlock import change_book_passphrase, saved_key_name
+
+    secure_store.set_secret(saved_key_name(book), derive_key(OLD))
+
+    def refuse(name, value):
+        raise RuntimeError("vault locked")
+
+    monkeypatch.setattr(secure_store, "set_secret", refuse)
+
+    result = change_book_passphrase(NEW)
+
+    assert result.new_key_opens is True
+    assert any("remembered key" in w for w in result.warnings)
+    assert verify_passphrase(book, NEW) is True

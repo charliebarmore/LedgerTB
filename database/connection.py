@@ -184,19 +184,24 @@ def get_connection():
     return conn
 
 
-def open_keyed(path):
+def open_keyed(path, key=None):
     """Open an arbitrary database file with the active passphrase.
+
+    ``key`` overrides it, for the one case that needs a file keyed with
+    something other than what the session is currently holding: a backup taken
+    under a NEW passphrase, just before the live book is re-encrypted with it.
 
     Used by the backup/restore paths, which must read and write SQLCipher files
     (a backup of an encrypted database must itself be encrypted). Requires the
     passphrase to be set, same as get_connection(). In fallback mode there is no
     key, so backups are plaintext like the database itself.
     """
-    if ENCRYPTION_AVAILABLE and _active_key is None:
+    chosen = key or _active_key
+    if ENCRYPTION_AVAILABLE and chosen is None:
         raise DatabaseLocked("Database is locked; unlock with the passphrase first.")
     conn = _driver.connect(str(path), check_same_thread=False)
     if ENCRYPTION_AVAILABLE:
-        conn.execute(f"PRAGMA key = {key_pragma(_active_key)}")
+        conn.execute(f"PRAGMA key = {key_pragma(chosen)}")
     conn.row_factory = _driver.Row
     return conn
 
