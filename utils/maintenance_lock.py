@@ -57,6 +57,33 @@ def _writer_path(book, token: str) -> Path:
     return Path(f"{book}.writer-{os.getpid()}-{token}")
 
 
+def _process_is_alive(pid: int) -> bool:
+    """Whether a process exists, on both platforms this app ships to.
+
+    POSIX signals 0 to probe and raises ProcessLookupError when there is no
+    such process. Windows does not: verified on Windows 11 with Python 3.12,
+    os.kill(pid, 0) returns normally for a live process (it does not terminate
+    it) and raises OSError WinError 87, "the parameter is incorrect", for a pid
+    with no process behind it. Treating only ProcessLookupError as death left
+    every stale marker on Windows looking live, which would have blocked
+    maintenance permanently after any crash.
+
+    Anything else is ambiguous and counts as alive. Refusing maintenance is
+    recoverable; writing over somebody's transaction is not.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True                     # exists, owned by another user
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 87:
+            return False                # Windows: no process with that id
+        return True
+    return True
+
+
 def _pid_of(marker: Path):
     """The pid a marker names, or None if it cannot be read as one."""
     parts = marker.name.rsplit("-", 2)
@@ -88,16 +115,9 @@ def _live_writers(book):
         # desktop app runs concurrent session threads. The rotating thread
         # itself never holds a writer marker, so this cannot block on its own
         # claim.
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
+        if not _process_is_alive(pid):
             marker.unlink(missing_ok=True)
             continue
-        except OSError:
-            # PermissionError, or anything else the probe cannot answer.
-            # Ambiguity counts as live: refusing maintenance is recoverable,
-            # writing over somebody's transaction is not.
-            pass
         live.append(marker)
     return live
 
@@ -114,13 +134,7 @@ def _holder_is_gone(lock: Path) -> bool:
         # Our own live claim. Reclaiming it would turn a second concurrent
         # rotation in this process into a silent success.
         return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return True
-    except PermissionError:
-        return False                # alive, owned by another user
-    return False
+    return not _process_is_alive(pid)
 
 
 @contextmanager

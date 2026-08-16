@@ -883,3 +883,47 @@ def test_an_unreadable_writer_marker_counts_as_live(book):
                 pass
     finally:
         Path(f"{book}.writer-not-a-pid").unlink(missing_ok=True)
+
+
+def test_a_dead_writer_is_detected_the_way_windows_reports_it(book, monkeypatch):
+    """Verified on Windows 11 / Python 3.12: os.kill(pid, 0) raises OSError
+    WinError 87 for a pid with no process, not ProcessLookupError. Treating
+    only the POSIX error as death left every stale marker looking live, which
+    would block maintenance permanently after a crash on Windows."""
+    from utils import maintenance_lock
+
+    stale = Path(f"{book}.writer-424242-abc123")
+    stale.write_text("")
+
+    def windows_style(pid, sig):
+        err = OSError(87, "The parameter is incorrect")
+        err.winerror = 87
+        raise err
+
+    with monkeypatch.context() as patched:
+        patched.setattr(maintenance_lock.os, "kill", windows_style)
+        with maintenance_lock.hold(book):
+            pass
+
+    assert not stale.exists(), "a dead writer's marker must be cleared"
+
+
+def test_an_ambiguous_liveness_probe_counts_as_live(book, monkeypatch):
+    from utils import maintenance_lock
+
+    marker = Path(f"{book}.writer-424242-abc123")
+    marker.write_text("")
+
+    def unknown_error(pid, sig):
+        err = OSError(1234, "something else entirely")
+        err.winerror = 1234
+        raise err
+
+    try:
+        with monkeypatch.context() as patched:
+            patched.setattr(maintenance_lock.os, "kill", unknown_error)
+            with pytest.raises(maintenance_lock.MaintenanceBusy):
+                with maintenance_lock.hold(book):
+                    pass
+    finally:
+        marker.unlink(missing_ok=True)
