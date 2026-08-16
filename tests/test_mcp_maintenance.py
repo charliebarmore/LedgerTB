@@ -27,14 +27,9 @@ def assistant(client_id, accounts, monkeypatch, tmp_path):
     dbconn.ASSISTANT_ACCESS_LEVEL = None
 
 
-def _markers(book):
-    return list(book.parent.glob(book.name + ".writer-*"))
-
-
 def test_posting_an_entry_registers_a_writer(assistant, client_id, accounts):
     """Charlie's reproduction: instrument the writer, call the real tool, and
     the entry posted without the context ever being entered."""
-    book = dbconn.DATABASE_PATH
     seen = []
     real = maintenance_lock.writer
 
@@ -42,7 +37,6 @@ def test_posting_an_entry_registers_a_writer(assistant, client_id, accounts):
         seen.append(str(path))
         return real(path)
 
-    import mcp_server as srv
     srv_writer = maintenance_lock.writer
     maintenance_lock.writer = spy
     try:
@@ -81,8 +75,7 @@ def test_maintenance_refuses_while_a_real_tool_is_mid_write(assistant, client_id
     ))
     try:
         worker.start()
-        inside.wait(timeout=5)
-        assert len(_markers(book)) == 1, "the in-flight write must be visible"
+        assert inside.wait(timeout=5)
         with pytest.raises(maintenance_lock.MaintenanceBusy):
             with maintenance_lock.hold(book):
                 result["held"] = True
@@ -92,7 +85,9 @@ def test_maintenance_refuses_while_a_real_tool_is_mid_write(assistant, client_id
         worker.join(timeout=5)
         mcp_server.mcp_tools.post_entry = original
 
-    assert _markers(book) == [], "the claim must be released when the tool ends"
+    assert not worker.is_alive()
+    with maintenance_lock.hold(book):
+        pass
 
 
 def test_every_mutating_tool_declares_itself(assistant):
@@ -115,9 +110,10 @@ def test_every_mutating_tool_declares_itself(assistant):
     assert undeclared == [], f"mutating tools missing the guard: {undeclared}"
 
 
-def test_a_read_tool_takes_no_claim(assistant, client_id, accounts):
+def test_a_read_tool_leaves_no_shared_lock(assistant, client_id, accounts):
     book = dbconn.DATABASE_PATH
 
     mcp_server.list_clients()
 
-    assert _markers(book) == [], "a read must not block maintenance"
+    with maintenance_lock.hold(book):
+        pass

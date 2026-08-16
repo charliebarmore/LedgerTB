@@ -4,7 +4,6 @@ The risk here is not a wrong number on a page, it is an unreadable book, so
 most of these tests are about what survives a failure.
 """
 
-import os
 import sqlite3
 from pathlib import Path
 
@@ -557,23 +556,15 @@ def test_a_non_local_book_is_refused(book, monkeypatch, tmp_path):
     assert verify_passphrase(book, OLD) is True
 
 
-def test_rotation_refuses_while_a_writer_is_registered(book):
+def test_rotation_refuses_while_an_assistant_write_is_active(book):
     """A running MCP call cannot be stopped by switching access off, so the
     lock refuses instead of racing it."""
-    import os
     from utils import maintenance_lock
     from utils.unlock import change_book_passphrase
 
-    other = Path(f"{book}.writer-{os.getpid() + 1}")
-    other.write_text("")
-    monkey = None
-    try:
-        # Make the fake writer look alive by pointing at a pid that exists.
-        other.rename(f"{book}.writer-1")
-        with pytest.raises(maintenance_lock.MaintenanceBusy, match="writing to this book"):
+    with maintenance_lock.writer(book):
+        with pytest.raises(maintenance_lock.MaintenanceBusy, match="still in use"):
             change_book_passphrase(NEW)
-    finally:
-        Path(f"{book}.writer-1").unlink(missing_ok=True)
 
     assert verify_passphrase(book, OLD) is True
 
@@ -644,38 +635,23 @@ def test_two_maintenance_holds_cannot_overlap(book):
 
 # --- what the second review found ------------------------------------------
 
-def test_an_assistant_write_publishes_a_marker_while_in_flight(book):
-    """The gap that mattered: checking only at connection time let a call that
-    had already opened commit into a book being replaced. The marker is what a
-    maintenance holder in another process sees.
-
-    Single-process here, so this asserts the marker is published and cleared;
-    a holder ignoring its own pid is why the refusal itself is tested with a
-    foreign pid in test_rotation_refuses_while_a_writer_is_registered.
-    """
-    import os
+def test_an_assistant_write_holds_a_shared_lock_while_in_flight(book):
+    """The wider tool guard must exclude maintenance for its whole lifetime."""
     from utils import maintenance_lock
 
-    from utils import maintenance_lock
-
-    def markers():
-        return list(book.parent.glob(book.name + ".writer-*"))
-
-    assert markers() == []
     with maintenance_lock.writer(book):
-        assert len(markers()) == 1, "an in-flight write must be visible"
-    assert markers() == [], "and must stop being visible when it ends"
+        with pytest.raises(maintenance_lock.MaintenanceBusy):
+            with maintenance_lock.hold(book):
+                pass
+
+    with maintenance_lock.hold(book):
+        pass
 
 
-def test_overlapping_writes_on_two_threads_keep_their_own_markers(book):
-    """MCP runs tool calls on parallel threads in one process. A per-process
-    marker meant the first to finish removed the claim while the second was
-    still writing, which is how a lost write stayed reachable."""
+def test_overlapping_writes_on_two_threads_keep_independent_shared_locks(book):
+    """Finishing one MCP call must not release another call's shared lock."""
     import threading
     from utils import maintenance_lock
-
-    def markers():
-        return list(book.parent.glob(book.name + ".writer-*"))
 
     second_in = threading.Event()
     first_out = threading.Event()
@@ -685,34 +661,44 @@ def test_overlapping_writes_on_two_threads_keep_their_own_markers(book):
         with maintenance_lock.writer(book):
             second_in.set()
             first_out.wait(timeout=5)
-            seen["after_first_exited"] = len(markers())
+            try:
+                with maintenance_lock.hold(book):
+                    pass
+            except maintenance_lock.MaintenanceBusy:
+                seen["after_first_exited"] = "blocked"
 
     worker = threading.Thread(target=second_writer)
     with maintenance_lock.writer(book):
         worker.start()
-        second_in.wait(timeout=5)
-        seen["both_active"] = len(markers())
+        assert second_in.wait(timeout=5)
+        with pytest.raises(maintenance_lock.MaintenanceBusy):
+            with maintenance_lock.hold(book):
+                pass
     first_out.set()
     worker.join(timeout=5)
 
-    assert seen["both_active"] == 2, "each in-flight write needs its own marker"
-    assert seen["after_first_exited"] == 1, "finishing one must not clear the other"
-    assert markers() == []
+    assert not worker.is_alive()
+    assert seen["after_first_exited"] == "blocked"
+    with maintenance_lock.hold(book):
+        pass
 
 
-def test_nesting_on_one_thread_reuses_the_same_claim(book):
+def test_nesting_on_one_thread_reuses_the_same_shared_lock(book):
     """A guarded tool may call another guarded helper; the inner one finishing
     must not retract the outer one's claim."""
     from utils import maintenance_lock
 
-    def markers():
-        return list(book.parent.glob(book.name + ".writer-*"))
-
     with maintenance_lock.writer(book):
         with maintenance_lock.writer(book):
-            assert len(markers()) == 1
-        assert len(markers()) == 1, "the inner exit must not clear the claim"
-    assert markers() == []
+            with pytest.raises(maintenance_lock.MaintenanceBusy):
+                with maintenance_lock.hold(book):
+                    pass
+        with pytest.raises(maintenance_lock.MaintenanceBusy):
+            with maintenance_lock.hold(book):
+                pass
+
+    with maintenance_lock.hold(book):
+        pass
 
 
 def test_an_assistant_write_is_refused_during_maintenance(book):
@@ -740,17 +726,14 @@ def test_an_undeclared_assistant_write_cannot_reach_the_database(book):
         dbconn.ASSISTANT_ACCESS_LEVEL = None
 
 
-def test_a_stale_maintenance_lock_is_reclaimed(book):
-    """A crash mid-rotation must not lock the book out permanently."""
+def test_coordination_file_contents_do_not_represent_lock_state(book):
+    """The persistent sidecar contains no PID or stale state to reclaim."""
     from utils import maintenance_lock
-    from utils.unlock import change_book_passphrase
 
-    # A lock naming a process that no longer exists.
-    maintenance_lock.maintenance_path(book).write_text("999999999\n")
+    maintenance_lock.maintenance_path(book).write_text("arbitrary old bytes\n")
 
-    change_book_passphrase(NEW)
-
-    assert verify_passphrase(book, NEW) is True
+    with maintenance_lock.hold(book):
+        pass
     assert not maintenance_lock.under_maintenance(book)
 
 
@@ -870,103 +853,20 @@ def test_the_quarantined_backup_is_kept_not_destroyed(book, monkeypatch):
     assert quarantined, "the bytes must still exist somewhere"
 
 
-def test_two_holders_cannot_both_reclaim_one_stale_lock(book):
-    """D3: unlink-then-create let two processes each delete the other's fresh
-    claim. Renaming aside is atomic, so exactly one can win."""
-    from utils import maintenance_lock
-
-    maintenance_lock.maintenance_path(book).write_text("999999999\n")
-
-    first = maintenance_lock.hold(book)
-    first.__enter__()
-    try:
-        with pytest.raises(maintenance_lock.MaintenanceBusy):
-            with maintenance_lock.hold(book):
-                pass
-    finally:
-        first.__exit__(None, None, None)
-
-    assert not maintenance_lock.under_maintenance(book)
-
-
-def test_an_unreadable_writer_marker_counts_as_live(book):
-    """Ambiguity fails closed: refusing maintenance is recoverable, writing
-    over somebody's transaction is not."""
-    from utils import maintenance_lock
-
-    Path(f"{book}.writer-not-a-pid").write_text("")
-    try:
-        with pytest.raises(maintenance_lock.MaintenanceBusy):
-            with maintenance_lock.hold(book):
-                pass
-    finally:
-        Path(f"{book}.writer-not-a-pid").unlink(missing_ok=True)
-
-
-def test_a_dead_writer_is_detected_the_way_windows_reports_it(book, monkeypatch):
-    """Verified on Windows 11 / Python 3.12: os.kill(pid, 0) raises OSError
-    WinError 87 for a pid with no process, not ProcessLookupError. Treating
-    only the POSIX error as death left every stale marker looking live, which
-    would block maintenance permanently after a crash on Windows."""
-    from utils import maintenance_lock
-
-    stale = Path(f"{book}.writer-424242-abc123")
-    stale.write_text("")
-
-    def windows_style(pid, sig):
-        err = OSError(87, "The parameter is incorrect")
-        err.winerror = 87
-        raise err
-
-    with monkeypatch.context() as patched:
-        patched.setattr(maintenance_lock.os, "kill", windows_style)
-        with maintenance_lock.hold(book):
-            pass
-
-    assert not stale.exists(), "a dead writer's marker must be cleared"
-
-
-def test_an_ambiguous_liveness_probe_counts_as_live(book, monkeypatch):
-    from utils import maintenance_lock
-
-    marker = Path(f"{book}.writer-424242-abc123")
-    marker.write_text("")
-
-    def unknown_error(pid, sig):
-        err = OSError(1234, "something else entirely")
-        err.winerror = 1234
-        raise err
-
-    try:
-        with monkeypatch.context() as patched:
-            patched.setattr(maintenance_lock.os, "kill", unknown_error)
-            with pytest.raises(maintenance_lock.MaintenanceBusy):
-                with maintenance_lock.hold(book):
-                    pass
-    finally:
-        marker.unlink(missing_ok=True)
-
-
-def test_a_book_name_with_glob_characters_still_blocks_maintenance(tmp_path, monkeypatch):
-    """Firm-mode books are named by the user. A name containing [ ] turned the
-    writer scan's pattern into a character class that matched nothing, so the
-    scan found no writers and rotation walked straight through a live write.
-    A safety check that silently finds nothing is the worst kind of bug."""
-    import os
+def test_a_book_name_with_glob_characters_uses_the_same_lock_protocol(tmp_path):
+    """User-controlled book names are literal paths, never glob patterns."""
     from utils import maintenance_lock
 
     book = tmp_path / "Client [2026] books.ledgertb"
     book.write_bytes(b"not really a book")
-    marker = Path(f"{book}.writer-{os.getpid()}-deadbeef")
-    marker.write_text("")
 
-    try:
-        assert maintenance_lock._live_writers(book), "the writer must be seen"
+    with maintenance_lock.writer(book):
         with pytest.raises(maintenance_lock.MaintenanceBusy):
             with maintenance_lock.hold(book):
                 pass
-    finally:
-        marker.unlink(missing_ok=True)
+
+    with maintenance_lock.hold(book):
+        pass
 
 
 def test_a_posix_permission_error_is_not_blamed_on_another_program(book, monkeypatch):

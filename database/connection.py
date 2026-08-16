@@ -162,6 +162,57 @@ def writes_permitted() -> bool:
     return True
 
 
+class _CoordinatedConnection:
+    """Connection proxy that releases its OS shared lock on close.
+
+    SQLite's connection object cannot carry arbitrary attributes, and the
+    SQLCipher driver does not expose a portable connection subclass hook.  A
+    transparent proxy keeps the lease lifetime identical to the database
+    connection lifetime while delegating the full driver API.
+    """
+
+    __slots__ = ("_connection", "_maintenance_lease", "_closed")
+
+    def __init__(self, connection, maintenance_lease):
+        object.__setattr__(self, "_connection", connection)
+        object.__setattr__(self, "_maintenance_lease", maintenance_lease)
+        object.__setattr__(self, "_closed", False)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+    def __setattr__(self, name, value):
+        if name in self.__slots__:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._connection, name, value)
+
+    def __enter__(self):
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return self._connection.__exit__(exc_type, exc, traceback)
+
+    def close(self):
+        if self._closed:
+            return
+        object.__setattr__(self, "_closed", True)
+        try:
+            self._connection.close()
+        finally:
+            from utils import maintenance_lock
+
+            maintenance_lock.release_connection(self._maintenance_lease)
+            object.__setattr__(self, "_maintenance_lease", None)
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
 def get_connection():
     """Open a database connection, keyed with the active passphrase when the
     SQLCipher driver is present.
@@ -173,58 +224,52 @@ def get_connection():
     """
     if ENCRYPTION_AVAILABLE and _active_key is None:
         raise DatabaseLocked("Database is locked; unlock with the passphrase first.")
-    # An assistant process must not open the book while it is being rewritten.
-    # ASSISTANT_ACCESS_LEVEL is only set in the MCP process, so this costs the
-    # desktop app nothing and is the one chokepoint every assistant query goes
-    # through.
     from utils import maintenance_lock
 
-    # Nobody opens this book while it is being rewritten, not just assistants.
-    # The desktop app runs concurrent Streamlit session threads, and a write
-    # started in one of them during a rotation would commit into the file the
-    # swap is about to unlink, losing it silently. Refusing here is the only
-    # point every caller passes through.
-    if (maintenance_lock.under_maintenance(DATABASE_PATH)
-            and not maintenance_lock.holding_now()):
-        raise DatabaseLocked(
-            "This book is being maintained right now (its passphrase is "
-            "being changed). Try again once that finishes."
-        )
+    # Acquire before opening SQLite and hold until close.  This covers a
+    # connection that predates rotation; an open-time existence check did not.
+    try:
+        maintenance_lease = maintenance_lock.acquire_connection(DATABASE_PATH)
+    except maintenance_lock.MaintenanceBusy as exc:
+        raise DatabaseLocked(str(exc)) from exc
     assistant_may_write = False
     if ASSISTANT_ACCESS_LEVEL:
-        # An assistant may only write inside a declared write, which is what
-        # publishes the marker a maintenance holder looks for. Anything else
-        # gets a read-only connection, so a tool that mutates without declaring
-        # it fails loudly here rather than slipping past the lock. Declaring
-        # the intent is the contract; this is the enforcement.
+        # An assistant may only write inside a declared write, which holds a
+        # shared OS lock across the complete tool invocation. Anything else gets
+        # a read-only connection, so an undeclared mutation fails loudly.
         assistant_may_write = maintenance_lock.writing_now()
-    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _tighten_permissions(DATABASE_PATH)
-    conn = _driver.connect(DATABASE_PATH, check_same_thread=False)
-    # Again now the file exists: on a book's first run there was nothing to
-    # chmod a moment ago.
-    _tighten_permissions(DATABASE_PATH)
-    if ENCRYPTION_AVAILABLE:
-        # The key must be applied before touching any table, so this is the
-        # first statement on the connection.
-        conn.execute(f"PRAGMA key = {key_pragma(_active_key)}")
-    conn.row_factory = _driver.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    # Wait rather than fail when another connection holds the write lock. A
-    # close-package export holds one for the length of the render, and the
-    # driver's 5-second default meant the person working in the app got
-    # "database is locked" while their assistant was busy.
-    conn.execute("PRAGMA busy_timeout = 30000")
-    # Query spills must never land beside an encrypted book as cleartext. The
-    # shipped driver is compiled TEMP_STORE=2 already; saying so explicitly
-    # means a rebuilt wheel cannot change it silently.
-    conn.execute("PRAGMA temp_store = MEMORY")
-    if READ_ONLY or (ASSISTANT_ACCESS_LEVEL and not assistant_may_write):
-        conn.execute("PRAGMA query_only = ON")
-    if ASSISTANT_ACCESS_LEVEL:
-        # Set last so the connection-setup pragmas above are unaffected.
-        conn.set_authorizer(_assistant_authorizer)
-    return conn
+    conn = None
+    try:
+        DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _tighten_permissions(DATABASE_PATH)
+        conn = _driver.connect(DATABASE_PATH, check_same_thread=False)
+        # Again now the file exists: on a book's first run there was nothing to
+        # chmod a moment ago.
+        _tighten_permissions(DATABASE_PATH)
+        if ENCRYPTION_AVAILABLE:
+            # The key must be applied before touching any table, so this is the
+            # first statement on the connection.
+            conn.execute(f"PRAGMA key = {key_pragma(_active_key)}")
+        conn.row_factory = _driver.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        # Wait rather than fail when another connection holds the write lock. A
+        # close-package export holds one for the length of the render, and the
+        # driver's 5-second default meant the person working in the app got
+        # "database is locked" while their assistant was busy.
+        conn.execute("PRAGMA busy_timeout = 30000")
+        # Query spills must never land beside an encrypted book as cleartext.
+        conn.execute("PRAGMA temp_store = MEMORY")
+        if READ_ONLY or (ASSISTANT_ACCESS_LEVEL and not assistant_may_write):
+            conn.execute("PRAGMA query_only = ON")
+        if ASSISTANT_ACCESS_LEVEL:
+            # Set last so the connection-setup pragmas above are unaffected.
+            conn.set_authorizer(_assistant_authorizer)
+        return _CoordinatedConnection(conn, maintenance_lease)
+    except Exception:
+        if conn is not None:
+            conn.close()
+        maintenance_lock.release_connection(maintenance_lease)
+        raise
 
 
 def open_keyed(path, key=None):
@@ -242,11 +287,36 @@ def open_keyed(path, key=None):
     chosen = key or _active_key
     if ENCRYPTION_AVAILABLE and chosen is None:
         raise DatabaseLocked("Database is locked; unlock with the passphrase first.")
-    conn = _driver.connect(str(path), check_same_thread=False)
-    if ENCRYPTION_AVAILABLE:
-        conn.execute(f"PRAGMA key = {key_pragma(chosen)}")
-    conn.row_factory = _driver.Row
-    return conn
+    from utils import maintenance_lock
+
+    # Most callers use this for independent backup files. A few integrity and
+    # migration checks open the live book directly, and those reads must join
+    # the same lease protocol as get_connection().
+    is_live_book = (
+        os.path.normcase(os.path.abspath(os.fspath(path)))
+        == os.path.normcase(os.path.abspath(os.fspath(DATABASE_PATH)))
+    )
+    maintenance_lease = None
+    if is_live_book:
+        try:
+            maintenance_lease = maintenance_lock.acquire_connection(DATABASE_PATH)
+        except maintenance_lock.MaintenanceBusy as exc:
+            raise DatabaseLocked(str(exc)) from exc
+
+    conn = None
+    try:
+        conn = _driver.connect(str(path), check_same_thread=False)
+        if ENCRYPTION_AVAILABLE:
+            conn.execute(f"PRAGMA key = {key_pragma(chosen)}")
+        conn.row_factory = _driver.Row
+        if is_live_book:
+            return _CoordinatedConnection(conn, maintenance_lease)
+        return conn
+    except Exception:
+        if conn is not None:
+            conn.close()
+        maintenance_lock.release_connection(maintenance_lease)
+        raise
 
 
 @contextmanager
