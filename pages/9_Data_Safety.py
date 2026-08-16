@@ -246,14 +246,22 @@ if backups:
             selected_record = next(
                 record for record in backups if record.database_path == selected
             )
-            safety_copy = restore_backup(selected)
-            # The restored database may contain a different client set, so the
-            # helper resolves the audit client again after replacement.
-            audit_safety_event("RESTORE", "database_restore", {
-                "restored_from": selected.name,
-                "pre_restore_backup": safety_copy.name,
-                "integrity_verified": True, "book_id": selected_record.book_id,
-            })
+            # The event is written into the prepared copy, before it goes
+            # live, so the restore and its record are one step. Written after
+            # replacement it could be lost: a backup predating the audit_log
+            # rebuild reinstates the older schema, where the event cannot be
+            # written at all.
+            def _record_restore(conn):
+                AuditLog.write(
+                    conn.cursor(), None, "database_restore", 0, "RESTORE",
+                    new_values={
+                        "restored_from": selected.name,
+                        "integrity_verified": True,
+                        "book_id": selected_record.book_id,
+                    },
+                )
+
+            safety_copy = restore_backup(selected, audit=_record_restore)
             st.success(f"Restore complete. Pre-restore safety copy: {safety_copy.name}")
             st.rerun()
         except Exception as exc:

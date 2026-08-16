@@ -33,16 +33,15 @@ from database.crypto import (
     plaintext_backup_path,
     verify_passphrase,
 )
-from utils import book_lock, books, secure_store
+from utils import book_lock, books, maintenance_lock, secure_store
 
 MIN_PASSPHRASE_LEN = 12
 
-# How much of the backup archive follows the book onto a new passphrase.
-# Chosen by the firm operating this build as a balance of risk against
-# resources: recent recovery points stay usable under one passphrase without
-# rewriting an entire archive, which cannot reach detached media anyway. Older
-# backups keep the previous passphrase and are labelled with it.
-REKEY_BACKUP_DAYS = 30
+# Every LedgerTB-managed backup follows the book onto the new passphrase.
+# A partial re-key was considered and rejected by the maintainer: it leaves
+# passphrase tiers the recovery UI cannot open, and a labelled mixture is worse
+# to live with than one slower rotation. Backups are preserved, never deleted.
+REKEY_ALL_BACKUPS = None
 
 # A launch token binds this browser session to the window the app opened.
 # Without it, the unlock is process-wide: anything else running on the machine
@@ -187,6 +186,14 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
             "from here. The session holding it open for writing is the one that "
             "can change it."
         )
+    if not books.is_local_book(book):
+        raise RuntimeError(
+            "This book is not in LedgerTB's own data folder, so it may be on a "
+            "shared drive where no other computer's activity can be seen from "
+            "here. Its passphrase cannot be changed in place. Copy it somewhere "
+            "local, change the passphrase there, and put it back with everyone "
+            "else closed out."
+        )
     if assistant_access_enabled(book):
         raise RuntimeError(
             "Turn assistant access off for this book first, under Assistant "
@@ -204,6 +211,11 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
 
     from services.backups import create_backup
 
+    # Everything from here to the end of the swap is exclusive. data_version
+    # detects a concurrent write after the fact, which is too late; this stops
+    # one starting, including from the separate MCP process.
+    maintenance = maintenance_lock.hold(book)
+    maintenance.__enter__()
     backup_path = None
     try:
         backup_path = create_backup(
@@ -211,14 +223,20 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
             target_key=new_key,
         ).database_path
     except Exception as exc:
+        maintenance.__exit__(None, None, None)
         raise RuntimeError(
             f"No backup could be taken, so the passphrase was not changed: {exc}"
         ) from exc
 
     # Point of no return is inside this call, at its single atomic replace.
-    change_passphrase(book, current_key, new_passphrase)
+    try:
+        change_passphrase(book, current_key, new_passphrase)
+    except Exception:
+        maintenance.__exit__(None, None, None)
+        raise
 
     dbconn.set_active_key(new_key)
+    maintenance.__exit__(None, None, None)
     result = RotationResult(new_key, backup_path)
 
     result.new_key_opens = verify_passphrase(book, new_passphrase)
@@ -231,14 +249,12 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
             "opens before doing further work in this book."
         )
 
-    # Recent backups follow the book onto the new passphrase. The older
-    # archive deliberately does not: see rekey_recent_backups.
+    # Every managed backup follows the book onto the new passphrase, so the
+    # recovery set never splits across two of them. See rekey_backups.
     try:
-        from services.backups import rekey_recent_backups
+        from services.backups import rekey_backups
 
-        converted, failed = rekey_recent_backups(
-            REKEY_BACKUP_DAYS, current_key, new_key
-        )
+        converted, failed = rekey_backups(current_key, new_key, REKEY_ALL_BACKUPS)
         result.backups_converted = converted
         for name, reason in failed:
             result.warnings.append(

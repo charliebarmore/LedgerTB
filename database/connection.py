@@ -155,6 +155,18 @@ def get_connection():
     """
     if ENCRYPTION_AVAILABLE and _active_key is None:
         raise DatabaseLocked("Database is locked; unlock with the passphrase first.")
+    # An assistant process must not open the book while it is being rewritten.
+    # ASSISTANT_ACCESS_LEVEL is only set in the MCP process, so this costs the
+    # desktop app nothing and is the one chokepoint every assistant query goes
+    # through.
+    if ASSISTANT_ACCESS_LEVEL:
+        from utils import maintenance_lock
+
+        if maintenance_lock.under_maintenance(DATABASE_PATH):
+            raise DatabaseLocked(
+                "This book is being maintained right now (its passphrase is "
+                "being changed). Try again once that finishes."
+            )
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     _tighten_permissions(DATABASE_PATH)
     conn = _driver.connect(DATABASE_PATH, check_same_thread=False)

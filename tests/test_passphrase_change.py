@@ -31,6 +31,11 @@ def book(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
     monkeypatch.setattr(_backups, "DEFAULT_BACKUP_DIR", tmp_path / "backups")
+    # Rotation refuses a book outside LedgerTB's managed area, so the throwaway
+    # book has to actually be inside one rather than have the check bypassed.
+    import utils.books as _books
+
+    monkeypatch.setattr(_books, "USER_DATA_DIR", tmp_path)
     dbconn.set_active_key(derive_key(OLD))
 
     from database import init_database
@@ -307,6 +312,9 @@ def test_a_rotation_is_recorded_on_a_book_with_no_clients(tmp_path, monkeypatch)
 
     monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
     monkeypatch.setattr(_backups, "DEFAULT_BACKUP_DIR", tmp_path / "backups")
+    import utils.books as _books
+
+    monkeypatch.setattr(_books, "USER_DATA_DIR", tmp_path)
     dbconn.set_active_key(derive_key(OLD))
     from database import init_database
     init_database()
@@ -459,8 +467,11 @@ def test_recent_backups_are_converted_to_the_new_passphrase(book, monkeypatch, t
         conn.close()
 
 
-def test_an_older_backup_keeps_the_previous_passphrase_and_says_so(book, monkeypatch, tmp_path):
-    """The archive is deliberately not rewritten, so it has to be labelled."""
+def test_even_an_old_backup_is_converted(book, monkeypatch, tmp_path):
+    """The whole archive follows the book. A partial re-key would leave
+    passphrase tiers the recovery UI cannot open, which the maintainer ruled
+    out: one slower rotation beats an archive where which passphrase opens
+    which recovery point depends on its age."""
     import json
     from datetime import datetime, timedelta, timezone
     import config
@@ -477,15 +488,15 @@ def test_an_older_backup_keeps_the_previous_passphrase_and_says_so(book, monkeyp
 
     change_book_passphrase(NEW)
 
-    # Untouched: still opens with the OLD passphrase.
-    conn = dbconn.open_keyed(stale, derive_key(OLD))
+    # Converted despite its age, so the archive stays on one passphrase.
+    conn = dbconn.open_keyed(stale, derive_key(NEW))
     try:
         conn.execute("SELECT count(*) FROM clients").fetchone()
     finally:
         conn.close()
 
     record = backups.load_record(stale)
-    assert backups.opens_with_active_key(record) is False, "it must be labelled"
+    assert backups.opens_with_active_key(record) is True
 
 
 def test_converting_backups_is_idempotent(book, monkeypatch, tmp_path):
@@ -494,8 +505,8 @@ def test_converting_backups_is_idempotent(book, monkeypatch, tmp_path):
     from database.crypto import key_fingerprint
 
     _backup()
-    first, _ = backups.rekey_recent_backups(30, derive_key(OLD), derive_key(NEW))
-    second, _ = backups.rekey_recent_backups(30, derive_key(OLD), derive_key(NEW))
+    first, _ = backups.rekey_backups(derive_key(OLD), derive_key(NEW))
+    second, _ = backups.rekey_backups(derive_key(OLD), derive_key(NEW))
 
     assert first >= 1
     assert second == 0, "an already-converted backup must be left alone"
@@ -527,3 +538,88 @@ def test_one_unconvertible_backup_does_not_stop_the_rest(book):
         conn.execute("SELECT count(*) FROM clients").fetchone()
     finally:
         conn.close()
+
+
+# --- the interprocess maintenance lock -------------------------------------
+
+def test_a_non_local_book_is_refused(book, monkeypatch, tmp_path):
+    """Cross-machine exclusivity cannot be seen from here, so rotation does not
+    claim it. The maintainer's call: refuse rather than qualify the success."""
+    import utils.books as books_mod
+    from utils.unlock import change_book_passphrase
+
+    monkeypatch.setattr(books_mod, "USER_DATA_DIR", tmp_path / "somewhere-else")
+
+    with pytest.raises(RuntimeError, match="shared drive"):
+        change_book_passphrase(NEW)
+
+    assert verify_passphrase(book, OLD) is True
+
+
+def test_rotation_refuses_while_a_writer_is_registered(book):
+    """A running MCP call cannot be stopped by switching access off, so the
+    lock refuses instead of racing it."""
+    import os
+    from utils import maintenance_lock
+    from utils.unlock import change_book_passphrase
+
+    other = Path(f"{book}.writer-{os.getpid() + 1}")
+    other.write_text("")
+    monkey = None
+    try:
+        # Make the fake writer look alive by pointing at a pid that exists.
+        other.rename(f"{book}.writer-1")
+        with pytest.raises(maintenance_lock.MaintenanceBusy, match="writing to this book"):
+            change_book_passphrase(NEW)
+    finally:
+        Path(f"{book}.writer-1").unlink(missing_ok=True)
+
+    assert verify_passphrase(book, OLD) is True
+
+
+def test_an_assistant_connection_is_refused_during_maintenance(book):
+    from utils import maintenance_lock
+
+    with maintenance_lock.hold(book):
+        dbconn.ASSISTANT_ACCESS_LEVEL = "post"
+        try:
+            with pytest.raises(dbconn.DatabaseLocked, match="being maintained"):
+                dbconn.get_connection()
+        finally:
+            dbconn.ASSISTANT_ACCESS_LEVEL = None
+
+
+def test_the_lock_is_released_after_a_rotation(book):
+    from utils import maintenance_lock
+    from utils.unlock import change_book_passphrase
+
+    change_book_passphrase(NEW)
+
+    assert not maintenance_lock.under_maintenance(book)
+
+
+def test_the_lock_is_released_when_a_rotation_fails(book, monkeypatch):
+    import database.crypto as crypto
+    from utils import maintenance_lock
+    from utils.unlock import change_book_passphrase
+
+    def boom(*a, **k):
+        raise RuntimeError("simulated")
+
+    monkeypatch.setattr(crypto, "change_passphrase", boom)
+    import utils.unlock as unlock_mod
+    monkeypatch.setattr(unlock_mod, "change_passphrase", boom)
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        change_book_passphrase(NEW)
+
+    assert not maintenance_lock.under_maintenance(book), "a stuck lock blocks the book forever"
+
+
+def test_two_maintenance_holds_cannot_overlap(book):
+    from utils import maintenance_lock
+
+    with maintenance_lock.hold(book):
+        with pytest.raises(maintenance_lock.MaintenanceBusy, match="already running"):
+            with maintenance_lock.hold(book):
+                pass

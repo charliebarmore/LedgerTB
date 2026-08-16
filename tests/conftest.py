@@ -63,6 +63,12 @@ def db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
     monkeypatch.setattr(_backups, "DEFAULT_BACKUP_DIR", tmp_path / "backups")
+    # The throwaway book has to look like one of LedgerTB's own, or anything
+    # gated on is_local_book (passphrase rotation, assistant writes) refuses it
+    # as a possible shared-drive book.
+    import utils.books as _books
+
+    monkeypatch.setattr(_books, "USER_DATA_DIR", tmp_path)
     # The database is SQLCipher-encrypted; set the derived key (the app's unlock
     # gate does this from the passphrase in production) so connections can open it.
     from database.crypto import derive_key

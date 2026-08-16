@@ -205,18 +205,22 @@ def _fingerprint_for(key=None) -> str:
     return key_fingerprint(chosen) if chosen else ""
 
 
-def rekey_recent_backups(days: int, current_key: str, new_key: str,
-                         backup_dir: Optional[Path] = None):
-    """Re-encrypt backups newer than ``days`` so they open with the new key.
+def rekey_backups(current_key: str, new_key: str, days: Optional[int] = None,
+                  backup_dir: Optional[Path] = None):
+    """Re-encrypt this book's backups so they open with the new key.
+
+    Every managed backup by default. A partial re-key was considered and
+    rejected: it leaves passphrase tiers the recovery UI cannot open, and one
+    slower rotation is easier to live with than an archive where which
+    passphrase opens which recovery point depends on its age. ``days`` limits
+    it for tests and for a caller that knowingly wants less.
+
+    Nothing is ever deleted here. A backup that cannot be converted is left
+    exactly as it was, still openable with the passphrase it already had, and
+    reported.
 
     Returns (converted, [(name, reason), ...]). Each backup is converted on its
-    own: one failure leaves that backup exactly as it was, correctly labelled
-    for the old key, and does not stop the rest.
-
-    Older backups are deliberately left alone. Rewriting an entire retention
-    archive during a passphrase change is slow, cannot reach detached media, and
-    puts the recovery set itself at risk; the archive keeps the previous
-    passphrase and says so in the list.
+    own, so one failure does not stop the rest.
 
     Residual window, stated rather than hidden: the database file and its
     manifest are replaced one after the other, so a crash between them leaves a
@@ -227,10 +231,10 @@ def rekey_recent_backups(days: int, current_key: str, new_key: str,
 
     from database.crypto import key_fingerprint, rekey_file
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)) if days else None
     converted, failed = 0, []
     for record in list_backups(backup_dir):
-        if record.created_at < cutoff:
+        if cutoff and record.created_at < cutoff:
             continue
         manifest_path = record.database_path.with_suffix(".json")
         try:
@@ -348,9 +352,30 @@ def list_backups(backup_dir: Optional[Path] = None) -> list[BackupRecord]:
     return sorted(records, key=lambda r: r.created_at, reverse=True)
 
 
-def restore_backup(database_path: Path, backup_dir: Path = DEFAULT_BACKUP_DIR) -> Path:
+def restore_backup(database_path: Path, backup_dir: Optional[Path] = None,
+                   audit=None) -> Path:
+    """Replace the live book with a recovery point, in one visible step.
+
+    The prepared copy is brought fully up to date before it goes live: copied,
+    integrity checked, migrated to the current schema, and its own restore event
+    written into it. Only then does it replace the live book, atomically.
+
+    Doing the migration and the audit on the copy is what makes the restore and
+    its record one transition rather than two. Restoring first and auditing
+    afterwards left a window where the book was replaced and nothing recorded
+    it, and worse, a backup predating the audit_log rebuild reinstated the older
+    schema, so the event could not be written at all.
+
+    ``audit`` is called with an open connection to the prepared copy, before it
+    goes live, and is expected to write the restore event through it.
+    """
     book_id = active_book_id()
     record = load_record(Path(database_path), expected_book_id=book_id)
+    if not opens_with_active_key(record):
+        raise ValueError(
+            "This recovery point was made under a different passphrase and "
+            "cannot be opened with the one this book uses now."
+        )
     # A verified pre-restore snapshot gives recovery even if replacement is
     # interrupted after this point.
     pre_restore = create_backup(
@@ -361,10 +386,35 @@ def restore_backup(database_path: Path, backup_dir: Path = DEFAULT_BACKUP_DIR) -
     temp = live.with_name(f".{live.name}.restore.tmp")
     shutil.copy2(record.database_path, temp)
     os.chmod(temp, 0o600)
-    if not _integrity(temp):
+    try:
+        if not _integrity(temp):
+            raise RuntimeError(
+                "The recovery point could not be read back after copying it. "
+                "The live book has not been touched."
+            )
+
+        # Bring the copy to the current schema before anything writes to it. An
+        # older backup can predate migrations the running code depends on.
+        from database.schema import create_tables
+
+        conn = db_connection.open_keyed(temp)
+        try:
+            create_tables(conn)
+            if audit is not None:
+                audit(conn)
+                conn.commit()
+        finally:
+            conn.close()
+
+        from database.crypto import _fsync_path
+
+        _fsync_path(temp)
+        os.replace(temp, live)
+        _fsync_path(live)
+        _fsync_path(live.parent)
+    except Exception:
         temp.unlink(missing_ok=True)
-        raise RuntimeError("Restored copy failed SQLite integrity verification.")
-    os.replace(temp, live)
+        raise
     return pre_restore
 
 

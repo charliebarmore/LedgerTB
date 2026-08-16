@@ -107,6 +107,27 @@ def verify_passphrase(path: Path, passphrase: str) -> bool:
         return False
 
 
+def _fsync_path(path: Path) -> None:
+    """Force a file or directory to durable storage, where the platform can.
+
+    A rename is only atomic once both the new file's contents and the directory
+    entry naming it have actually reached the disk. Without this a power loss
+    can leave the rename visible and the contents not, which is the one failure
+    an atomic replace is supposed to rule out. Directory fsync is a no-op or an
+    error on some platforms (Windows), so it is best effort there.
+    """
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def _data_version(conn) -> int:
     """SQLite's counter of commits made by OTHER connections to this database.
 
@@ -158,7 +179,10 @@ def rekey_file(path: Path, current_key_hex: str, new_key_hex: str) -> None:
         if not ok:
             raise RuntimeError("The re-encrypted copy failed its integrity check.")
 
+        _fsync_path(tmp_new)
         os.replace(tmp_new, path)
+        _fsync_path(path)
+        _fsync_path(path.parent)
         try:
             os.chmod(path, 0o600)
         except OSError:
@@ -281,7 +305,10 @@ def change_passphrase(path: Path, current_key_hex: str, new_passphrase: str) -> 
         finally:
             final.close()
 
+        _fsync_path(tmp_new)
         os.replace(tmp_new, path)
+        _fsync_path(path)
+        _fsync_path(path.parent)
         try:
             os.chmod(path, 0o600)
         except OSError:
