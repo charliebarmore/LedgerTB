@@ -103,7 +103,24 @@ def _live_writers(book):
     """
     book = Path(book)
     live = []
-    for marker in book.parent.glob(book.name + ".writer-*"):
+    # Listed and matched by prefix, never globbed. A book path is user-chosen
+    # in firm mode, so a name like "Client [2026] books.ledgertb" turns the
+    # name into a character class and the pattern matches nothing. That failed
+    # OPEN: the scan found no writers and rotation proceeded straight through a
+    # live write. A safety check that silently finds nothing is worse than one
+    # that errors.
+    prefix = book.name + ".writer-"
+    try:
+        entries = list(book.parent.iterdir())
+    except OSError:
+        # Cannot enumerate, so cannot prove nobody is writing.
+        raise MaintenanceBusy(
+            f"The folder holding this book could not be read, so it is not "
+            f"possible to tell whether anything else is writing to it."
+        )
+    for marker in entries:
+        if not marker.name.startswith(prefix):
+            continue
         pid = _pid_of(marker)
         if pid is None:
             # A name we cannot interpret is not evidence that nobody is
@@ -125,11 +142,20 @@ def _live_writers(book):
 def _holder_is_gone(lock: Path) -> bool:
     """Whether a maintenance lock's recorded process is no longer running."""
     try:
-        pid = int(lock.read_text().strip() or 0)
-    except (OSError, ValueError):
-        return True                 # unreadable or malformed: not a live claim
+        content = lock.read_text()
+    except OSError:
+        # Cannot read it, so cannot prove it is abandoned.
+        return False
+    stamp = content.strip().splitlines()
+    try:
+        pid = int(stamp[0]) if stamp else 0
+    except ValueError:
+        return False
     if pid <= 0:
-        return True
+        # Empty or not yet stamped. hold() creates the file and then writes its
+        # pid, so this is most likely a claim mid-publication, not an abandoned
+        # one. Treating it as stale let a live holder be reclaimed in that gap.
+        return False
     if pid == os.getpid():
         # Our own live claim. Reclaiming it would turn a second concurrent
         # rotation in this process into a silent success.
@@ -154,11 +180,34 @@ def hold(book):
             raise MaintenanceBusy(
                 "Another maintenance operation is already running on this book."
             ) from exc
+        try:
+            inspected = lock.read_bytes()
+        except OSError:
+            raise MaintenanceBusy(
+                "Another maintenance operation is already running on this book."
+            ) from exc
         aside = Path(f"{lock}.stale-{secrets.token_hex(8)}")
         try:
             os.rename(str(lock), str(aside))
         except FileNotFoundError:
             # Someone else reclaimed it first. Do not race them for it.
+            raise MaintenanceBusy(
+                "Another maintenance operation is already running on this book."
+            ) from exc
+        # Atomicity claims the pathname, not the object: between judging the
+        # lock stale and renaming it, another process can have reclaimed it and
+        # published a live claim at the same name. Renaming that away and
+        # carrying on would produce two holders, so the bytes are compared and
+        # anything unexpected is put back.
+        try:
+            taken = aside.read_bytes()
+        except OSError:
+            taken = None
+        if taken != inspected:
+            try:
+                os.rename(str(aside), str(lock))
+            except OSError:
+                pass
             raise MaintenanceBusy(
                 "Another maintenance operation is already running on this book."
             ) from exc
@@ -173,10 +222,14 @@ def hold(book):
                 "Another maintenance operation is already running on this book."
             ) from exc
     try:
-        os.write(fd, f"{os.getpid()}\n".encode())
+        # pid first, then a nonce: two claims from the same pid are still
+        # distinguishable, which is what makes the byte comparison above mean
+        # something.
+        os.write(fd, f"{os.getpid()}\n{secrets.token_hex(8)}\n".encode())
     finally:
         os.close(fd)
 
+    _local.holding = True
     try:
         writers = _live_writers(book)
         if writers:
@@ -187,6 +240,7 @@ def hold(book):
             )
         yield
     finally:
+        _local.holding = False
         lock.unlink(missing_ok=True)
 
 
@@ -227,6 +281,17 @@ def writer(book):
     finally:
         _local.depth = 0
         marker.unlink(missing_ok=True)
+
+
+def holding_now() -> bool:
+    """Whether THIS thread is the one performing the maintenance.
+
+    The holder has to keep working on the book it locked: it takes a backup,
+    re-encrypts, and converts the archive. Every other thread and process is
+    refused. Thread-local rather than process-wide, so a second Streamlit
+    session thread is still shut out while a rotation runs.
+    """
+    return getattr(_local, "holding", False)
 
 
 def writing_now() -> bool:

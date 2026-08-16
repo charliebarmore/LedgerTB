@@ -177,15 +177,21 @@ def get_connection():
     # ASSISTANT_ACCESS_LEVEL is only set in the MCP process, so this costs the
     # desktop app nothing and is the one chokepoint every assistant query goes
     # through.
+    from utils import maintenance_lock
+
+    # Nobody opens this book while it is being rewritten, not just assistants.
+    # The desktop app runs concurrent Streamlit session threads, and a write
+    # started in one of them during a rotation would commit into the file the
+    # swap is about to unlink, losing it silently. Refusing here is the only
+    # point every caller passes through.
+    if (maintenance_lock.under_maintenance(DATABASE_PATH)
+            and not maintenance_lock.holding_now()):
+        raise DatabaseLocked(
+            "This book is being maintained right now (its passphrase is "
+            "being changed). Try again once that finishes."
+        )
     assistant_may_write = False
     if ASSISTANT_ACCESS_LEVEL:
-        from utils import maintenance_lock
-
-        if maintenance_lock.under_maintenance(DATABASE_PATH):
-            raise DatabaseLocked(
-                "This book is being maintained right now (its passphrase is "
-                "being changed). Try again once that finishes."
-            )
         # An assistant may only write inside a declared write, which is what
         # publishes the marker a maintenance holder looks for. Anything else
         # gets a read-only connection, so a tool that mutates without declaring

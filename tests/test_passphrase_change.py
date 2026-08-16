@@ -4,6 +4,7 @@ The risk here is not a wrong number on a page, it is an unreadable book, so
 most of these tests are about what survives a failure.
 """
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -577,16 +578,32 @@ def test_rotation_refuses_while_a_writer_is_registered(book):
     assert verify_passphrase(book, OLD) is True
 
 
-def test_an_assistant_connection_is_refused_during_maintenance(book):
+def test_any_other_thread_is_refused_during_maintenance(book):
+    """Not only assistants. The desktop app runs concurrent Streamlit session
+    threads, and a write started in one during a rotation would commit into the
+    file the swap is about to unlink. The holder's own thread stays exempt,
+    because it is the one doing the work."""
+    import threading
     from utils import maintenance_lock
 
-    with maintenance_lock.hold(book):
-        dbconn.ASSISTANT_ACCESS_LEVEL = "post"
+    refused = {}
+
+    def other_thread():
         try:
-            with pytest.raises(dbconn.DatabaseLocked, match="being maintained"):
-                dbconn.get_connection()
-        finally:
-            dbconn.ASSISTANT_ACCESS_LEVEL = None
+            dbconn.get_connection().close()
+            refused["result"] = "allowed"
+        except dbconn.DatabaseLocked as exc:
+            refused["result"] = str(exc)
+
+    with maintenance_lock.hold(book):
+        # The holder itself must still be able to work on the book.
+        dbconn.get_connection().close()
+
+        worker = threading.Thread(target=other_thread)
+        worker.start()
+        worker.join(timeout=5)
+
+    assert "being maintained" in refused["result"], refused["result"]
 
 
 def test_the_lock_is_released_after_a_rotation(book):
@@ -802,6 +819,7 @@ def test_a_windows_style_replace_refusal_is_explained(book, monkeypatch):
 
     with monkeypatch.context() as patched:
         patched.setattr(crypto.os, "replace", refuse)
+        patched.setattr(crypto, "_on_windows", lambda: True)
         with pytest.raises(RuntimeError, match="Another program has this book open"):
             crypto.change_passphrase(book, derive_key(OLD), NEW)
 
@@ -927,3 +945,41 @@ def test_an_ambiguous_liveness_probe_counts_as_live(book, monkeypatch):
                     pass
     finally:
         marker.unlink(missing_ok=True)
+
+
+def test_a_book_name_with_glob_characters_still_blocks_maintenance(tmp_path, monkeypatch):
+    """Firm-mode books are named by the user. A name containing [ ] turned the
+    writer scan's pattern into a character class that matched nothing, so the
+    scan found no writers and rotation walked straight through a live write.
+    A safety check that silently finds nothing is the worst kind of bug."""
+    import os
+    from utils import maintenance_lock
+
+    book = tmp_path / "Client [2026] books.ledgertb"
+    book.write_bytes(b"not really a book")
+    marker = Path(f"{book}.writer-{os.getpid()}-deadbeef")
+    marker.write_text("")
+
+    try:
+        assert maintenance_lock._live_writers(book), "the writer must be seen"
+        with pytest.raises(maintenance_lock.MaintenanceBusy):
+            with maintenance_lock.hold(book):
+                pass
+    finally:
+        marker.unlink(missing_ok=True)
+
+
+def test_a_posix_permission_error_is_not_blamed_on_another_program(book, monkeypatch):
+    """On POSIX a rename is not refused for an open handle, so this is a real
+    permission problem and the Windows advice would send someone chasing
+    nothing."""
+    import database.crypto as crypto
+
+    def refuse(src, dst):
+        raise PermissionError(13, "Permission denied")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(crypto, "_on_windows", lambda: False)
+        patched.setattr(crypto.os, "replace", refuse)
+        with pytest.raises(RuntimeError, match="permissions"):
+            crypto.change_passphrase(book, derive_key(OLD), NEW)

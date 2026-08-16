@@ -264,6 +264,27 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
                 "passphrase."
             )
 
+        # Inside the lock, not after it. Released first, a concurrent restore,
+        # retention pass or second rotation could observe or overwrite a
+        # recovery set that is half converted.
+        try:
+            from services.backups import rekey_backups
+
+            converted, failed = rekey_backups(current_key, new_key, REKEY_ALL_BACKUPS)
+            result.backups_converted = converted
+            for name, reason in failed:
+                result.warnings.append(
+                    f"The backup {name} could not be converted to the new "
+                    f"passphrase ({reason}). It was left as it was; check which "
+                    "passphrase opens it before relying on it."
+                )
+        except Exception as exc:
+            result.warnings.append(
+                "The passphrase was changed, but existing backups could not be "
+                f"converted to it ({exc}). They were left as they were; check "
+                "which passphrase opens them before relying on them."
+            )
+
     try:
         result.new_key_opens = verify_passphrase(book, new_passphrase)
         result.old_key_refused = not _key_opens(book, current_key)
@@ -278,26 +299,6 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
             "The book was re-encrypted, but this machine could not confirm "
             "every check on it afterwards. Take a backup now and verify it "
             "opens before doing further work in this book."
-        )
-
-    # Every managed backup follows the book onto the new passphrase, so the
-    # recovery set never splits across two of them. See rekey_backups.
-    try:
-        from services.backups import rekey_backups
-
-        converted, failed = rekey_backups(current_key, new_key, REKEY_ALL_BACKUPS)
-        result.backups_converted = converted
-        for name, reason in failed:
-            result.warnings.append(
-                f"The backup {name} could not be converted to the new "
-                f"passphrase ({reason}). It was left as it was; check which "
-                "passphrase opens it before relying on it."
-            )
-    except Exception as exc:
-        result.warnings.append(
-            "The passphrase was changed, but existing backups could not be "
-            f"converted to it ({exc}). They were left as they were; check "
-            "which passphrase opens them before relying on them."
         )
 
     # A machine that remembered the old key holds one that no longer opens the

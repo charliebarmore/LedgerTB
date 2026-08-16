@@ -10,6 +10,7 @@ the OS keychain.
 """
 
 import hashlib
+import secrets
 import os
 from pathlib import Path
 
@@ -128,6 +129,12 @@ def _fsync_path(path: Path) -> None:
         os.close(fd)
 
 
+def _on_windows() -> bool:
+    """Named so a test can exercise the other platform's message without
+    mutating os.name, which pathlib reads and misbehaves without."""
+    return os.name == "nt"
+
+
 def _replace_or_explain(tmp_new: Path, path: Path) -> None:
     """Swap the prepared file in, or say why Windows refused.
 
@@ -141,11 +148,21 @@ def _replace_or_explain(tmp_new: Path, path: Path) -> None:
     try:
         os.replace(tmp_new, path)
     except PermissionError as exc:
+        if _on_windows():
+            raise RuntimeError(
+                "Another program has this book open, so it could not be "
+                "replaced. On Windows a file cannot be replaced while anything "
+                "holds it open. Close every other LedgerTB window and any "
+                "assistant access, then try again. Nothing has been changed."
+            ) from exc
+        # On POSIX a rename is not refused for an open handle, so this is a
+        # real permission problem with the file or its folder, and telling
+        # someone to close other windows would send them chasing nothing.
         raise RuntimeError(
-            "Another program has this book open, so it could not be replaced. "
-            "On Windows a file cannot be replaced while anything holds it open. "
-            "Close every other LedgerTB window and any assistant access, then "
-            "try again. Nothing has been changed."
+            "This book or the folder holding it could not be written to, so "
+            f"the passphrase was not changed ({exc}). Check the file's "
+            "permissions and that the drive is not read-only. Nothing has "
+            "been changed."
         ) from exc
 
 
@@ -172,9 +189,9 @@ def rekey_file(path: Path, current_key_hex: str, new_key_hex: str) -> None:
     path = Path(path)
     current_pragma = key_pragma(current_key_hex)
     new_pragma = key_pragma(new_key_hex)
-    tmp_new = path.with_suffix(path.suffix + ".rekey.tmp")
-    if tmp_new.exists() or tmp_new.is_symlink():
-        tmp_new.unlink()
+    # A unique name per invocation. A fixed one collides between concurrent
+    # re-keys and can be pre-created as a symlink pointing somewhere else.
+    tmp_new = path.with_suffix(path.suffix + f".rekey-{secrets.token_hex(8)}.tmp")
     try:
         src = sqlcipher3.connect(str(path))
         try:
@@ -265,9 +282,9 @@ def change_passphrase(path: Path, current_key_hex: str, new_passphrase: str) -> 
 
     current_pragma = key_pragma(current_key_hex)
     new_pragma = key_pragma(new_key)
-    tmp_new = path.with_suffix(path.suffix + ".rekey.tmp")
-    if tmp_new.exists() or tmp_new.is_symlink():
-        tmp_new.unlink()
+    # A unique name per invocation. A fixed one collides between concurrent
+    # re-keys and can be pre-created as a symlink pointing somewhere else.
+    tmp_new = path.with_suffix(path.suffix + f".rekey-{secrets.token_hex(8)}.tmp")
 
     try:
         src = sqlcipher3.connect(str(path))
