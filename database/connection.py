@@ -233,6 +233,25 @@ def get_cursor(commit: bool = False):
         with get_cursor(commit=True) as cur: # write
             cur.execute(...)
     """
+    # An assistant's write has to be visible to a maintenance holder for as long
+    # as it is in flight, not merely refused when the connection opens: a call
+    # that opened before maintenance began would otherwise commit into a book
+    # that is being replaced. The marker is published before the work and
+    # removed after it, and maintenance_lock.hold refuses while one is live.
+    if ASSISTANT_ACCESS_LEVEL and commit:
+        from utils import maintenance_lock
+
+        with maintenance_lock.writer(DATABASE_PATH):
+            with _cursor(commit) as cursor:
+                yield cursor
+        return
+
+    with _cursor(commit) as cursor:
+        yield cursor
+
+
+@contextmanager
+def _cursor(commit: bool):
     conn = get_connection()
     try:
         yield conn.cursor()

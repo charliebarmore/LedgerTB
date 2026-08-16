@@ -255,6 +255,43 @@ def rekey_backups(current_key: str, new_key: str, days: Optional[int] = None,
     return converted, failed
 
 
+def _repair_interrupted_rekey(database_path: Path, manifest: Path, payload: dict,
+                              digest: str) -> bool:
+    """Finish a backup conversion that was interrupted between its two writes.
+
+    rekey_backups replaces a backup's database and then its manifest. A crash
+    between the two leaves a database on the new key described by a manifest
+    recording the old one, which reads as a checksum failure and, before this,
+    as advice to delete the backup. That contradicts preserving them.
+
+    Opening cleanly is not enough on its own to justify rewriting a checksum: a
+    tampered file can still open and pass an integrity check, and repairing on
+    that basis would launder tampering into a fresh, trusted record.
+
+    The specific evidence of an interrupted conversion is that the manifest
+    names a DIFFERENT key from the one that actually opens the file. That is
+    only true when the database was re-keyed and its manifest was not. A
+    tampered backup whose manifest already names the current key does not match
+    that shape and is left alone, still reported as a mismatch.
+    """
+    from database.crypto import key_fingerprint
+
+    active = db_connection.get_active_key()
+    recorded = payload.get("key_fingerprint")
+    if not active or not recorded or recorded == key_fingerprint(active):
+        return False
+    if not _integrity(database_path):
+        return False
+    payload["sha256"] = digest
+    payload["size_bytes"] = database_path.stat().st_size
+    payload["key_fingerprint"] = key_fingerprint(active)
+    tmp = manifest.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, manifest)
+    return True
+
+
 def opens_with_active_key(record) -> bool:
     """Whether the session's current key is the one this backup was written
     with. Unknown (an older manifest with no fingerprint) counts as yes, since
@@ -294,6 +331,11 @@ def load_record(
             "This backup predates book-specific recovery protection and cannot "
             "be restored automatically."
         )
+    digest = _sha256(database_path)
+    if digest != payload.get("sha256") and _repair_interrupted_rekey(
+        database_path, manifest, payload, digest
+    ):
+        payload = json.loads(manifest.read_text())
     digest = _sha256(database_path)
     if digest != payload.get("sha256"):
         raise ValueError(
@@ -371,6 +413,11 @@ def restore_backup(database_path: Path, backup_dir: Optional[Path] = None,
     """
     book_id = active_book_id()
     record = load_record(Path(database_path), expected_book_id=book_id)
+    if audit is None:
+        raise ValueError(
+            "A restore must record itself in the audit trail; no audit writer "
+            "was supplied."
+        )
     if not opens_with_active_key(record):
         raise ValueError(
             "This recovery point was made under a different passphrase and "
@@ -400,11 +447,19 @@ def restore_backup(database_path: Path, backup_dir: Optional[Path] = None,
         conn = db_connection.open_keyed(temp)
         try:
             create_tables(conn)
-            if audit is not None:
-                audit(conn)
-                conn.commit()
+            audit(conn)
+            conn.commit()
         finally:
             conn.close()
+
+        # Re-checked after migrating and auditing it, not only after copying:
+        # those are writes, and a copy that was sound before them is not
+        # evidence about the file that is about to go live.
+        if not _integrity(temp):
+            raise RuntimeError(
+                "The recovery point stopped reading cleanly while it was being "
+                "prepared. The live book has not been touched."
+            )
 
         from database.crypto import _fsync_path
 

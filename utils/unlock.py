@@ -214,34 +214,44 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
     # Everything from here to the end of the swap is exclusive. data_version
     # detects a concurrent write after the fact, which is too late; this stops
     # one starting, including from the separate MCP process.
-    maintenance = maintenance_lock.hold(book)
-    maintenance.__enter__()
-    backup_path = None
-    try:
-        backup_path = create_backup(
-            reason="pre_passphrase_change", apply_retention=False,
-            target_key=new_key,
-        ).database_path
-    except Exception as exc:
-        maintenance.__exit__(None, None, None)
-        raise RuntimeError(
-            f"No backup could be taken, so the passphrase was not changed: {exc}"
-        ) from exc
+    # try/finally rather than an explicit __exit__ on each path: a
+    # KeyboardInterrupt or SystemExit would skip an except clause and leave the
+    # book locked for maintenance with nothing running.
+    with maintenance_lock.hold(book):
+        try:
+            backup_path = create_backup(
+                reason="pre_passphrase_change", apply_retention=False,
+                target_key=new_key,
+            ).database_path
+        except Exception as exc:
+            raise RuntimeError(
+                f"No backup could be taken, so the passphrase was not changed: {exc}"
+            ) from exc
 
-    # Point of no return is inside this call, at its single atomic replace.
-    try:
+        # Point of no return is inside this call, at its single atomic replace.
         change_passphrase(book, current_key, new_passphrase)
-    except Exception:
-        maintenance.__exit__(None, None, None)
-        raise
 
-    dbconn.set_active_key(new_key)
-    maintenance.__exit__(None, None, None)
-    result = RotationResult(new_key, backup_path)
+        # From here nothing may raise. The new key is live, and telling someone
+        # the passphrase did not change is how they record the wrong one.
+        result = RotationResult(new_key, backup_path)
+        try:
+            dbconn.set_active_key(new_key)
+        except Exception as exc:
+            result.warnings.append(
+                "The passphrase was changed, but this session could not switch "
+                f"to it ({exc}). Close and reopen the book using the new "
+                "passphrase."
+            )
 
-    result.new_key_opens = verify_passphrase(book, new_passphrase)
-    result.old_key_refused = not _key_opens(book, current_key)
-    result.integrity_ok = _integrity_with_key(book, new_key)
+    try:
+        result.new_key_opens = verify_passphrase(book, new_passphrase)
+        result.old_key_refused = not _key_opens(book, current_key)
+        result.integrity_ok = _integrity_with_key(book, new_key)
+    except Exception as exc:
+        result.warnings.append(
+            f"The passphrase was changed, but the checks afterwards could not "
+            f"be completed ({exc}). Take a backup now and verify it opens."
+        )
     if not result.verified:
         result.warnings.append(
             "The book was re-encrypted, but this machine could not confirm "
@@ -259,13 +269,14 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
         for name, reason in failed:
             result.warnings.append(
                 f"The backup {name} could not be converted to the new "
-                f"passphrase ({reason}). It still opens with the previous one."
+                f"passphrase ({reason}). It was left as it was; check which "
+                "passphrase opens it before relying on it."
             )
     except Exception as exc:
         result.warnings.append(
             "The passphrase was changed, but existing backups could not be "
-            f"converted to it ({exc}). They still open with the previous "
-            "passphrase."
+            f"converted to it ({exc}). They were left as they were; check "
+            "which passphrase opens them before relying on them."
         )
 
     # A machine that remembered the old key holds one that no longer opens the

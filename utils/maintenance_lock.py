@@ -71,6 +71,27 @@ def _live_writers(book):
     return live
 
 
+def _holder_is_gone(lock: Path) -> bool:
+    """Whether a maintenance lock's recorded process is no longer running."""
+    try:
+        pid = int(lock.read_text().strip() or 0)
+    except (OSError, ValueError):
+        return True                 # unreadable or malformed: not a live claim
+    if pid <= 0:
+        return True
+    if pid == os.getpid():
+        # Our own live claim. Reclaiming it would turn a second concurrent
+        # rotation in this process into a silent success.
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False                # alive, owned by another user
+    return False
+
+
 @contextmanager
 def hold(book):
     """Take the book for maintenance, or raise MaintenanceBusy."""
@@ -79,10 +100,21 @@ def hold(book):
     try:
         fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as exc:
-        raise MaintenanceBusy(
-            "Another maintenance operation is already running on this book. If "
-            f"nothing else is running, remove {lock.name} and try again."
-        ) from exc
+        # A crash mid-maintenance would otherwise block this book forever, so a
+        # lock whose holder is gone is reclaimed rather than believed. A lock we
+        # cannot attribute to a live process is not evidence of anything.
+        if _holder_is_gone(lock):
+            lock.unlink(missing_ok=True)
+            try:
+                fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                raise MaintenanceBusy(
+                    "Another maintenance operation is already running on this book."
+                ) from exc
+        else:
+            raise MaintenanceBusy(
+                "Another maintenance operation is already running on this book."
+            ) from exc
     try:
         os.write(fd, f"{os.getpid()}\n".encode())
     finally:

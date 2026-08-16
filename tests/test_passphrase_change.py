@@ -623,3 +623,122 @@ def test_two_maintenance_holds_cannot_overlap(book):
         with pytest.raises(maintenance_lock.MaintenanceBusy, match="already running"):
             with maintenance_lock.hold(book):
                 pass
+
+
+# --- what the second review found ------------------------------------------
+
+def test_an_assistant_write_publishes_a_marker_while_in_flight(book):
+    """The gap that mattered: checking only at connection time let a call that
+    had already opened commit into a book being replaced. The marker is what a
+    maintenance holder in another process sees.
+
+    Single-process here, so this asserts the marker is published and cleared;
+    a holder ignoring its own pid is why the refusal itself is tested with a
+    foreign pid in test_rotation_refuses_while_a_writer_is_registered.
+    """
+    import os
+    from utils import maintenance_lock
+
+    marker = Path(f"{book}.writer-{os.getpid()}")
+    dbconn.ASSISTANT_ACCESS_LEVEL = "post"
+    try:
+        assert not marker.exists()
+        with dbconn.get_cursor(commit=True):
+            assert marker.exists(), "an in-flight assistant write must be visible"
+        assert not marker.exists(), "and must stop being visible when it ends"
+    finally:
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
+
+
+def test_a_read_does_not_publish_a_writer_marker(book):
+    """Only mutations need to block maintenance."""
+    import os
+
+    marker = Path(f"{book}.writer-{os.getpid()}")
+    dbconn.ASSISTANT_ACCESS_LEVEL = "read"
+    try:
+        with dbconn.get_cursor():
+            assert not marker.exists()
+    finally:
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
+
+
+def test_an_assistant_write_is_refused_during_maintenance(book):
+    from utils import maintenance_lock
+
+    with maintenance_lock.hold(book):
+        dbconn.ASSISTANT_ACCESS_LEVEL = "post"
+        try:
+            with pytest.raises(maintenance_lock.MaintenanceBusy):
+                with dbconn.get_cursor(commit=True):
+                    pass
+        finally:
+            dbconn.ASSISTANT_ACCESS_LEVEL = None
+
+
+def test_a_stale_maintenance_lock_is_reclaimed(book):
+    """A crash mid-rotation must not lock the book out permanently."""
+    from utils import maintenance_lock
+    from utils.unlock import change_book_passphrase
+
+    # A lock naming a process that no longer exists.
+    maintenance_lock.maintenance_path(book).write_text("999999999\n")
+
+    change_book_passphrase(NEW)
+
+    assert verify_passphrase(book, NEW) is True
+    assert not maintenance_lock.under_maintenance(book)
+
+
+def test_a_live_holders_lock_is_not_reclaimed(book):
+    from utils import maintenance_lock
+
+    with maintenance_lock.hold(book):
+        with pytest.raises(maintenance_lock.MaintenanceBusy):
+            with maintenance_lock.hold(book):
+                pass
+
+
+def test_a_failure_after_the_swap_never_reports_failure(book, monkeypatch):
+    """R7. The new key is live, so the only honest outcome is success plus a
+    warning naming the follow-up."""
+    from utils.unlock import change_book_passphrase
+
+    def refuse(_key):
+        raise RuntimeError("simulated key publication failure")
+
+    monkeypatch.setattr(dbconn, "set_active_key", refuse)
+
+    result = change_book_passphrase(NEW)
+
+    assert any("could not switch" in w for w in result.warnings)
+    assert verify_passphrase(book, NEW) is True
+
+
+def test_an_interrupted_backup_conversion_repairs_itself(book, monkeypatch):
+    """Crash between replacing a backup and its manifest: the backup is on the
+    new key, its record says otherwise. Preserve and repair, never delete."""
+    import services.backups as backups
+    from database.crypto import rekey_file
+
+    record = _backup()
+    # Convert the file but not its manifest, exactly as an interrupted run would.
+    rekey_file(record.database_path, derive_key(OLD), derive_key(NEW))
+    dbconn.set_active_key(derive_key(NEW))
+
+    repaired = backups.load_record(record.database_path)
+
+    assert backups.opens_with_active_key(repaired) is True
+    assert repaired.database_path.exists(), "it must never be deleted"
+
+
+def test_a_tampered_backup_is_still_rejected(book):
+    """The repair above must not launder tampering into a fresh checksum."""
+    import services.backups as backups
+
+    record = _backup()
+    with record.database_path.open("ab") as handle:
+        handle.write(b"tampered")
+
+    with pytest.raises(ValueError, match="checksum"):
+        backups.load_record(record.database_path)
