@@ -27,6 +27,7 @@ from utils.client_selector import render_client_selector
 from utils.folder_picker import choose_folder
 from utils.unlock import (
     MIN_PASSPHRASE_LEN,
+    assistant_access_enabled,
     change_book_passphrase,
     passphrase_strength,
     require_unlock,
@@ -270,75 +271,122 @@ if backups:
 st.divider()
 st.subheader("Book passphrase")
 
+_rotation_blockers = []
 if not dbconn.ENCRYPTION_AVAILABLE:
     st.caption(
         "This book is not encrypted, because the SQLCipher driver is not "
         "installed on this machine, so there is no passphrase to change."
     )
 else:
-    _remembered = bool(secure_store.get_secret(saved_key_name(dbconn.DATABASE_PATH)))
-    st.caption(
-        "Changing the passphrase re-encrypts the whole book. The old "
-        "passphrase stops working immediately, and no copy that opens with it "
-        "is kept."
-    )
-    if _remembered:
-        st.caption(
-            "This computer remembers the key for this book, so you are not "
-            "asked for the current passphrase and this computer keeps opening "
-            "the book without one after the change."
+    if dbconn.READ_ONLY:
+        _rotation_blockers.append(
+            "This book is open read-only. The session holding it open for "
+            "writing is the one that can change its passphrase."
         )
-    st.caption(
-        "LedgerTB cannot tell you the current passphrase. It is never stored, "
-        "only a key derived from it, so record the new one somewhere you trust "
-        "before you change it."
-    )
+    if not books.is_local_book(dbconn.DATABASE_PATH):
+        _rotation_blockers.append(
+            "This book is not in LedgerTB's own data folder, so it may be on a "
+            "shared drive. Nothing here can see whether another computer is "
+            "working in it, so the passphrase cannot be changed in place. Copy "
+            "the book somewhere local, change it there, and put it back with "
+            "everyone else closed out."
+        )
+    if assistant_access_enabled(dbconn.DATABASE_PATH):
+        _rotation_blockers.append(
+            "Assistant access is on for this book. It runs as a separate "
+            "program holding its own copy of the key, which cannot be closed "
+            "or updated from here, so turn it off below first. Re-enable it "
+            "afterwards and it picks up the new passphrase."
+        )
 
-    with st.form("change_book_passphrase_form"):
-        _new = st.text_input("New passphrase", type="password",
-                             key="rekey_new")
-        _confirm = st.text_input("Confirm new passphrase", type="password",
-                                 key="rekey_confirm")
-        _submitted = st.form_submit_button("Change passphrase", type="primary")
-
-    if _new:
-        _verdict, _detail = passphrase_strength(_new)
-        st.caption(f"{_verdict} · {_detail}")
-
-    if _submitted:
-        if _new != _confirm:
-            st.error("The two passphrases do not match.")
-        elif len(_new) < MIN_PASSPHRASE_LEN:
-            st.error(
-                f"The new passphrase must be at least {MIN_PASSPHRASE_LEN} "
-                "characters."
+    if _rotation_blockers:
+        for _blocker in _rotation_blockers:
+            st.warning(_blocker)
+    else:
+        _remembered = bool(secure_store.get_secret(saved_key_name(dbconn.DATABASE_PATH)))
+        st.caption(
+            "Changing the passphrase re-encrypts the whole book and every "
+            "backup of it. The old passphrase stops working immediately."
+        )
+        st.caption(
+            "Close this book everywhere else first. Nothing here can tell "
+            "whether another copy of LedgerTB has it open."
+        )
+        if _remembered:
+            st.caption(
+                "This computer remembers the key for this book, so you are not "
+                "asked for the current passphrase and it keeps opening the book "
+                "without one afterwards."
             )
-        else:
-            try:
-                change_book_passphrase(_new)
-            except Exception as exc:
+        st.caption(
+            "LedgerTB cannot tell you the current passphrase. It is never "
+            "stored, only a key derived from it, so record the new one "
+            "somewhere you trust before you change it."
+        )
+
+        with st.form("change_book_passphrase_form"):
+            _new = st.text_input("New passphrase", type="password", key="rekey_new")
+            _confirm = st.text_input("Confirm new passphrase", type="password",
+                                     key="rekey_confirm")
+            _submitted = st.form_submit_button("Change passphrase", type="primary")
+
+        if _new:
+            _verdict, _detail = passphrase_strength(_new)
+            st.caption(f"{_verdict} · {_detail}")
+
+        if _submitted:
+            if _new != _confirm:
+                st.error("The two passphrases do not match.")
+            elif len(_new) < MIN_PASSPHRASE_LEN:
                 st.error(
-                    f"The passphrase was not changed: {exc} The book still "
-                    "opens with the passphrase it had."
+                    f"The new passphrase must be at least {MIN_PASSPHRASE_LEN} "
+                    "characters."
                 )
             else:
-                audit_safety_event(
-                    "REKEY",
-                    "book_passphrase_changed",
-                    {
-                        "book": dbconn.DATABASE_PATH.name,
-                        "remembered_key_updated": _remembered,
-                    },
-                )
-                st.session_state["passphrase_changed"] = True
-                st.rerun()
+                try:
+                    _result = change_book_passphrase(_new)
+                except Exception as exc:
+                    st.error(
+                        f"The passphrase was not changed: {exc} The book still "
+                        "opens with the passphrase it had."
+                    )
+                else:
+                    audit_safety_event(
+                        "REKEY",
+                        "book_passphrase_changed",
+                        {
+                            "book": dbconn.DATABASE_PATH.name,
+                            "backups_converted": _result.backups_converted,
+                            "checks_passed": _result.verified,
+                            "warnings": _result.warnings,
+                        },
+                    )
+                    st.session_state["passphrase_result"] = {
+                        "verified": _result.verified,
+                        "converted": _result.backups_converted,
+                        "warnings": _result.warnings,
+                    }
+                    st.rerun()
 
-_changed = st.session_state.pop("passphrase_changed", None)
-if _changed:
+_done = st.session_state.pop("passphrase_result", None)
+if _done:
     st.success(
-        "The passphrase is changed and the book is open under it. Record it "
-        "now: nothing here can recover it later."
+        "The passphrase is changed on this computer and the book is open under "
+        f"it. {_done['converted']} backup(s) were re-encrypted to match. "
+        "Record it now: nothing here can recover it later."
     )
+    if _done["verified"]:
+        st.caption(
+            "Checked afterwards: the new passphrase opens the book, the old one "
+            "does not, and the file reads back cleanly."
+        )
+    else:
+        st.warning(
+            "The checks afterwards did not all pass. Take a backup now and "
+            "confirm it opens before doing further work in this book."
+        )
+    for _warning in _done["warnings"]:
+        st.warning(_warning)
 
 st.divider()
 st.subheader("Assistant access (MCP)")
