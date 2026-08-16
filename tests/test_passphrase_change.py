@@ -742,3 +742,21 @@ def test_a_tampered_backup_is_still_rejected(book):
 
     with pytest.raises(ValueError, match="checksum"):
         backups.load_record(record.database_path)
+
+
+def test_a_windows_style_replace_refusal_is_explained(book, monkeypatch):
+    """Verified on Windows 11 / NTFS: os.replace raises WinError 5 if anything
+    holds the target open, including a read handle or a live SQLite connection.
+    It fails safely, but "Access is denied" does not tell anyone what to do."""
+    import database.crypto as crypto
+
+    def refuse(src, dst):
+        raise PermissionError(5, "Access is denied")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(crypto.os, "replace", refuse)
+        with pytest.raises(RuntimeError, match="Another program has this book open"):
+            crypto.change_passphrase(book, derive_key(OLD), NEW)
+
+    assert verify_passphrase(book, OLD) is True
+    assert not (book.parent / (book.name + ".rekey.tmp")).exists()

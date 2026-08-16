@@ -128,6 +128,27 @@ def _fsync_path(path: Path) -> None:
         os.close(fd)
 
 
+def _replace_or_explain(tmp_new: Path, path: Path) -> None:
+    """Swap the prepared file in, or say why Windows refused.
+
+    Verified on Windows 11 / NTFS with Python 3.12: os.replace fails with
+    WinError 5 if ANY handle is open on the target, including a plain read
+    handle and a live SQLite connection. POSIX replaces the name regardless.
+
+    It fails safely, since the replace is all-or-nothing and the book is left
+    untouched, but "Access is denied" tells the reader nothing about what to do.
+    """
+    try:
+        os.replace(tmp_new, path)
+    except PermissionError as exc:
+        raise RuntimeError(
+            "Another program has this book open, so it could not be replaced. "
+            "On Windows a file cannot be replaced while anything holds it open. "
+            "Close every other LedgerTB window and any assistant access, then "
+            "try again. Nothing has been changed."
+        ) from exc
+
+
 def _data_version(conn) -> int:
     """SQLite's counter of commits made by OTHER connections to this database.
 
@@ -180,7 +201,7 @@ def rekey_file(path: Path, current_key_hex: str, new_key_hex: str) -> None:
             raise RuntimeError("The re-encrypted copy failed its integrity check.")
 
         _fsync_path(tmp_new)
-        os.replace(tmp_new, path)
+        _replace_or_explain(tmp_new, path)
         _fsync_path(path)
         _fsync_path(path.parent)
         try:
@@ -306,7 +327,7 @@ def change_passphrase(path: Path, current_key_hex: str, new_passphrase: str) -> 
             final.close()
 
         _fsync_path(tmp_new)
-        os.replace(tmp_new, path)
+        _replace_or_explain(tmp_new, path)
         _fsync_path(path)
         _fsync_path(path.parent)
         try:
