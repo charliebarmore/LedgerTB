@@ -292,6 +292,29 @@ def _repair_interrupted_rekey(database_path: Path, manifest: Path, payload: dict
     return True
 
 
+def quarantine_backup(database_path: Path) -> Path:
+    """Take a backup out of the managed set without destroying it.
+
+    Used when a passphrase change fails after its pre-swap backup was written:
+    the live book is still on the old key, so leaving a new-key recovery point
+    in the set is exactly the mixed key tier the design avoids. Deleting it
+    would be simpler, but backups are preserved, so it moves instead.
+
+    The manifest goes first. A backup with no manifest is not listed and not
+    restorable, so a crash between the two moves leaves it out of the set
+    rather than half in it.
+    """
+    database_path = Path(database_path)
+    quarantine = database_path.parent / "failed-rotation"
+    quarantine.mkdir(parents=True, exist_ok=True, mode=0o700)
+    manifest = database_path.with_suffix(".json")
+    if manifest.exists():
+        os.replace(manifest, quarantine / manifest.name)
+    if database_path.exists():
+        os.replace(database_path, quarantine / database_path.name)
+    return quarantine / database_path.name
+
+
 def opens_with_active_key(record) -> bool:
     """Whether the session's current key is the one this backup was written
     with. Unknown (an older manifest with no fingerprint) counts as yes, since

@@ -27,8 +27,15 @@ machines on a share.
 """
 
 import os
+import secrets
+import threading
 from contextlib import contextmanager
 from pathlib import Path
+
+# Writer contexts nest: a guarded tool may call another guarded helper. Only the
+# outermost publishes and removes the marker, so an inner one finishing cannot
+# retract a claim the outer one still needs.
+_local = threading.local()
 
 
 class MaintenanceBusy(RuntimeError):
@@ -40,8 +47,25 @@ def maintenance_path(book) -> Path:
     return Path(str(book) + ".maintenance")
 
 
-def _writer_path(book, pid=None) -> Path:
-    return Path(f"{book}.writer-{pid or os.getpid()}")
+def _writer_path(book, token: str) -> Path:
+    """One marker per in-flight invocation, not per process.
+
+    MCP runs tool calls on parallel threads in one process. A per-process marker
+    meant the first call to finish removed the claim while the second was still
+    writing, which is how a lost write stayed reachable through the lock.
+    """
+    return Path(f"{book}.writer-{os.getpid()}-{token}")
+
+
+def _pid_of(marker: Path):
+    """The pid a marker names, or None if it cannot be read as one."""
+    parts = marker.name.rsplit("-", 2)
+    if len(parts) < 2:
+        return None
+    try:
+        return int(parts[-2])
+    except ValueError:
+        return None
 
 
 def _live_writers(book):
@@ -53,20 +77,27 @@ def _live_writers(book):
     book = Path(book)
     live = []
     for marker in book.parent.glob(book.name + ".writer-*"):
-        try:
-            pid = int(marker.name.rsplit("-", 1)[1])
-        except (IndexError, ValueError):
-            marker.unlink(missing_ok=True)
+        pid = _pid_of(marker)
+        if pid is None:
+            # A name we cannot interpret is not evidence that nobody is
+            # writing, so it counts as live rather than being cleaned up.
+            live.append(marker)
             continue
-        if pid == os.getpid():
-            continue
+        # Same-process markers are NOT skipped. A write in flight on another
+        # thread of this process is as real as one in the MCP process, and the
+        # desktop app runs concurrent session threads. The rotating thread
+        # itself never holds a writer marker, so this cannot block on its own
+        # claim.
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
             marker.unlink(missing_ok=True)
             continue
-        except PermissionError:
-            pass                    # alive, owned by someone else
+        except OSError:
+            # PermissionError, or anything else the probe cannot answer.
+            # Ambiguity counts as live: refusing maintenance is recoverable,
+            # writing over somebody's transaction is not.
+            pass
         live.append(marker)
     return live
 
@@ -101,17 +132,29 @@ def hold(book):
         fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as exc:
         # A crash mid-maintenance would otherwise block this book forever, so a
-        # lock whose holder is gone is reclaimed rather than believed. A lock we
-        # cannot attribute to a live process is not evidence of anything.
-        if _holder_is_gone(lock):
-            lock.unlink(missing_ok=True)
-            try:
-                fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            except FileExistsError:
-                raise MaintenanceBusy(
-                    "Another maintenance operation is already running on this book."
-                ) from exc
-        else:
+        # lock whose holder is gone is reclaimed. Unlinking it first was racy:
+        # two processes could both judge it stale and each delete the other's
+        # fresh claim. Renaming it aside is the atomic step instead, since
+        # exactly one process can rename a given path; the loser sees it gone.
+        if not _holder_is_gone(lock):
+            raise MaintenanceBusy(
+                "Another maintenance operation is already running on this book."
+            ) from exc
+        aside = Path(f"{lock}.stale-{secrets.token_hex(8)}")
+        try:
+            os.rename(str(lock), str(aside))
+        except FileNotFoundError:
+            # Someone else reclaimed it first. Do not race them for it.
+            raise MaintenanceBusy(
+                "Another maintenance operation is already running on this book."
+            ) from exc
+        aside.unlink(missing_ok=True)
+        # Deliberately no retry loop. If a third process claimed the canonical
+        # name in the gap, that claim is live and this attempt refuses; looping
+        # here is exactly how two holders could both believe they won.
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
             raise MaintenanceBusy(
                 "Another maintenance operation is already running on this book."
             ) from exc
@@ -136,14 +179,30 @@ def hold(book):
 @contextmanager
 def writer(book):
     """Mark a write in progress, or raise MaintenanceBusy if the book is being
-    maintained. Used by the MCP process around its own mutations."""
+    maintained. Wrapped around a whole mutating MCP tool invocation.
+
+    Reentrant per thread: nesting increments a depth and only the outermost
+    context publishes and removes the marker. Without that, an inner guard
+    finishing would retract a claim the outer one still depends on.
+    """
     book = Path(book)
-    marker = _writer_path(book)
+    depth = getattr(_local, "depth", 0)
+    if depth:
+        _local.depth = depth + 1
+        try:
+            yield
+        finally:
+            _local.depth -= 1
+        return
+
+    token = secrets.token_hex(8)
+    marker = _writer_path(book, token)
     try:
-        fd = os.open(str(marker), os.O_CREAT | os.O_WRONLY, 0o600)
+        fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         os.close(fd)
     except OSError as exc:
         raise MaintenanceBusy(f"Could not register a write on this book: {exc}") from exc
+    _local.depth = 1
     try:
         if maintenance_path(book).exists():
             raise MaintenanceBusy(
@@ -152,7 +211,19 @@ def writer(book):
             )
         yield
     finally:
+        _local.depth = 0
         marker.unlink(missing_ok=True)
+
+
+def writing_now() -> bool:
+    """Whether this thread is inside a declared write.
+
+    The enforcement point for writes that never declared themselves: an
+    assistant connection opened outside a writer context is opened read-only,
+    so a tool that mutates while claiming to be read-only fails loudly instead
+    of slipping past the lock.
+    """
+    return getattr(_local, "depth", 0) > 0
 
 
 def under_maintenance(book) -> bool:

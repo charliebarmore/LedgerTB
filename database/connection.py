@@ -144,6 +144,24 @@ def _tighten_permissions(path) -> None:
         pass
 
 
+def writes_permitted() -> bool:
+    """Whether a connection opened now would be writable.
+
+    Read-only book sessions cannot write, and neither can an assistant outside
+    a declared write. Callers that need a write lock (an export taking a
+    consistent snapshot, for instance) must ask this rather than checking
+    READ_ONLY alone, or they will try to BEGIN IMMEDIATE on a connection the
+    factory has already made read-only.
+    """
+    if READ_ONLY:
+        return False
+    if ASSISTANT_ACCESS_LEVEL:
+        from utils import maintenance_lock
+
+        return maintenance_lock.writing_now()
+    return True
+
+
 def get_connection():
     """Open a database connection, keyed with the active passphrase when the
     SQLCipher driver is present.
@@ -159,6 +177,7 @@ def get_connection():
     # ASSISTANT_ACCESS_LEVEL is only set in the MCP process, so this costs the
     # desktop app nothing and is the one chokepoint every assistant query goes
     # through.
+    assistant_may_write = False
     if ASSISTANT_ACCESS_LEVEL:
         from utils import maintenance_lock
 
@@ -167,6 +186,12 @@ def get_connection():
                 "This book is being maintained right now (its passphrase is "
                 "being changed). Try again once that finishes."
             )
+        # An assistant may only write inside a declared write, which is what
+        # publishes the marker a maintenance holder looks for. Anything else
+        # gets a read-only connection, so a tool that mutates without declaring
+        # it fails loudly here rather than slipping past the lock. Declaring
+        # the intent is the contract; this is the enforcement.
+        assistant_may_write = maintenance_lock.writing_now()
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     _tighten_permissions(DATABASE_PATH)
     conn = _driver.connect(DATABASE_PATH, check_same_thread=False)
@@ -188,9 +213,9 @@ def get_connection():
     # shipped driver is compiled TEMP_STORE=2 already; saying so explicitly
     # means a rebuilt wheel cannot change it silently.
     conn.execute("PRAGMA temp_store = MEMORY")
-    if READ_ONLY:
+    if READ_ONLY or (ASSISTANT_ACCESS_LEVEL and not assistant_may_write):
         conn.execute("PRAGMA query_only = ON")
-    elif ASSISTANT_ACCESS_LEVEL:
+    if ASSISTANT_ACCESS_LEVEL:
         # Set last so the connection-setup pragmas above are unaffected.
         conn.set_authorizer(_assistant_authorizer)
     return conn
@@ -233,19 +258,6 @@ def get_cursor(commit: bool = False):
         with get_cursor(commit=True) as cur: # write
             cur.execute(...)
     """
-    # An assistant's write has to be visible to a maintenance holder for as long
-    # as it is in flight, not merely refused when the connection opens: a call
-    # that opened before maintenance began would otherwise commit into a book
-    # that is being replaced. The marker is published before the work and
-    # removed after it, and maintenance_lock.hold refuses while one is live.
-    if ASSISTANT_ACCESS_LEVEL and commit:
-        from utils import maintenance_lock
-
-        with maintenance_lock.writer(DATABASE_PATH):
-            with _cursor(commit) as cursor:
-                yield cursor
-        return
-
     with _cursor(commit) as cursor:
         yield cursor
 

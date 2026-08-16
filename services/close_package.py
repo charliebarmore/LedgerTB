@@ -60,7 +60,7 @@ def consistent_export_window():
     conn = get_connection()
     try:
         from utils import books
-        if not dbconn.READ_ONLY and books.is_local_book(dbconn.DATABASE_PATH):
+        if dbconn.writes_permitted() and books.is_local_book(dbconn.DATABASE_PATH):
             conn.execute("BEGIN IMMEDIATE")
         else:
             conn.execute("BEGIN")

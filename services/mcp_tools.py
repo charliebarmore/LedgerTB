@@ -9,6 +9,7 @@ corresponding append-only write surface. Updates and deletes are always denied.
 Amounts are dollars (floats) — presentation values for an assistant, not
 ledger arithmetic (the ledger itself stores integer cents).
 """
+import functools as _functools
 import os
 from datetime import date
 from pathlib import Path
@@ -21,6 +22,32 @@ from models.journal_entry import JournalEntry
 from models.reports import ReportGenerator
 from money import to_dollars
 from services.book_review import run_integrity_sweep
+
+
+
+def mutating(fn):
+    """Declare a tool implementation as a write.
+
+    The guard lives here rather than only on the MCP server's wrappers so that
+    it holds for every caller of this module, not just the one entry point. It
+    is reentrant, so the server's own declaration nesting over this one is
+    harmless.
+
+    Declaring is the contract; database/connection.py is the enforcement, which
+    opens an assistant connection read-only outside a declared write. A mutating
+    tool that loses this decorator fails loudly instead of silently escaping the
+    maintenance lock.
+    """
+    @_functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        from database import connection as _dbconn
+        from utils import maintenance_lock
+
+        with maintenance_lock.writer(_dbconn.DATABASE_PATH):
+            return fn(*args, **kwargs)
+
+    wrapper._ledgertb_mutating = True
+    return wrapper
 
 
 def _write_private(path: Path, payload: bytes) -> None:
@@ -118,6 +145,7 @@ def client_branding_detail(client_id: int) -> dict:
     }
 
 
+@mutating
 def propose_client_branding(
     client_id: int,
     display_name: Optional[str] = None,
@@ -257,6 +285,7 @@ def account_close_detail(client_id: int, fiscal_year: int, account_id: int) -> d
     }
 
 
+@mutating
 def propose_close_explanation(client_id: int, fiscal_year: int, account_id: int,
                               explanation: str, rationale: str = "") -> dict:
     """File an explanation proposal; only a person can accept or sign it."""
@@ -516,6 +545,7 @@ def integrity_sweep(client_id: int, start: str, end: str) -> dict:
     }
 
 
+@mutating
 def propose_entry(client_id: int, entry_date: str, description: str,
                   lines: list, rationale: str = "",
                   entry_type: str = "Regular",
@@ -555,6 +585,7 @@ def propose_entry(client_id: int, entry_date: str, description: str,
     }
 
 
+@mutating
 def propose_correction(client_id: int, original_entry_id: int,
                        entry_date: str, description: str, lines: list,
                        rationale: str = "",
@@ -607,6 +638,7 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
     ]
 
 
+@mutating
 def propose_import(client_id: int, bank_account_number: str, rows: list,
                    source_label: str = "Assistant import") -> dict:
     """Stage normalized bank/card rows for human review in LedgerTB's import
@@ -728,6 +760,7 @@ def list_staged_imports(client_id: int) -> list:
     ]
 
 
+@mutating
 def post_entry(client_id: int, entry_date: str, description: str,
                lines: list, entry_type: str = "Regular") -> dict:
     """POST a balanced journal entry directly (assistant access level "post"
@@ -773,6 +806,7 @@ def post_entry(client_id: int, entry_date: str, description: str,
     }
 
 
+@mutating
 def export_close_package(client_id: int, period_start: str, period_end: str,
                          out_dir: str) -> dict:
     """Write the close package (branded PDF + Excel workbook) to disk so a
@@ -868,6 +902,7 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
     }
 
 
+@mutating
 def create_client(name: str, entity_type: str = "",
                   fiscal_year_end_month: int = 12,
                   seed_default_chart: bool = True) -> dict:
@@ -903,6 +938,7 @@ def create_client(name: str, entity_type: str = "",
     }
 
 
+@mutating
 def import_accounts(client_id: int, rows: list) -> dict:
     """Add accounts to a client's chart. rows: dicts with number, name, type
     (canonical or QuickBooks type names — Bank, Credit Card, Accounts

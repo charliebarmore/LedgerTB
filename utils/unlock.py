@@ -229,7 +229,28 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
             ) from exc
 
         # Point of no return is inside this call, at its single atomic replace.
-        change_passphrase(book, current_key, new_passphrase)
+        # Before it, the attempt owns that backup: the live book is still on the
+        # old key, so a new-key recovery point left in the managed set is the
+        # mixed tier this design exists to avoid.
+        try:
+            change_passphrase(book, current_key, new_passphrase)
+        except Exception as exc:
+            from services.backups import quarantine_backup
+
+            try:
+                moved = quarantine_backup(backup_path)
+            except Exception as cleanup_exc:
+                raise RuntimeError(
+                    f"{exc} A backup for the attempt was left in place and "
+                    f"could not be moved aside ({cleanup_exc}): "
+                    f"{backup_path.name}. It opens with the passphrase you "
+                    "just tried, not the one the book still uses."
+                ) from exc
+            raise RuntimeError(
+                f"{exc} The backup taken for this attempt was moved to "
+                f"{moved.parent.name}/, so your recovery points still all open "
+                "with the passphrase the book already had."
+            ) from exc
 
         # From here nothing may raise. The new key is live, and telling someone
         # the passphrase did not change is how they record the wrong one.

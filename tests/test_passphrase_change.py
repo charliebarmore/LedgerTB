@@ -639,41 +639,88 @@ def test_an_assistant_write_publishes_a_marker_while_in_flight(book):
     import os
     from utils import maintenance_lock
 
-    marker = Path(f"{book}.writer-{os.getpid()}")
-    dbconn.ASSISTANT_ACCESS_LEVEL = "post"
-    try:
-        assert not marker.exists()
-        with dbconn.get_cursor(commit=True):
-            assert marker.exists(), "an in-flight assistant write must be visible"
-        assert not marker.exists(), "and must stop being visible when it ends"
-    finally:
-        dbconn.ASSISTANT_ACCESS_LEVEL = None
+    from utils import maintenance_lock
+
+    def markers():
+        return list(book.parent.glob(book.name + ".writer-*"))
+
+    assert markers() == []
+    with maintenance_lock.writer(book):
+        assert len(markers()) == 1, "an in-flight write must be visible"
+    assert markers() == [], "and must stop being visible when it ends"
 
 
-def test_a_read_does_not_publish_a_writer_marker(book):
-    """Only mutations need to block maintenance."""
-    import os
+def test_overlapping_writes_on_two_threads_keep_their_own_markers(book):
+    """MCP runs tool calls on parallel threads in one process. A per-process
+    marker meant the first to finish removed the claim while the second was
+    still writing, which is how a lost write stayed reachable."""
+    import threading
+    from utils import maintenance_lock
 
-    marker = Path(f"{book}.writer-{os.getpid()}")
-    dbconn.ASSISTANT_ACCESS_LEVEL = "read"
-    try:
-        with dbconn.get_cursor():
-            assert not marker.exists()
-    finally:
-        dbconn.ASSISTANT_ACCESS_LEVEL = None
+    def markers():
+        return list(book.parent.glob(book.name + ".writer-*"))
+
+    second_in = threading.Event()
+    first_out = threading.Event()
+    seen = {}
+
+    def second_writer():
+        with maintenance_lock.writer(book):
+            second_in.set()
+            first_out.wait(timeout=5)
+            seen["after_first_exited"] = len(markers())
+
+    worker = threading.Thread(target=second_writer)
+    with maintenance_lock.writer(book):
+        worker.start()
+        second_in.wait(timeout=5)
+        seen["both_active"] = len(markers())
+    first_out.set()
+    worker.join(timeout=5)
+
+    assert seen["both_active"] == 2, "each in-flight write needs its own marker"
+    assert seen["after_first_exited"] == 1, "finishing one must not clear the other"
+    assert markers() == []
+
+
+def test_nesting_on_one_thread_reuses_the_same_claim(book):
+    """A guarded tool may call another guarded helper; the inner one finishing
+    must not retract the outer one's claim."""
+    from utils import maintenance_lock
+
+    def markers():
+        return list(book.parent.glob(book.name + ".writer-*"))
+
+    with maintenance_lock.writer(book):
+        with maintenance_lock.writer(book):
+            assert len(markers()) == 1
+        assert len(markers()) == 1, "the inner exit must not clear the claim"
+    assert markers() == []
 
 
 def test_an_assistant_write_is_refused_during_maintenance(book):
     from utils import maintenance_lock
 
     with maintenance_lock.hold(book):
-        dbconn.ASSISTANT_ACCESS_LEVEL = "post"
-        try:
-            with pytest.raises(maintenance_lock.MaintenanceBusy):
-                with dbconn.get_cursor(commit=True):
-                    pass
-        finally:
-            dbconn.ASSISTANT_ACCESS_LEVEL = None
+        with pytest.raises(maintenance_lock.MaintenanceBusy):
+            with maintenance_lock.writer(book):
+                pass
+
+
+def test_an_undeclared_assistant_write_cannot_reach_the_database(book):
+    """The declaration is the contract; this is the enforcement. A tool that
+    mutates without declaring it must fail rather than bypass the lock."""
+    from models.client import Client
+
+    dbconn.ASSISTANT_ACCESS_LEVEL = "post"
+    try:
+        with pytest.raises(Exception) as caught:
+            Client(name="Undeclared", entity_type="S-Corp",
+                   fiscal_year_end_month=12).save(seed_accounts=False)
+        assert "readonly" in str(caught.value).lower() or \
+               "read-only" in str(caught.value).lower(), str(caught.value)
+    finally:
+        dbconn.ASSISTANT_ACCESS_LEVEL = None
 
 
 def test_a_stale_maintenance_lock_is_reclaimed(book):
@@ -760,3 +807,79 @@ def test_a_windows_style_replace_refusal_is_explained(book, monkeypatch):
 
     assert verify_passphrase(book, OLD) is True
     assert not (book.parent / (book.name + ".rekey.tmp")).exists()
+
+
+def test_a_refused_swap_leaves_the_recovery_set_as_it_was(book, monkeypatch):
+    """D4: the pre-swap backup is written under the NEW key. If the swap is
+    refused, the live book is still on the old key, so leaving that backup in
+    the managed set is the mixed tier the design exists to avoid."""
+    import services.backups as backups
+    import database.crypto as crypto
+    from utils.unlock import change_book_passphrase
+
+    before = {r.database_path.name for r in backups.list_backups()}
+
+    # Patch the swap itself, not os.replace: crypto.os IS the os module, so
+    # patching it there breaks the backup step before the swap is reached.
+    def refuse(tmp_new, path):
+        raise RuntimeError("Another program has this book open")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(crypto, "_replace_or_explain", refuse)
+        with pytest.raises(RuntimeError) as caught:
+            change_book_passphrase(NEW)
+
+    assert "moved to" in str(caught.value), "the user must be told where it went"
+    after = {r.database_path.name for r in backups.list_backups()}
+    assert after == before, "the managed set must be as it was found"
+    assert verify_passphrase(book, OLD) is True
+
+
+def test_the_quarantined_backup_is_kept_not_destroyed(book, monkeypatch):
+    """Backups are preserved. It leaves the managed set; it does not vanish."""
+    import database.crypto as crypto
+    from utils.unlock import change_book_passphrase
+
+    def refuse(tmp_new, path):
+        raise RuntimeError("Another program has this book open")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(crypto, "_replace_or_explain", refuse)
+        with pytest.raises(RuntimeError):
+            change_book_passphrase(NEW)
+
+    quarantined = list((book.parent / "backups").rglob("failed-rotation/*.db"))
+    assert quarantined, "the bytes must still exist somewhere"
+
+
+def test_two_holders_cannot_both_reclaim_one_stale_lock(book):
+    """D3: unlink-then-create let two processes each delete the other's fresh
+    claim. Renaming aside is atomic, so exactly one can win."""
+    from utils import maintenance_lock
+
+    maintenance_lock.maintenance_path(book).write_text("999999999\n")
+
+    first = maintenance_lock.hold(book)
+    first.__enter__()
+    try:
+        with pytest.raises(maintenance_lock.MaintenanceBusy):
+            with maintenance_lock.hold(book):
+                pass
+    finally:
+        first.__exit__(None, None, None)
+
+    assert not maintenance_lock.under_maintenance(book)
+
+
+def test_an_unreadable_writer_marker_counts_as_live(book):
+    """Ambiguity fails closed: refusing maintenance is recoverable, writing
+    over somebody's transaction is not."""
+    from utils import maintenance_lock
+
+    Path(f"{book}.writer-not-a-pid").write_text("")
+    try:
+        with pytest.raises(maintenance_lock.MaintenanceBusy):
+            with maintenance_lock.hold(book):
+                pass
+    finally:
+        Path(f"{book}.writer-not-a-pid").unlink(missing_ok=True)

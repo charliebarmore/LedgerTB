@@ -17,6 +17,7 @@ Access model, in order:
 Run from source:      python mcp_server.py
 Run from the bundle:  LEDGERTB_MODE=mcp <LedgerTB binary>
 """
+import functools
 import sys
 from pathlib import Path
 
@@ -106,6 +107,30 @@ def _refresh_access() -> str:
     return level
 
 
+def _mutating(fn):
+    """Wrap a whole mutating tool invocation in a declared write.
+
+    The guard used to sit on one database helper, get_cursor(commit=True), but
+    the model layer commits through raw connections too, so real mutations
+    (posting an entry, staging an import, creating a client) never entered it
+    and the lost-write race stayed reachable. Declaring it at the tool boundary
+    covers the whole invocation whatever it uses underneath.
+
+    The declaration is not trusted on its own: a connection opened by this
+    process outside a declared write is read-only, so a tool that mutates
+    without this decorator fails rather than bypassing the lock silently.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        from utils import maintenance_lock
+
+        with maintenance_lock.writer(dbconn.DATABASE_PATH):
+            return fn(*args, **kwargs)
+
+    wrapper._ledgertb_mutating = True
+    return wrapper
+
+
 def _require_level(minimum: str):
     order = ("read", "propose", "post")
     current = _refresh_access()
@@ -169,6 +194,7 @@ def client_branding_detail(client_id: int) -> dict:
 
 
 @server.tool()
+@_mutating
 def propose_client_branding(client_id: int, display_name: str = "",
                             tagline: str = "", accent_hex: str = "",
                             rationale: str = "") -> dict:
@@ -267,6 +293,7 @@ def account_close_detail(client_id: int, fiscal_year: int,
 
 
 @server.tool()
+@_mutating
 def propose_close_explanation(client_id: int, fiscal_year: int, account_id: int,
                               explanation: str, rationale: str = "") -> dict:
     """Propose a balance/variance explanation for human review in Close Map.
@@ -279,6 +306,7 @@ def propose_close_explanation(client_id: int, fiscal_year: int, account_id: int,
 
 
 @server.tool()
+@_mutating
 def propose_entry(client_id: int, entry_date: str, description: str,
                   lines: list, rationale: str = "",
                   entry_type: str = "Regular",
@@ -298,6 +326,7 @@ def propose_entry(client_id: int, entry_date: str, description: str,
 
 
 @server.tool()
+@_mutating
 def propose_correction(client_id: int, original_entry_id: int,
                        entry_date: str, description: str, lines: list,
                        rationale: str = "",
@@ -323,6 +352,7 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
 
 
 @server.tool()
+@_mutating
 def propose_import(client_id: int, bank_account_number: str, rows: list,
                    source_label: str = "Assistant import") -> dict:
     """Stage bank/card transactions for human review in LedgerTB's import
@@ -345,6 +375,7 @@ def list_staged_imports(client_id: int) -> list:
 
 
 @server.tool()
+@_mutating
 def post_entry(client_id: int, entry_date: str, description: str,
                lines: list, entry_type: str = "Regular") -> dict:
     """POST a balanced journal entry directly to the ledger. Only works at
@@ -373,6 +404,7 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
 
 
 @server.tool()
+@_mutating
 def create_client(name: str, entity_type: str = "",
                   fiscal_year_end_month: int = 12,
                   seed_default_chart: bool = True) -> dict:
@@ -385,6 +417,7 @@ def create_client(name: str, entity_type: str = "",
 
 
 @server.tool()
+@_mutating
 def import_accounts(client_id: int, rows: list) -> dict:
     """Add accounts to a client's chart of accounts. rows:
     [{"number": "1000", "name": "Operating Checking", "type": "Bank"}] —
