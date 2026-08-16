@@ -26,6 +26,11 @@ def book(tmp_path, monkeypatch):
     """An encrypted book with something in it, opened under OLD."""
     path = tmp_path / "rotate.ledgertb"
     monkeypatch.setattr(dbconn, "DATABASE_PATH", path)
+    import config
+    import services.backups as _backups
+
+    monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(_backups, "DEFAULT_BACKUP_DIR", tmp_path / "backups")
     dbconn.set_active_key(derive_key(OLD))
 
     from database import init_database
@@ -297,6 +302,11 @@ def test_a_rotation_is_recorded_on_a_book_with_no_clients(tmp_path, monkeypatch)
     import utils.client_selector as selector
 
     monkeypatch.setattr(dbconn, "DATABASE_PATH", tmp_path / "empty.ledgertb")
+    import config
+    import services.backups as _backups
+
+    monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(_backups, "DEFAULT_BACKUP_DIR", tmp_path / "backups")
     dbconn.set_active_key(derive_key(OLD))
     from database import init_database
     init_database()
@@ -424,3 +434,96 @@ def test_a_vault_failure_after_the_swap_is_a_warning_not_a_failure(book, monkeyp
     assert result.new_key_opens is True
     assert any("remembered key" in w for w in result.warnings)
     assert verify_passphrase(book, NEW) is True
+
+
+# --- backups follow the book, up to a point --------------------------------
+
+def _backup(reason="manual"):
+    from services.backups import create_backup
+    import config
+    return create_backup(config.BACKUP_DIR, reason=reason, apply_retention=False)
+
+
+def test_recent_backups_are_converted_to_the_new_passphrase(book, monkeypatch, tmp_path):
+    import config
+    from utils.unlock import change_book_passphrase
+
+    old_backup = _backup().database_path
+    result = change_book_passphrase(NEW)
+
+    assert result.backups_converted >= 1
+    conn = dbconn.open_keyed(old_backup, derive_key(NEW))
+    try:
+        assert conn.execute("SELECT count(*) FROM clients").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_an_older_backup_keeps_the_previous_passphrase_and_says_so(book, monkeypatch, tmp_path):
+    """The archive is deliberately not rewritten, so it has to be labelled."""
+    import json
+    from datetime import datetime, timedelta, timezone
+    import config
+    import services.backups as backups
+    from utils.unlock import change_book_passphrase
+
+    stale = _backup().database_path
+    manifest = stale.with_suffix(".json")
+    payload = json.loads(manifest.read_text())
+    payload["created_at"] = (
+        datetime.now(timezone.utc) - timedelta(days=120)
+    ).isoformat()
+    manifest.write_text(json.dumps(payload))
+
+    change_book_passphrase(NEW)
+
+    # Untouched: still opens with the OLD passphrase.
+    conn = dbconn.open_keyed(stale, derive_key(OLD))
+    try:
+        conn.execute("SELECT count(*) FROM clients").fetchone()
+    finally:
+        conn.close()
+
+    record = backups.load_record(stale)
+    assert backups.opens_with_active_key(record) is False, "it must be labelled"
+
+
+def test_converting_backups_is_idempotent(book, monkeypatch, tmp_path):
+    import config
+    import services.backups as backups
+    from database.crypto import key_fingerprint
+
+    _backup()
+    first, _ = backups.rekey_recent_backups(30, derive_key(OLD), derive_key(NEW))
+    second, _ = backups.rekey_recent_backups(30, derive_key(OLD), derive_key(NEW))
+
+    assert first >= 1
+    assert second == 0, "an already-converted backup must be left alone"
+
+
+def test_one_unconvertible_backup_does_not_stop_the_rest(book):
+    import services.backups as backups
+    from utils.unlock import change_book_passphrase
+
+    import json
+    from database.crypto import rekey_file
+
+    good = _backup().database_path
+    # A backup from two passphrases ago: intact and listable, but the current
+    # key is not the one that opens it, so it cannot be converted.
+    stranded = _backup().database_path
+    rekey_file(stranded, derive_key(OLD), derive_key("a-third-passphrase"))
+    manifest = stranded.with_suffix(".json")
+    payload = json.loads(manifest.read_text())
+    payload["sha256"] = backups._sha256(stranded)
+    manifest.write_text(json.dumps(payload))
+
+    result = change_book_passphrase(NEW)
+
+    assert any(stranded.name in w for w in result.warnings)
+    assert result.new_key_opens is True, "a bad backup must not fail the rotation"
+    conn = dbconn.open_keyed(good, derive_key(NEW))
+    try:
+        conn.execute("SELECT count(*) FROM clients").fetchone()
+    finally:
+        conn.close()

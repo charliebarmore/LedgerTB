@@ -37,6 +37,13 @@ from utils import book_lock, books, secure_store
 
 MIN_PASSPHRASE_LEN = 12
 
+# How much of the backup archive follows the book onto a new passphrase.
+# Chosen by the firm operating this build as a balance of risk against
+# resources: recent recovery points stay usable under one passphrase without
+# rewriting an entire archive, which cannot reach detached media anyway. Older
+# backups keep the previous passphrase and are labelled with it.
+REKEY_BACKUP_DAYS = 30
+
 # A launch token binds this browser session to the window the app opened.
 # Without it, the unlock is process-wide: anything else running on the machine
 # — another signed-in user on a terminal server, or a page served by some other
@@ -118,6 +125,7 @@ class RotationResult:
         self.backup_path = backup_path
         self.warnings = []
         self.new_key_opens = False
+        self.backups_converted = 0
         self.old_key_refused = False
         self.integrity_ok = False
 
@@ -221,6 +229,27 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
             "The book was re-encrypted, but this machine could not confirm "
             "every check on it afterwards. Take a backup now and verify it "
             "opens before doing further work in this book."
+        )
+
+    # Recent backups follow the book onto the new passphrase. The older
+    # archive deliberately does not: see rekey_recent_backups.
+    try:
+        from services.backups import rekey_recent_backups
+
+        converted, failed = rekey_recent_backups(
+            REKEY_BACKUP_DAYS, current_key, new_key
+        )
+        result.backups_converted = converted
+        for name, reason in failed:
+            result.warnings.append(
+                f"The backup {name} could not be converted to the new "
+                f"passphrase ({reason}). It still opens with the previous one."
+            )
+    except Exception as exc:
+        result.warnings.append(
+            "The passphrase was changed, but existing backups could not be "
+            f"converted to it ({exc}). They still open with the previous "
+            "passphrase."
         )
 
     # A machine that remembered the old key holds one that no longer opens the

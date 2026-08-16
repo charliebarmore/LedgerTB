@@ -34,9 +34,16 @@ def _sha256(path: Path) -> str:
 def _integrity(path: Path, key=None) -> bool:
     # Backups are SQLCipher-encrypted, so they must be opened with the active
     # key -- a plaintext sqlite3 open would fail on the encrypted header.
-    conn = db_connection.open_keyed(path, key)
+    # A wrong key raises rather than reporting corruption, and callers all want
+    # the same answer either way: this file is not readable as it stands.
+    try:
+        conn = db_connection.open_keyed(path, key)
+    except Exception:
+        return False
     try:
         return conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    except Exception:
+        return False
     finally:
         conn.close()
 
@@ -55,6 +62,9 @@ class BackupRecord:
     integrity_ok: bool
     book_id: str
     book_name: str
+    # Which key this backup was written with. Empty for backups predating the
+    # marker, which are treated as openable until proven otherwise.
+    key_fingerprint: str = ""
 
 
 def _read_book_id(conn) -> str:
@@ -112,7 +122,7 @@ def _backup_paths(directory: Path) -> list[Path]:
 
 
 def create_backup(
-    backup_dir: Path = DEFAULT_BACKUP_DIR,
+    backup_dir: Optional[Path] = None,
     *,
     reason: str = "manual",
     apply_retention: bool = True,
@@ -126,7 +136,7 @@ def create_backup(
     opens with the passphrase the user just chose and recorded, rather than one
     they may never have known.
     """
-    backup_root = Path(backup_dir)
+    backup_root = Path(backup_dir or DEFAULT_BACKUP_DIR)
     backup_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(backup_root, 0o700)
 
@@ -172,6 +182,7 @@ def create_backup(
         "size_bytes": temp_db.stat().st_size,
         "sha256": digest,
         "integrity_ok": True,
+        "key_fingerprint": _fingerprint_for(target_key),
     }
     temp_manifest.write_text(json.dumps(payload, indent=2) + "\n")
     os.chmod(temp_manifest, 0o600)
@@ -182,8 +193,70 @@ def create_backup(
         prune_backups(backup_root)
     return BackupRecord(
         final_db, manifest, created_at, digest, final_db.stat().st_size, True,
-        book_id, book_name,
+        book_id, book_name, payload["key_fingerprint"],
     )
+
+
+def _fingerprint_for(key=None) -> str:
+    """Marker for the key a backup was written with, or "" if unencrypted."""
+    from database.crypto import key_fingerprint
+
+    chosen = key or db_connection.get_active_key()
+    return key_fingerprint(chosen) if chosen else ""
+
+
+def rekey_recent_backups(days: int, current_key: str, new_key: str,
+                         backup_dir: Optional[Path] = None):
+    """Re-encrypt backups newer than ``days`` so they open with the new key.
+
+    Returns (converted, [(name, reason), ...]). Each backup is converted on its
+    own: one failure leaves that backup exactly as it was, correctly labelled
+    for the old key, and does not stop the rest.
+
+    Older backups are deliberately left alone. Rewriting an entire retention
+    archive during a passphrase change is slow, cannot reach detached media, and
+    puts the recovery set itself at risk; the archive keeps the previous
+    passphrase and says so in the list.
+
+    Residual window, stated rather than hidden: the database file and its
+    manifest are replaced one after the other, so a crash between them leaves a
+    checksum mismatch. load_record reports that as an interrupted re-key rather
+    than as corruption, and the backup can be deleted and remade.
+    """
+    from datetime import timedelta
+
+    from database.crypto import key_fingerprint, rekey_file
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    converted, failed = 0, []
+    for record in list_backups(backup_dir):
+        if record.created_at < cutoff:
+            continue
+        manifest_path = record.database_path.with_suffix(".json")
+        try:
+            payload = json.loads(manifest_path.read_text())
+            if payload.get("key_fingerprint") == key_fingerprint(new_key):
+                continue                      # already converted, idempotent
+            rekey_file(record.database_path, current_key, new_key)
+            payload["sha256"] = _sha256(record.database_path)
+            payload["size_bytes"] = record.database_path.stat().st_size
+            payload["key_fingerprint"] = key_fingerprint(new_key)
+            tmp = manifest_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload, indent=2) + "\n")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, manifest_path)
+            converted += 1
+        except Exception as exc:
+            failed.append((record.database_path.name, str(exc)))
+    return converted, failed
+
+
+def opens_with_active_key(record) -> bool:
+    """Whether the session's current key is the one this backup was written
+    with. Unknown (an older manifest with no fingerprint) counts as yes, since
+    there is nothing to contradict it."""
+    recorded = getattr(record, "key_fingerprint", "") or ""
+    return not recorded or recorded == _fingerprint_for()
 
 
 def _schema_versions(path: Path, key=None) -> list[str]:
@@ -219,12 +292,25 @@ def load_record(
         )
     digest = _sha256(database_path)
     if digest != payload.get("sha256"):
-        raise ValueError("Backup checksum verification failed.")
-    if not _integrity(database_path):
-        raise ValueError("Backup database failed SQLite integrity verification.")
-    database_book_id = _database_book_id(database_path)
-    if database_book_id != manifest_book_id:
-        raise ValueError("Backup manifest identity does not match its database.")
+        raise ValueError(
+            "This recovery point does not match its own record of itself, so "
+            "its checksum verification failed. It may have been altered, or a "
+            "passphrase change may have been interrupted while converting it. "
+            "Either way it cannot be restored; delete it and take a fresh backup."
+        )
+    # A backup written under a previous passphrase cannot be opened with the
+    # session's current key, and that must not make it disappear. Listing it is
+    # how someone finds out it needs the old passphrase; silently dropping it
+    # tells them their recovery points are gone. The checksum above is the
+    # anti-tamper control that still applies either way; the identity
+    # cross-check below only runs when the file can actually be read.
+    openable = _integrity(database_path)
+    if openable:
+        database_book_id = _database_book_id(database_path)
+        if database_book_id != manifest_book_id:
+            raise ValueError("Backup manifest identity does not match its database.")
+    else:
+        database_book_id = manifest_book_id
     if expected_book_id and database_book_id != expected_book_id:
         raise BackupBookMismatch(
             "That recovery point belongs to a different book and cannot replace "
@@ -236,14 +322,15 @@ def load_record(
         created_at=datetime.fromisoformat(payload["created_at"]),
         sha256=digest,
         size_bytes=database_path.stat().st_size,
-        integrity_ok=True,
+        integrity_ok=openable,
+        key_fingerprint=payload.get("key_fingerprint", ""),
         book_id=database_book_id,
         book_name=str(payload.get("book_name") or "Book"),
     )
 
 
-def list_backups(backup_dir: Path = DEFAULT_BACKUP_DIR) -> list[BackupRecord]:
-    backup_root = Path(backup_dir)
+def list_backups(backup_dir: Optional[Path] = None) -> list[BackupRecord]:
+    backup_root = Path(backup_dir or DEFAULT_BACKUP_DIR)
     if not backup_root.exists():
         return []
     book_id = active_book_id()

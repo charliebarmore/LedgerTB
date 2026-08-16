@@ -117,6 +117,68 @@ def _data_version(conn) -> int:
     return conn.execute("PRAGMA data_version").fetchone()[0]
 
 
+def rekey_file(path: Path, current_key_hex: str, new_key_hex: str) -> None:
+    """Re-encrypt a standalone SQLCipher file in place, atomically.
+
+    The same export, verify, single-replace shape as change_passphrase, without
+    its concurrency checks: this is for a file nothing else is writing, such as
+    a backup. The original is never replaced by anything that has not opened and
+    passed an integrity check first.
+    """
+    if sqlcipher3 is None:
+        raise RuntimeError("SQLCipher (sqlcipher3) is not installed.")
+    path = Path(path)
+    current_pragma = key_pragma(current_key_hex)
+    new_pragma = key_pragma(new_key_hex)
+    tmp_new = path.with_suffix(path.suffix + ".rekey.tmp")
+    if tmp_new.exists() or tmp_new.is_symlink():
+        tmp_new.unlink()
+    try:
+        src = sqlcipher3.connect(str(path))
+        try:
+            src.execute(f"PRAGMA key = {current_pragma}")
+            src.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            page_size = src.execute("PRAGMA cipher_page_size").fetchone()[0]
+            src.execute(
+                f"ATTACH DATABASE {_sql_str(str(tmp_new))} AS rekeyed KEY {new_pragma}"
+            )
+            if page_size:
+                src.execute(f"PRAGMA rekeyed.cipher_page_size = {int(page_size)}")
+            src.execute("SELECT sqlcipher_export('rekeyed')")
+            src.execute("DETACH DATABASE rekeyed")
+        finally:
+            src.close()
+
+        check = sqlcipher3.connect(str(tmp_new))
+        try:
+            check.execute(f"PRAGMA key = {new_pragma}")
+            ok = check.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        finally:
+            check.close()
+        if not ok:
+            raise RuntimeError("The re-encrypted copy failed its integrity check.")
+
+        os.replace(tmp_new, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except Exception:
+        if tmp_new.exists():
+            tmp_new.unlink()
+        raise
+
+
+def key_fingerprint(key_hex: str) -> str:
+    """A short, non-reversible marker for which key opens a file.
+
+    Recorded in a backup's manifest so the app can say which passphrase a
+    backup needs without opening it, and without storing anything that helps
+    open it. A SHA-256 of a 256-bit key is not a shortcut to the key.
+    """
+    return hashlib.sha256(("ledgertb-key-fingerprint:" + key_hex).encode()).hexdigest()[:16]
+
+
 def change_passphrase(path: Path, current_key_hex: str, new_passphrase: str) -> str:
     """Re-encrypt an encrypted book under a new passphrase. Returns the new key.
 
