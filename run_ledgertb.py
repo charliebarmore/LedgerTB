@@ -45,6 +45,7 @@ except ImportError:
 import anthropic       # noqa: F401
 import dotenv          # noqa: F401
 import platformdirs    # noqa: F401
+import portalocker     # noqa: F401  (cross-process live-book coordination)
 import keyring         # noqa: F401
 import altair          # noqa: F401  (streamlit dependency used for charts)
 import pypdfium2        # noqa: F401  (PDF text extraction and page rendering)
@@ -282,6 +283,7 @@ def _selfcheck() -> int:
             "reportlab", "reportlab.platypus", "reportlab.lib.pagesizes",
             "reportlab.lib.styles", "reportlab.pdfgen.canvas",
             "anthropic", "pydantic", "pydantic_core", "dotenv", "platformdirs",
+            "portalocker",
             "mcp", "mcp.server", "mcp.server.stdio",
             "config", "constants", "money", "models.journal_entry", "models.reconciliation",
             "services.categorization", "services.document_import", "pypdfium2", "PIL",

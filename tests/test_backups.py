@@ -17,6 +17,14 @@ from services.backups import (
 )
 
 
+def _restore_audit(conn):
+    """Every restore records itself; these tests restore, so they audit."""
+    from models.audit_log import AuditLog
+
+    AuditLog.write(conn.cursor(), None, "database_restore", 0, "RESTORE",
+                   new_values={"restored_from": "test"})
+
+
 def test_backup_is_verified_and_restore_replaces_live_database(db, tmp_path):
     Client(name="Before Backup").save(seed_accounts=False)
     backup_dir = tmp_path / "backups"
@@ -29,7 +37,7 @@ def test_backup_is_verified_and_restore_replaces_live_database(db, tmp_path):
     Client(name="After Backup").save(seed_accounts=False)
     assert {c.name for c in Client.get_all()} == {"Before Backup", "After Backup"}
 
-    safety_copy = restore_backup(record.database_path, backup_dir)
+    safety_copy = restore_backup(record.database_path, backup_dir, audit=_restore_audit)
     assert safety_copy.exists()
     assert {c.name for c in Client.get_all()} == {"Before Backup"}
 
@@ -41,7 +49,7 @@ def test_tampered_backup_is_rejected(db, tmp_path):
         handle.write(b"tampered")
 
     with pytest.raises(ValueError, match="checksum"):
-        restore_backup(record.database_path, tmp_path / "backups")
+        restore_backup(record.database_path, tmp_path / "backups", audit=_restore_audit)
     health = backup_health(tmp_path / "backups")
     assert health["healthy"] is False
     assert "invalid" in health["reason"]
@@ -89,7 +97,7 @@ def test_backups_and_restore_are_scoped_to_the_active_book(db, tmp_path):
             book_b_backup.database_path
         ]
         with pytest.raises(BackupBookMismatch, match="different book"):
-            restore_backup(book_a_backup.database_path, backup_dir)
+            restore_backup(book_a_backup.database_path, backup_dir, audit=_restore_audit)
         assert [c.name for c in Client.get_all()] == ["Book B Client"]
         # A rejected cross-book restore must not create a pre-restore snapshot.
         assert [r.database_path for r in list_backups(backup_dir)] == [
@@ -112,7 +120,7 @@ def test_manifest_cannot_lie_about_the_backup_book(db, tmp_path):
     record.manifest_path.write_text(json.dumps(payload))
 
     with pytest.raises(ValueError, match="identity does not match"):
-        restore_backup(record.database_path, backup_dir)
+        restore_backup(record.database_path, backup_dir, audit=_restore_audit)
 
 
 def test_legacy_unscoped_backups_are_reported_but_not_offered(db, tmp_path):
@@ -185,7 +193,7 @@ def test_adopted_legacy_backup_becomes_restorable(db, tmp_path):
     # as applied, so init neither collides nor assigns a fresh random id
     # (which would orphan every other recovery point).
     book_id = active_book_id()
-    restore_backup(adopted.database_path, backup_root)
+    restore_backup(adopted.database_path, backup_root, audit=_restore_audit)
     from database import init_database
     init_database()
     assert active_book_id() == book_id
@@ -233,3 +241,45 @@ def test_backup_health_degrades_instead_of_raising(db, tmp_path, monkeypatch):
     assert health["healthy"] is False
     assert health["latest"] is None
     assert "unavailable" in health["reason"]
+
+
+def test_restore_records_its_own_event_inside_the_restored_book(db, tmp_path):
+    """The restore and its audit row are one step. Written afterwards the row
+    could be lost entirely: an older backup reinstates a schema where a
+    book-level event cannot be written."""
+    from models.audit_log import AuditLog
+
+    record = create_backup(tmp_path / "backups")
+
+    written = []
+
+    def audit(conn):
+        AuditLog.write(conn.cursor(), None, "database_restore", 0, "RESTORE",
+                       new_values={"restored_from": record.database_path.name})
+        written.append(True)
+
+    restore_backup(record.database_path, tmp_path / "backups", audit=audit)
+
+    assert written, "the audit hook must run"
+    events = AuditLog.get_history("database_restore", 0)
+    assert events and events[0].action == "RESTORE"
+
+
+def test_a_failed_restore_leaves_the_live_book_alone(db, tmp_path):
+    from database import connection as dbconn
+    from models.client import Client
+
+    Client(name="Kettle Ridge Cabinetry", entity_type="S-Corp",
+           fiscal_year_end_month=12).save(seed_accounts=False)
+    record = create_backup(tmp_path / "backups")
+
+    def boom(conn):
+        raise RuntimeError("simulated audit failure")
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        restore_backup(record.database_path, tmp_path / "backups", audit=boom)
+
+    # Still the live book, still readable, and no temp file left behind.
+    assert [c.name for c in Client.get_all()] == ["Kettle Ridge Cabinetry"]
+    live = Path(dbconn.DATABASE_PATH)
+    assert not live.with_name(f".{live.name}.restore.tmp").exists()

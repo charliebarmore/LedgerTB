@@ -73,6 +73,7 @@ pefile==2024.8.26
 pillow==12.3.0
 platformdirs==4.11.0
 pluggy==1.6.0
+portalocker==3.2.0
 protobuf==7.35.1
 proxy_tools==0.1.0
 pyarrow==24.0.0

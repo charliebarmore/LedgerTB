@@ -20,3 +20,11 @@ dependencies shipped for the target platform.
 
 Other Python dependencies retain the copyright and license terms supplied in
 their package metadata and distributions.
+
+## Portalocker
+
+LedgerTB uses `portalocker` for operating-system-backed coordination between
+the desktop application, assistant process, and passphrase maintenance. It is
+distributed under the BSD-3-Clause License.
+
+- Portalocker: https://github.com/wolph/portalocker

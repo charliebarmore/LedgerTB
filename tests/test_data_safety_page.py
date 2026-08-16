@@ -145,3 +145,97 @@ def test_assistant_export_folder_can_be_chosen_natively(db, monkeypatch, tmp_pat
     captions = " ".join(c.value for c in at.caption)
     assert "Generated for this" in captions
     assert "Windows build" in captions
+
+
+def test_passphrase_can_be_changed_from_data_safety(db, monkeypatch):
+    """The rotation the app exists to offer, driven through the page."""
+    from database import connection as dbconn
+    from database.crypto import derive_key, verify_passphrase
+
+    _patched(monkeypatch)
+    at = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30).run()
+    assert not at.exception
+
+    at.text_input(key="rekey_new").set_value("a-recorded-passphrase")
+    at.text_input(key="rekey_confirm").set_value("a-recorded-passphrase")
+    next(b for b in at.button if "Change passphrase" in b.label).click().run()
+
+    assert not at.exception
+    assert dbconn.get_active_key() == derive_key("a-recorded-passphrase")
+    assert verify_passphrase(dbconn.DATABASE_PATH, "a-recorded-passphrase") is True
+    assert verify_passphrase(dbconn.DATABASE_PATH, "test-passphrase") is False
+
+
+def test_mismatched_confirmation_changes_nothing(db, monkeypatch):
+    from database import connection as dbconn
+    from database.crypto import verify_passphrase
+
+    _patched(monkeypatch)
+    at = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30).run()
+
+    at.text_input(key="rekey_new").set_value("a-recorded-passphrase")
+    at.text_input(key="rekey_confirm").set_value("a-different-passphrase")
+    next(b for b in at.button if "Change passphrase" in b.label).click().run()
+
+    assert any("do not match" in e.value for e in at.error)
+    assert verify_passphrase(dbconn.DATABASE_PATH, "test-passphrase") is True
+
+
+def test_a_too_short_passphrase_is_refused_by_the_page(db, monkeypatch):
+    from database import connection as dbconn
+    from database.crypto import verify_passphrase
+
+    _patched(monkeypatch)
+    at = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30).run()
+
+    at.text_input(key="rekey_new").set_value("short")
+    at.text_input(key="rekey_confirm").set_value("short")
+    next(b for b in at.button if "Change passphrase" in b.label).click().run()
+
+    assert any("at least" in e.value for e in at.error)
+    assert verify_passphrase(dbconn.DATABASE_PATH, "test-passphrase") is True
+
+
+def test_a_non_local_book_offers_no_rotation_form(db, monkeypatch, tmp_path):
+    """The maintainer's call: refuse rather than qualify the success."""
+    import utils.books as books_mod
+
+    _patched(monkeypatch)
+    monkeypatch.setattr(books_mod, "USER_DATA_DIR", tmp_path / "elsewhere")
+    at = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30).run()
+
+    assert not at.exception
+    assert any("shared drive" in w.value for w in at.warning)
+    assert not any((t.key or "") == "rekey_new" for t in at.text_input)
+
+
+def test_assistant_access_blocks_the_rotation_form(db, monkeypatch):
+    from utils import secure_store
+    from utils.assistant_access import credential_names
+    from database import connection as dbconn
+
+    _patched(monkeypatch)
+    secure_store.set_secret(credential_names(dbconn.DATABASE_PATH).key, "deadbeef")
+    at = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30).run()
+
+    assert not at.exception
+    assert any("Assistant access is on" in w.value for w in at.warning)
+    assert not any((t.key or "") == "rekey_new" for t in at.text_input)
+
+
+def test_a_successful_rotation_reports_what_it_checked(db, monkeypatch):
+    from database import connection as dbconn
+    from database.crypto import derive_key, verify_passphrase
+
+    _patched(monkeypatch)
+    at = AppTest.from_file(page_path("pages/9_Data_Safety.py"), default_timeout=30).run()
+    at.text_input(key="rekey_new").set_value("a-recorded-passphrase")
+    at.text_input(key="rekey_confirm").set_value("a-recorded-passphrase")
+    next(b for b in at.button if "Change passphrase" in b.label).click().run()
+
+    assert not at.exception
+    success = " ".join(s.value for s in at.success)
+    assert "changed on this computer" in success
+    captions = " ".join(c.value for c in at.caption)
+    assert "the old one" in captions and "does not" in captions
+    assert verify_passphrase(dbconn.DATABASE_PATH, "a-recorded-passphrase") is True

@@ -31,12 +31,19 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _integrity(path: Path) -> bool:
+def _integrity(path: Path, key=None) -> bool:
     # Backups are SQLCipher-encrypted, so they must be opened with the active
     # key -- a plaintext sqlite3 open would fail on the encrypted header.
-    conn = db_connection.open_keyed(path)
+    # A wrong key raises rather than reporting corruption, and callers all want
+    # the same answer either way: this file is not readable as it stands.
+    try:
+        conn = db_connection.open_keyed(path, key)
+    except Exception:
+        return False
     try:
         return conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    except Exception:
+        return False
     finally:
         conn.close()
 
@@ -55,6 +62,9 @@ class BackupRecord:
     integrity_ok: bool
     book_id: str
     book_name: str
+    # Which key this backup was written with. Empty for backups predating the
+    # marker, which are treated as openable until proven otherwise.
+    key_fingerprint: str = ""
 
 
 def _read_book_id(conn) -> str:
@@ -112,12 +122,21 @@ def _backup_paths(directory: Path) -> list[Path]:
 
 
 def create_backup(
-    backup_dir: Path = DEFAULT_BACKUP_DIR,
+    backup_dir: Optional[Path] = None,
     *,
     reason: str = "manual",
     apply_retention: bool = True,
+    target_key: Optional[str] = None,
 ) -> BackupRecord:
-    backup_root = Path(backup_dir)
+    """Write a verified encrypted copy of the live book.
+
+    ``target_key`` keys the copy with something other than the session's
+    current key. Used once: the backup taken immediately before a passphrase
+    change is written under the NEW passphrase, so the recovery point it leaves
+    opens with the passphrase the user just chose and recorded, rather than one
+    they may never have known.
+    """
+    backup_root = Path(backup_dir or DEFAULT_BACKUP_DIR)
     backup_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(backup_root, 0o700)
 
@@ -137,7 +156,7 @@ def create_backup(
         # Key the backup target with the same passphrase so the backup file is
         # itself encrypted (SQLCipher's online backup writes encrypted pages
         # when the target connection is keyed).
-        target = db_connection.open_keyed(temp_db)
+        target = db_connection.open_keyed(temp_db, target_key)
         try:
             source.backup(target)
         finally:
@@ -146,7 +165,7 @@ def create_backup(
         source.close()
 
     os.chmod(temp_db, 0o600)
-    if not _integrity(temp_db):
+    if not _integrity(temp_db, target_key):
         temp_db.unlink(missing_ok=True)
         raise RuntimeError("Backup failed SQLite integrity verification.")
 
@@ -154,7 +173,7 @@ def create_backup(
     digest = _sha256(temp_db)
     payload = {
         "app_version": APP_VERSION,
-        "schema_versions": _schema_versions(temp_db),
+        "schema_versions": _schema_versions(temp_db, target_key),
         "created_at": created_at.isoformat(),
         "reason": reason,
         "book_id": book_id,
@@ -163,6 +182,7 @@ def create_backup(
         "size_bytes": temp_db.stat().st_size,
         "sha256": digest,
         "integrity_ok": True,
+        "key_fingerprint": _fingerprint_for(target_key),
     }
     temp_manifest.write_text(json.dumps(payload, indent=2) + "\n")
     os.chmod(temp_manifest, 0o600)
@@ -173,12 +193,138 @@ def create_backup(
         prune_backups(backup_root)
     return BackupRecord(
         final_db, manifest, created_at, digest, final_db.stat().st_size, True,
-        book_id, book_name,
+        book_id, book_name, payload["key_fingerprint"],
     )
 
 
-def _schema_versions(path: Path) -> list[str]:
-    conn = db_connection.open_keyed(path)
+def _fingerprint_for(key=None) -> str:
+    """Marker for the key a backup was written with, or "" if unencrypted."""
+    from database.crypto import key_fingerprint
+
+    chosen = key or db_connection.get_active_key()
+    return key_fingerprint(chosen) if chosen else ""
+
+
+def rekey_backups(current_key: str, new_key: str, days: Optional[int] = None,
+                  backup_dir: Optional[Path] = None):
+    """Re-encrypt this book's backups so they open with the new key.
+
+    Every managed backup by default. A partial re-key was considered and
+    rejected: it leaves passphrase tiers the recovery UI cannot open, and one
+    slower rotation is easier to live with than an archive where which
+    passphrase opens which recovery point depends on its age. ``days`` limits
+    it for tests and for a caller that knowingly wants less.
+
+    Nothing is ever deleted here. A backup that cannot be converted is left
+    exactly as it was, still openable with the passphrase it already had, and
+    reported.
+
+    Returns (converted, [(name, reason), ...]). Each backup is converted on its
+    own, so one failure does not stop the rest.
+
+    Residual window, stated rather than hidden: the database file and its
+    manifest are replaced one after the other, so a crash between them leaves a
+    checksum mismatch. load_record reports that as an interrupted re-key rather
+    than as corruption, and the backup can be deleted and remade.
+    """
+    from datetime import timedelta
+
+    from database.crypto import key_fingerprint, rekey_file
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)) if days else None
+    converted, failed = 0, []
+    for record in list_backups(backup_dir):
+        if cutoff and record.created_at < cutoff:
+            continue
+        manifest_path = record.database_path.with_suffix(".json")
+        try:
+            payload = json.loads(manifest_path.read_text())
+            if payload.get("key_fingerprint") == key_fingerprint(new_key):
+                continue                      # already converted, idempotent
+            rekey_file(record.database_path, current_key, new_key)
+            payload["sha256"] = _sha256(record.database_path)
+            payload["size_bytes"] = record.database_path.stat().st_size
+            payload["key_fingerprint"] = key_fingerprint(new_key)
+            tmp = manifest_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload, indent=2) + "\n")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, manifest_path)
+            converted += 1
+        except Exception as exc:
+            failed.append((record.database_path.name, str(exc)))
+    return converted, failed
+
+
+def _repair_interrupted_rekey(database_path: Path, manifest: Path, payload: dict,
+                              digest: str) -> bool:
+    """Finish a backup conversion that was interrupted between its two writes.
+
+    rekey_backups replaces a backup's database and then its manifest. A crash
+    between the two leaves a database on the new key described by a manifest
+    recording the old one, which reads as a checksum failure and, before this,
+    as advice to delete the backup. That contradicts preserving them.
+
+    Opening cleanly is not enough on its own to justify rewriting a checksum: a
+    tampered file can still open and pass an integrity check, and repairing on
+    that basis would launder tampering into a fresh, trusted record.
+
+    The specific evidence of an interrupted conversion is that the manifest
+    names a DIFFERENT key from the one that actually opens the file. That is
+    only true when the database was re-keyed and its manifest was not. A
+    tampered backup whose manifest already names the current key does not match
+    that shape and is left alone, still reported as a mismatch.
+    """
+    from database.crypto import key_fingerprint
+
+    active = db_connection.get_active_key()
+    recorded = payload.get("key_fingerprint")
+    if not active or not recorded or recorded == key_fingerprint(active):
+        return False
+    if not _integrity(database_path):
+        return False
+    payload["sha256"] = digest
+    payload["size_bytes"] = database_path.stat().st_size
+    payload["key_fingerprint"] = key_fingerprint(active)
+    tmp = manifest.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, manifest)
+    return True
+
+
+def quarantine_backup(database_path: Path) -> Path:
+    """Take a backup out of the managed set without destroying it.
+
+    Used when a passphrase change fails after its pre-swap backup was written:
+    the live book is still on the old key, so leaving a new-key recovery point
+    in the set is exactly the mixed key tier the design avoids. Deleting it
+    would be simpler, but backups are preserved, so it moves instead.
+
+    The manifest goes first. A backup with no manifest is not listed and not
+    restorable, so a crash between the two moves leaves it out of the set
+    rather than half in it.
+    """
+    database_path = Path(database_path)
+    quarantine = database_path.parent / "failed-rotation"
+    quarantine.mkdir(parents=True, exist_ok=True, mode=0o700)
+    manifest = database_path.with_suffix(".json")
+    if manifest.exists():
+        os.replace(manifest, quarantine / manifest.name)
+    if database_path.exists():
+        os.replace(database_path, quarantine / database_path.name)
+    return quarantine / database_path.name
+
+
+def opens_with_active_key(record) -> bool:
+    """Whether the session's current key is the one this backup was written
+    with. Unknown (an older manifest with no fingerprint) counts as yes, since
+    there is nothing to contradict it."""
+    recorded = getattr(record, "key_fingerprint", "") or ""
+    return not recorded or recorded == _fingerprint_for()
+
+
+def _schema_versions(path: Path, key=None) -> list[str]:
+    conn = db_connection.open_keyed(path, key)
     try:
         found = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
@@ -209,13 +355,31 @@ def load_record(
             "be restored automatically."
         )
     digest = _sha256(database_path)
+    if digest != payload.get("sha256") and _repair_interrupted_rekey(
+        database_path, manifest, payload, digest
+    ):
+        payload = json.loads(manifest.read_text())
+    digest = _sha256(database_path)
     if digest != payload.get("sha256"):
-        raise ValueError("Backup checksum verification failed.")
-    if not _integrity(database_path):
-        raise ValueError("Backup database failed SQLite integrity verification.")
-    database_book_id = _database_book_id(database_path)
-    if database_book_id != manifest_book_id:
-        raise ValueError("Backup manifest identity does not match its database.")
+        raise ValueError(
+            "This recovery point does not match its own record of itself, so "
+            "its checksum verification failed. It may have been altered, or a "
+            "passphrase change may have been interrupted while converting it. "
+            "Either way it cannot be restored; delete it and take a fresh backup."
+        )
+    # A backup written under a previous passphrase cannot be opened with the
+    # session's current key, and that must not make it disappear. Listing it is
+    # how someone finds out it needs the old passphrase; silently dropping it
+    # tells them their recovery points are gone. The checksum above is the
+    # anti-tamper control that still applies either way; the identity
+    # cross-check below only runs when the file can actually be read.
+    openable = _integrity(database_path)
+    if openable:
+        database_book_id = _database_book_id(database_path)
+        if database_book_id != manifest_book_id:
+            raise ValueError("Backup manifest identity does not match its database.")
+    else:
+        database_book_id = manifest_book_id
     if expected_book_id and database_book_id != expected_book_id:
         raise BackupBookMismatch(
             "That recovery point belongs to a different book and cannot replace "
@@ -227,14 +391,15 @@ def load_record(
         created_at=datetime.fromisoformat(payload["created_at"]),
         sha256=digest,
         size_bytes=database_path.stat().st_size,
-        integrity_ok=True,
+        integrity_ok=openable,
+        key_fingerprint=payload.get("key_fingerprint", ""),
         book_id=database_book_id,
         book_name=str(payload.get("book_name") or "Book"),
     )
 
 
-def list_backups(backup_dir: Path = DEFAULT_BACKUP_DIR) -> list[BackupRecord]:
-    backup_root = Path(backup_dir)
+def list_backups(backup_dir: Optional[Path] = None) -> list[BackupRecord]:
+    backup_root = Path(backup_dir or DEFAULT_BACKUP_DIR)
     if not backup_root.exists():
         return []
     book_id = active_book_id()
@@ -252,9 +417,35 @@ def list_backups(backup_dir: Path = DEFAULT_BACKUP_DIR) -> list[BackupRecord]:
     return sorted(records, key=lambda r: r.created_at, reverse=True)
 
 
-def restore_backup(database_path: Path, backup_dir: Path = DEFAULT_BACKUP_DIR) -> Path:
+def restore_backup(database_path: Path, backup_dir: Optional[Path] = None,
+                   audit=None) -> Path:
+    """Replace the live book with a recovery point, in one visible step.
+
+    The prepared copy is brought fully up to date before it goes live: copied,
+    integrity checked, migrated to the current schema, and its own restore event
+    written into it. Only then does it replace the live book, atomically.
+
+    Doing the migration and the audit on the copy is what makes the restore and
+    its record one transition rather than two. Restoring first and auditing
+    afterwards left a window where the book was replaced and nothing recorded
+    it, and worse, a backup predating the audit_log rebuild reinstated the older
+    schema, so the event could not be written at all.
+
+    ``audit`` is called with an open connection to the prepared copy, before it
+    goes live, and is expected to write the restore event through it.
+    """
     book_id = active_book_id()
     record = load_record(Path(database_path), expected_book_id=book_id)
+    if audit is None:
+        raise ValueError(
+            "A restore must record itself in the audit trail; no audit writer "
+            "was supplied."
+        )
+    if not opens_with_active_key(record):
+        raise ValueError(
+            "This recovery point was made under a different passphrase and "
+            "cannot be opened with the one this book uses now."
+        )
     # A verified pre-restore snapshot gives recovery even if replacement is
     # interrupted after this point.
     pre_restore = create_backup(
@@ -265,10 +456,43 @@ def restore_backup(database_path: Path, backup_dir: Path = DEFAULT_BACKUP_DIR) -
     temp = live.with_name(f".{live.name}.restore.tmp")
     shutil.copy2(record.database_path, temp)
     os.chmod(temp, 0o600)
-    if not _integrity(temp):
+    try:
+        if not _integrity(temp):
+            raise RuntimeError(
+                "The recovery point could not be read back after copying it. "
+                "The live book has not been touched."
+            )
+
+        # Bring the copy to the current schema before anything writes to it. An
+        # older backup can predate migrations the running code depends on.
+        from database.schema import create_tables
+
+        conn = db_connection.open_keyed(temp)
+        try:
+            create_tables(conn)
+            audit(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Re-checked after migrating and auditing it, not only after copying:
+        # those are writes, and a copy that was sound before them is not
+        # evidence about the file that is about to go live.
+        if not _integrity(temp):
+            raise RuntimeError(
+                "The recovery point stopped reading cleanly while it was being "
+                "prepared. The live book has not been touched."
+            )
+
+        from database.crypto import _fsync_path
+
+        _fsync_path(temp)
+        os.replace(temp, live)
+        _fsync_path(live)
+        _fsync_path(live.parent)
+    except Exception:
         temp.unlink(missing_ok=True)
-        raise RuntimeError("Restored copy failed SQLite integrity verification.")
-    os.replace(temp, live)
+        raise
     return pre_restore
 
 

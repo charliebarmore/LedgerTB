@@ -11,14 +11,16 @@ logger = logging.getLogger(__name__)
 
 AUDIT_ACTIONS = {
     "INSERT", "UPDATE", "DELETE", "EXPORT", "BACKUP", "RESTORE",
-    "CLOSE", "REOPEN", "REVERSE", "OVERRIDE", "REVIEW",
+    "CLOSE", "REOPEN", "REVERSE", "OVERRIDE", "REVIEW", "REKEY",
 }
 
 
 @dataclass
 class AuditLog:
     id: Optional[int] = None
-    client_id: int = 0
+    # None for events that belong to the book rather than to one client:
+    # a passphrase change, a backup, a restore.
+    client_id: Optional[int] = None
     table_name: str = ""
     record_id: int = 0
     action: str = ""  # INSERT, UPDATE, DELETE
@@ -62,7 +64,7 @@ class AuditLog:
     @staticmethod
     def write(
         cursor,
-        client_id: int,
+        client_id: Optional[int],
         table_name: str,
         record_id: int,
         action: str,
@@ -104,7 +106,7 @@ class AuditLog:
 
     @staticmethod
     def log_change(
-        client_id: int,
+        client_id: Optional[int],
         table_name: str,
         record_id: int,
         action: str,
@@ -134,7 +136,7 @@ class AuditLog:
 
     @staticmethod
     def log_event(
-        client_id: int,
+        client_id: Optional[int],
         action: str,
         event_name: str,
         details: Optional[Dict[str, Any]] = None,
@@ -151,7 +153,7 @@ class AuditLog:
 
     @staticmethod
     def log_change_safe(
-        client_id: int,
+        client_id: Optional[int],
         table_name: str,
         record_id: int,
         action: str,
@@ -211,7 +213,8 @@ class AuditLog:
         """Get the timestamp of the client's earliest audit log entry, if any."""
         with get_cursor() as cursor:
             cursor.execute(
-                "SELECT MIN(changed_at) as earliest FROM audit_log WHERE client_id = ?",
+                "SELECT MIN(changed_at) as earliest FROM audit_log "
+                "WHERE client_id = ? OR client_id IS NULL",
                 (client_id,)
             )
             row = cursor.fetchone()
@@ -322,7 +325,9 @@ class AuditLog:
         search_term: Optional[str] = None,
     ):
         require_valid_range(start_date, end_date, "Audit filter")
-        clauses = ["client_id = ?"]
+        # Book-level events (client_id NULL) belong to every client's view of
+        # the trail, because they affected the book all of them live in.
+        clauses = ["(client_id = ? OR client_id IS NULL)"]
         params: List[Any] = [client_id]
         # SQLite CURRENT_TIMESTAMP uses a space separator, not ISO's "T".
         if start_date:

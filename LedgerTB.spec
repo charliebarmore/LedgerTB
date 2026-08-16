@@ -80,7 +80,7 @@ metadatas = []
 for pkg in (
     "streamlit", "pandas", "numpy", "pyarrow", "altair", "anthropic",
     "openpyxl", "pillow", "tornado", "click", "rich", "platformdirs",
-    "python-dotenv", "gitpython", "packaging", "keyring",
+    "python-dotenv", "gitpython", "packaging", "keyring", "portalocker",
     "pypdfium2", "Pillow", "pyobjc-framework-Quartz",
 ):
     try:
@@ -89,7 +89,7 @@ for pkg in (
         pass
 
 hiddenimports = st_hiddenimports + [
-    "pandas", "numpy", "openpyxl", "anthropic", "dotenv", "platformdirs", "altair",
+    "pandas", "numpy", "openpyxl", "anthropic", "dotenv", "platformdirs", "portalocker", "altair",
     # Both credential-vault backends: the frozen app must reach the OS vault
     # on each platform (API key + MCP enablement live there).
     "keyring", "keyring.backends.macOS", "keyring.backends.Windows",

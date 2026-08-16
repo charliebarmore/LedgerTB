@@ -9,6 +9,7 @@ import pytest
 
 from database import connection as dbconn
 from database.connection import get_cursor
+from utils import maintenance_lock
 from models import assistant_review
 from models.account import Account
 from services import mcp_tools
@@ -108,7 +109,10 @@ def test_review_checkpoint_covers_only_the_displayed_page(client_id, monkeypatch
     from utils import actor as actor_mod
 
     _as_assistant(monkeypatch)
-    with get_cursor(commit=True) as cursor:
+    # An assistant only ever writes inside a declared tool invocation, which is
+    # what publishes its claim to the maintenance lock. Simulating its writes
+    # without that would exercise a path production does not have.
+    with maintenance_lock.writer(dbconn.DATABASE_PATH), get_cursor(commit=True) as cursor:
         for number in range(205):
             AuditLog.write(
                 cursor=cursor,
@@ -142,12 +146,13 @@ def test_review_checkpoint_rejects_stale_or_foreign_target(
     from utils import actor as actor_mod
 
     _as_assistant(monkeypatch)
-    own_id = AuditLog.log_event(client_id, "EXPORT", "own_assistant_event")
-    other_client = Client(name="Other Review Client")
-    other_client.save(seed_accounts=False)
-    foreign_id = AuditLog.log_event(
-        other_client.id, "EXPORT", "foreign_assistant_event"
-    )
+    with maintenance_lock.writer(dbconn.DATABASE_PATH):
+        own_id = AuditLog.log_event(client_id, "EXPORT", "own_assistant_event")
+        other_client = Client(name="Other Review Client")
+        other_client.save(seed_accounts=False)
+        foreign_id = AuditLog.log_event(
+            other_client.id, "EXPORT", "foreign_assistant_event"
+        )
     monkeypatch.setattr(actor_mod, "_ASSISTANT", False)
     monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", None)
 
@@ -166,9 +171,10 @@ def test_review_checkpoint_rolls_back_when_audit_write_fails(
     from utils import actor as actor_mod
 
     _as_assistant(monkeypatch)
-    assistant_id = AuditLog.log_event(
-        client_id, "EXPORT", "assistant_event_before_failed_review"
-    )
+    with maintenance_lock.writer(dbconn.DATABASE_PATH):
+        assistant_id = AuditLog.log_event(
+            client_id, "EXPORT", "assistant_event_before_failed_review"
+        )
     monkeypatch.setattr(actor_mod, "_ASSISTANT", False)
     monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", None)
 

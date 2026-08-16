@@ -55,6 +55,20 @@ def fake_credential_vault(request, monkeypatch):
 def db(tmp_path, monkeypatch):
     """Point the app at a throwaway encrypted SQLite file for this test only."""
     monkeypatch.setattr(db_connection, "DATABASE_PATH", tmp_path / "test.db")
+    # Backups too, or anything that takes one writes into the developer's real
+    # backup folder. Both names: config's, and the copy services.backups bound
+    # at import time.
+    import config
+    import services.backups as _backups
+
+    monkeypatch.setattr(config, "BACKUP_DIR", tmp_path / "backups")
+    monkeypatch.setattr(_backups, "DEFAULT_BACKUP_DIR", tmp_path / "backups")
+    # The throwaway book has to look like one of LedgerTB's own, or anything
+    # gated on is_local_book (passphrase rotation, assistant writes) refuses it
+    # as a possible shared-drive book.
+    import utils.books as _books
+
+    monkeypatch.setattr(_books, "USER_DATA_DIR", tmp_path)
     # The database is SQLCipher-encrypted; set the derived key (the app's unlock
     # gate does this from the passphrase in production) so connections can open it.
     from database.crypto import derive_key

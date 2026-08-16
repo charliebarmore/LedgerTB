@@ -10,6 +10,7 @@ the OS keychain.
 """
 
 import hashlib
+import secrets
 import os
 from pathlib import Path
 
@@ -105,6 +106,257 @@ def verify_passphrase(path: Path, passphrase: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def _fsync_path(path: Path) -> None:
+    """Force a file or directory to durable storage, where the platform can.
+
+    A rename is only atomic once both the new file's contents and the directory
+    entry naming it have actually reached the disk. Without this a power loss
+    can leave the rename visible and the contents not, which is the one failure
+    an atomic replace is supposed to rule out. Directory fsync is a no-op or an
+    error on some platforms (Windows), so it is best effort there.
+    """
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def _on_windows() -> bool:
+    """Named so a test can exercise the other platform's message without
+    mutating os.name, which pathlib reads and misbehaves without."""
+    return os.name == "nt"
+
+
+def _replace_or_explain(tmp_new: Path, path: Path) -> None:
+    """Swap the prepared file in, or say why Windows refused.
+
+    Verified on Windows 11 / NTFS with Python 3.12: os.replace fails with
+    WinError 5 if ANY handle is open on the target, including a plain read
+    handle and a live SQLite connection. POSIX replaces the name regardless.
+
+    It fails safely, since the replace is all-or-nothing and the book is left
+    untouched, but "Access is denied" tells the reader nothing about what to do.
+    """
+    try:
+        os.replace(tmp_new, path)
+    except PermissionError as exc:
+        if _on_windows():
+            raise RuntimeError(
+                "Another program has this book open, so it could not be "
+                "replaced. On Windows a file cannot be replaced while anything "
+                "holds it open. Close every other LedgerTB window and any "
+                "assistant access, then try again. Nothing has been changed."
+            ) from exc
+        # On POSIX a rename is not refused for an open handle, so this is a
+        # real permission problem with the file or its folder, and telling
+        # someone to close other windows would send them chasing nothing.
+        raise RuntimeError(
+            "This book or the folder holding it could not be written to, so "
+            f"the passphrase was not changed ({exc}). Check the file's "
+            "permissions and that the drive is not read-only. Nothing has "
+            "been changed."
+        ) from exc
+
+
+def _data_version(conn) -> int:
+    """SQLite's counter of commits made by OTHER connections to this database.
+
+    The one signal available here for "did somebody else write while we were
+    working". It does not move for this connection's own writes, which is
+    exactly what makes it usable as a race detector.
+    """
+    return conn.execute("PRAGMA data_version").fetchone()[0]
+
+
+def rekey_file(path: Path, current_key_hex: str, new_key_hex: str) -> None:
+    """Re-encrypt a standalone SQLCipher file in place, atomically.
+
+    The same export, verify, single-replace shape as change_passphrase, without
+    its concurrency checks: this is for a file nothing else is writing, such as
+    a backup. The original is never replaced by anything that has not opened and
+    passed an integrity check first.
+    """
+    if sqlcipher3 is None:
+        raise RuntimeError("SQLCipher (sqlcipher3) is not installed.")
+    path = Path(path)
+    current_pragma = key_pragma(current_key_hex)
+    new_pragma = key_pragma(new_key_hex)
+    # A unique name per invocation. A fixed one collides between concurrent
+    # re-keys and can be pre-created as a symlink pointing somewhere else.
+    tmp_new = path.with_suffix(path.suffix + f".rekey-{secrets.token_hex(8)}.tmp")
+    try:
+        src = sqlcipher3.connect(str(path))
+        try:
+            src.execute(f"PRAGMA key = {current_pragma}")
+            src.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            page_size = src.execute("PRAGMA cipher_page_size").fetchone()[0]
+            src.execute(
+                f"ATTACH DATABASE {_sql_str(str(tmp_new))} AS rekeyed KEY {new_pragma}"
+            )
+            if page_size:
+                src.execute(f"PRAGMA rekeyed.cipher_page_size = {int(page_size)}")
+            src.execute("SELECT sqlcipher_export('rekeyed')")
+            src.execute("DETACH DATABASE rekeyed")
+        finally:
+            src.close()
+
+        check = sqlcipher3.connect(str(tmp_new))
+        try:
+            check.execute(f"PRAGMA key = {new_pragma}")
+            ok = check.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        finally:
+            check.close()
+        if not ok:
+            raise RuntimeError("The re-encrypted copy failed its integrity check.")
+
+        _fsync_path(tmp_new)
+        _replace_or_explain(tmp_new, path)
+        _fsync_path(path)
+        _fsync_path(path.parent)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except Exception:
+        if tmp_new.exists():
+            tmp_new.unlink()
+        raise
+
+
+def key_fingerprint(key_hex: str) -> str:
+    """A short, non-reversible marker for which key opens a file.
+
+    Recorded in a backup's manifest so the app can say which passphrase a
+    backup needs without opening it, and without storing anything that helps
+    open it. A SHA-256 of a 256-bit key is not a shortcut to the key.
+    """
+    return hashlib.sha256(("ledgertb-key-fingerprint:" + key_hex).encode()).hexdigest()[:16]
+
+
+def change_passphrase(path: Path, current_key_hex: str, new_passphrase: str) -> str:
+    """Re-encrypt an encrypted book under a new passphrase. Returns the new key.
+
+    Exports the whole database into a new file keyed with the new passphrase,
+    proves that file opens and passes an integrity check, and then replaces the
+    live file with it in one atomic rename.
+
+    One rename, not two. An earlier version moved the live file aside and then
+    moved the new one in, which left a window where the book did not exist at
+    its own path -- and a crash there looks to the unlock gate exactly like a
+    first run, so the app would offer to create a fresh empty book while the
+    real one sat beside it under a name nothing mentioned. os.replace onto the
+    live path is atomic on POSIX, so the path always resolves to a whole book,
+    either the old one or the new one. The caller is expected to have taken a
+    verified backup under the new key first; that, not a temporary sibling
+    file, is the fallback.
+
+    ``PRAGMA rekey`` would be shorter still and rewrites the live file in
+    place, which leaves nothing to fall back to at all.
+
+    Concurrency: this reads data_version before the export and again
+    immediately before the replace, and refuses if another connection committed
+    in between. That is detection, not exclusion. It cannot see a commit that
+    lands after the final read, and it cannot stop a process that keeps writing
+    to the displaced file after the replace. Callers must not present a
+    successful return as proof that nothing else was writing.
+    """
+    if sqlcipher3 is None:
+        raise RuntimeError("SQLCipher (sqlcipher3) is not installed; cannot change the passphrase.")
+    path = Path(path)
+    if database_state(path) != "encrypted":
+        raise RuntimeError("Only an encrypted book has a passphrase to change.")
+    if not new_passphrase:
+        raise ValueError("The new passphrase cannot be empty.")
+
+    new_key = derive_key(new_passphrase)
+    if new_key == current_key_hex:
+        raise ValueError("The new passphrase is the same as the current one.")
+
+    current_pragma = key_pragma(current_key_hex)
+    new_pragma = key_pragma(new_key)
+    # A unique name per invocation. A fixed one collides between concurrent
+    # re-keys and can be pre-created as a symlink pointing somewhere else.
+    tmp_new = path.with_suffix(path.suffix + f".rekey-{secrets.token_hex(8)}.tmp")
+
+    try:
+        src = sqlcipher3.connect(str(path))
+        try:
+            src.execute(f"PRAGMA key = {current_pragma}")
+            # Fails here, before anything is written, if the key we were handed
+            # does not open the book.
+            src.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            page_size = src.execute("PRAGMA cipher_page_size").fetchone()[0]
+            before = _data_version(src)
+
+            src.execute(
+                f"ATTACH DATABASE {_sql_str(str(tmp_new))} AS rekeyed KEY {new_pragma}"
+            )
+            # Carry the source's page size across. sqlcipher_export does not,
+            # and a target left on the build's default would still open here
+            # while failing against a build compiled with a different one.
+            if page_size:
+                src.execute(f"PRAGMA rekeyed.cipher_page_size = {int(page_size)}")
+            src.execute("SELECT sqlcipher_export('rekeyed')")
+            src.execute("DETACH DATABASE rekeyed")
+
+            after = _data_version(src)
+        finally:
+            src.close()
+
+        if after != before:
+            raise RuntimeError(
+                "Another connection wrote to this book while its passphrase was "
+                "being changed, so nothing was changed. Close the book "
+                "everywhere else, including any assistant access, and try again."
+            )
+
+        check = sqlcipher3.connect(str(tmp_new))
+        try:
+            check.execute(f"PRAGMA key = {new_pragma}")
+            result = check.execute("PRAGMA integrity_check").fetchone()[0]
+        finally:
+            check.close()
+        if result != "ok":
+            raise RuntimeError("The re-encrypted copy failed its integrity check.")
+
+        # Last look before the point of no return. Narrow, not closed: a commit
+        # landing after this and before the replace is still lost, which is why
+        # the caller takes a backup first and why the UI does not claim more.
+        final = sqlcipher3.connect(str(path))
+        try:
+            final.execute(f"PRAGMA key = {current_pragma}")
+            if _data_version(final) != before:
+                raise RuntimeError(
+                    "Another connection wrote to this book while its passphrase "
+                    "was being changed, so nothing was changed. Close the book "
+                    "everywhere else, including any assistant access, and try "
+                    "again."
+                )
+        finally:
+            final.close()
+
+        _fsync_path(tmp_new)
+        _replace_or_explain(tmp_new, path)
+        _fsync_path(path)
+        _fsync_path(path.parent)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except Exception:
+        if tmp_new.exists():
+            tmp_new.unlink()
+        raise
+
+    return new_key
 
 
 def encrypt_plaintext_db(path: Path, passphrase: str) -> Path:
