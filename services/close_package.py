@@ -153,26 +153,30 @@ def get_cash_activity(client_id: int, period_start: date, period_end: date) -> L
     with get_cursor() as cursor:
         cursor.execute(
             """
-            SELECT a.account_number, a.name AS account_name,
+            SELECT a.account_number, a.name AS account_name, a.type, a.subtype,
                    COALESCE(SUM(CASE WHEN je.entry_date < ?
+                       OR (je.entry_type = 'Beginning Balance'
+                           AND je.entry_date <= ?)
                        THEN jel.debit - jel.credit ELSE 0 END), 0) AS beginning,
                    COALESCE(SUM(CASE WHEN je.entry_date BETWEEN ? AND ?
+                       AND je.entry_type != 'Beginning Balance'
                        THEN jel.debit ELSE 0 END), 0) AS receipts,
                    COALESCE(SUM(CASE WHEN je.entry_date BETWEEN ? AND ?
+                       AND je.entry_type != 'Beginning Balance'
                        THEN jel.credit ELSE 0 END), 0) AS disbursements
             FROM accounts a
             LEFT JOIN journal_entry_lines jel ON jel.account_id = a.id
             LEFT JOIN journal_entries je ON je.id = jel.journal_entry_id
             WHERE a.client_id = ? AND a.type = 'Asset'
-              AND LOWER(TRIM(a.subtype)) = LOWER(?)
             GROUP BY a.id
             ORDER BY a.account_number
             """,
             (
                 period_start.isoformat(),
+                period_end.isoformat(),
                 period_start.isoformat(), period_end.isoformat(),
                 period_start.isoformat(), period_end.isoformat(),
-                client_id, AccountSubtype.CASH,
+                client_id,
             ),
         )
         rows = cursor.fetchall()
@@ -185,6 +189,9 @@ def get_cash_activity(client_id: int, period_start: date, period_end: date) -> L
             disbursements=to_dollars(row["disbursements"]),
         )
         for row in rows
+        if AccountSubtype.is_cash_like(
+            row["type"], row["subtype"], row["account_name"]
+        )
     ]
 
 
@@ -202,6 +209,12 @@ def load_close_package_snapshot(
     if year:
         from models.close_map import readiness
         close_map = readiness(client_id, year["id"])
+    cash_flow = ReportGenerator.cash_flow_statement(
+        client_id, period_start, period_end
+    )
+    comparative_cash_flow = ReportGenerator.comparative_cash_flow_statement(
+        client_id, period_start, period_end, current_report=cash_flow
+    )
     return ClosePackageSnapshot(
         transactions=get_period_transactions(client_id, period_start, period_end),
         cash=get_cash_activity(client_id, period_start, period_end),
@@ -215,12 +228,8 @@ def load_close_package_snapshot(
         comparative_balance_sheet=ReportGenerator.comparative_balance_sheet(
             client_id, period_end
         ),
-        cash_flow=ReportGenerator.cash_flow_statement(
-            client_id, period_start, period_end
-        ),
-        comparative_cash_flow=ReportGenerator.comparative_cash_flow_statement(
-            client_id, period_start, period_end
-        ),
+        cash_flow=cash_flow,
+        comparative_cash_flow=comparative_cash_flow,
         comparative_trial_balance=ReportGenerator.comparative_trial_balance(
             client_id, period_end
         ),
@@ -403,61 +412,8 @@ def _append_comparative_statement_groups(
 
 
 def _income_statement_rows(report: Dict) -> List[tuple]:
-    """Shared grouped, multi-step IS rows for Excel and PDF close packages."""
-    revenue_by_key = {group['key']: group for group in report['revenue_groups']}
-    expense_by_key = {group['key']: group for group in report['expense_groups']}
-    rows = []
-
-    def append_group(group: Dict):
-        rows.append(('group', group['group'], None))
-        rows.extend(
-            ('item', _statement_label(item), item)
-            for item in group['accounts']
-        )
-        rows.append(('group_total', f"Total {group['group']}", group['subtotal']))
-
-    rows.append(('section', 'Revenue', None))
-    operating_revenue = revenue_by_key.get('operating_revenue')
-    if operating_revenue:
-        append_group(operating_revenue)
-    elif not report['revenues']:
-        rows.append(('note', 'No revenue recorded', None))
-
-    cogs = expense_by_key.get('cost_of_goods_sold')
-    if cogs:
-        append_group(cogs)
-        rows.append(('total', 'Gross Profit', report['gross_profit']))
-
-    operating_groups = [
-        expense_by_key[key]
-        for key in ('operating_expenses', 'depreciation_amortization')
-        if key in expense_by_key
-    ]
-    if operating_groups:
-        rows.append(('section', 'Operating Expenses', None))
-        for group in operating_groups:
-            append_group(group)
-        if operating_revenue or cogs:
-            rows.append(('total', 'Operating Income', report['operating_income']))
-
-    other_groups = []
-    for key in ('other_income', 'unclassified'):
-        if key in revenue_by_key:
-            other_groups.append(revenue_by_key[key])
-    for key in ('other_expenses', 'unclassified'):
-        if key in expense_by_key:
-            other_groups.append(expense_by_key[key])
-    if other_groups:
-        rows.append(('section', 'Other and Unclassified', None))
-        for group in other_groups:
-            append_group(group)
-
-    rows.extend([
-        ('subtotal', 'Total Revenue', report['total_revenue']),
-        ('subtotal', 'Total Expenses', report['total_expenses']),
-        ('total', 'NET INCOME', report['net_income']),
-    ])
-    return rows
+    """Compatibility wrapper around the shared statement row assembly."""
+    return ReportGenerator.income_statement_rows(report)
 
 
 def _append_comparative_income_statement(ws, report: Dict) -> None:
@@ -982,7 +938,9 @@ def _pdf_income_statement_table(report: Dict) -> Table:
             else '  ' if kind in {'group', 'group_total'}
             else ''
         )
-        row = [f"{prefix}{label}"]
+        row = [
+            _wrap(label) if kind == 'item' else f"{prefix}{label}"
+        ]
         row += (
             _pdf_comparison_values(
                 values, totals=kind in {'group_total', 'subtotal', 'total'}
@@ -1019,7 +977,7 @@ def _pdf_grouped_comparison_table(groups: List[Dict], empty_label: str,
         bold_rows.append(len(data_rows) - 1)
         for item in group['accounts']:
             data_rows.append([
-                f"    {_statement_label(item)}",
+                _wrap(_statement_label(item)),
                 *_pdf_comparison_values(item),
             ])
         if group['accounts']:

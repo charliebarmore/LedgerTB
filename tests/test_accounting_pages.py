@@ -110,6 +110,9 @@ def test_add_account_subtypes_follow_type_without_form_submission(
     page = AppTest.from_file(
         page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30
     ).run()
+    page.selectbox(key="add_account_subtype").set_value(
+        AccountSubtype.CASH
+    ).run()
     page.selectbox(key="add_account_type").set_value("Liability").run()
     assert not page.exception
     subtype = next(
@@ -117,6 +120,7 @@ def test_add_account_subtypes_follow_type_without_form_submission(
         if box.label == "Statement Subtype (optional)"
     )
     assert subtype.options == ["Review later"] + AccountSubtype.for_type("Liability")
+    assert subtype.value is None
     assert AccountSubtype.OPERATING_EXPENSE not in subtype.options
 
 

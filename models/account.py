@@ -106,7 +106,14 @@ class Account:
         """
         from models.audit_log import AuditLog
 
-        selected_ids = list(dict.fromkeys(int(value) for value in account_ids))
+        selected_ids = []
+        for value in account_ids:
+            try:
+                account_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if account_id not in selected_ids:
+                selected_ids.append(account_id)
         if not selected_ids:
             return 0
 
@@ -121,10 +128,11 @@ class Account:
                 [client_id, *selected_ids],
             )
             rows = cursor.fetchall()
-            if len(rows) != len(selected_ids):
-                raise ValueError(
-                    "One or more selected accounts no longer belong to this client."
-                )
+            # A Streamlit multiselect can briefly submit stale ids after the
+            # prior bulk update reruns the page. Ignore ids that are no longer
+            # valid for this client; never update outside the scoped query.
+            if not rows:
+                return 0
 
             account_types = {row["type"] for row in rows}
             if len(account_types) != 1:

@@ -190,6 +190,87 @@ def test_unknown_subtypes_land_in_explicit_unclassified_groups(
     assert group["group"] == "Unclassified Expenses"
     assert group["subtotal"] == 25
     assert group["accounts"][0]["statement_subtype"] is None
+    assert report["multistep_ready"] is False
+    assert report["gross_profit"] is None
+    assert report["operating_income"] is None
+    assert report["statement_warnings"]
+
+
+def test_unclassified_revenue_hides_misleading_multistep_subtotals(
+    client_id, accounts
+):
+    legacy_revenue = Account(
+        client_id=client_id, account_number="4190", name="Legacy Sales",
+        type="Revenue", subtype="CPA Revenue Group",
+    )
+    cogs = Account(
+        client_id=client_id, account_number="5100", name="Materials",
+        type="Expense", subtype=AccountSubtype.COST_OF_GOODS_SOLD,
+    )
+    legacy_revenue.save()
+    cogs.save()
+    post_entry(client_id, date(2026, 2, 1), [
+        (accounts["cash"], 100, 0), (legacy_revenue.id, 0, 100),
+    ])
+    post_entry(client_id, date(2026, 2, 2), [
+        (cogs.id, 40, 0), (accounts["cash"], 0, 40),
+    ])
+
+    report = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    labels = [label for _kind, label, _value
+              in ReportGenerator.income_statement_rows(report)]
+    assert report["net_income"] == 60
+    assert report["multistep_ready"] is False
+    assert report["gross_profit"] is None
+    assert report["operating_income"] is None
+    assert "GROSS PROFIT" not in labels
+    assert "OPERATING INCOME" not in labels
+    assert "Unclassified Revenues" in labels
+
+
+def test_other_income_only_does_not_render_an_empty_revenue_heading(
+    client_id, accounts
+):
+    other_income = Account(
+        client_id=client_id, account_number="4900", name="Interest Income",
+        type="Revenue", subtype=AccountSubtype.OTHER_INCOME,
+    )
+    other_income.save()
+    post_entry(client_id, date(2026, 4, 1), [
+        (accounts["cash"], 25, 0), (other_income.id, 0, 25),
+    ])
+    report = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    rows = ReportGenerator.income_statement_rows(report)
+    assert rows[0][:2] == ('section', 'Other Income and Expenses')
+    assert not any(
+        kind == 'section' and label == 'Revenue' for kind, label, _ in rows
+    )
+
+
+def test_orphan_accumulated_depreciation_is_not_negative_net_ppe(
+    client_id, accounts
+):
+    accumulated = Account(
+        client_id=client_id, account_number="1510",
+        name="Accumulated Depreciation", type="Asset",
+        subtype=AccountSubtype.ACCUMULATED_DEPRECIATION,
+    )
+    accumulated.save()
+    post_entry(client_id, date(2026, 6, 30), [
+        (accounts["equity"], 100, 0), (accumulated.id, 0, 100),
+    ])
+
+    report = ReportGenerator.balance_sheet(client_id, date(2026, 12, 31))
+    groups = {group["key"]: group for group in report["asset_groups"]}
+    assert "property_equipment_net" not in groups
+    assert groups["unclassified"]["subtotal"] == -100
+    assert groups["unclassified"]["accounts"][0]["name"] == (
+        "Accumulated Depreciation"
+    )
 
 
 def test_income_statement_comparison_merges_lines_and_calculates_changes(

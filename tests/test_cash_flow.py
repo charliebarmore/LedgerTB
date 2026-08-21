@@ -126,14 +126,16 @@ def test_cash_flow_ignores_closing_entry_when_calculating_period_profit(
     ], entry_type="Closing")
 
     report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    income = ReportGenerator.income_statement(client_id, START, END)
     net_income = report["operating"]["lines"][0]
     assert net_income == {"key": "net_income", "name": "Net Income", "amount": 200}
     assert report["operating"]["total"] == 200
     assert report["noncash_items"] == []
     assert report["ready"] is True
+    assert income["net_income"] == net_income["amount"] == 200
 
 
-def test_mixed_debt_and_interest_payment_stays_unclassified(
+def test_mixed_debt_and_interest_payment_splits_by_exact_counterpart_amount(
     client_id, accounts
 ):
     retained = _account(
@@ -157,13 +159,69 @@ def test_mixed_debt_and_interest_payment_stays_unclassified(
 
     report = ReportGenerator.cash_flow_statement(client_id, START, END)
     assert report["ties"] is True
-    assert report["unclassified"]["total"] == -100
-    assert report["unclassified"]["entries"][0]["reason"] == (
-        "entry mixes financing and operating activity"
+    assert report["operating"]["total"] == -20
+    assert report["financing"]["total"] == -80
+    assert report["unclassified"]["entries"] == []
+    assert report["classification_complete"] is True
+    assert report["operating_reconciled"] is True
+    assert report["ready"] is True
+
+
+def test_midperiod_beginning_balance_establishes_opening_cash(
+    client_id, accounts
+):
+    retained = _account(
+        client_id, "3900", "Retained Earnings", "Equity",
+        AccountSubtype.RETAINED_EARNINGS,
     )
+    revenue = _account(
+        client_id, "4100", "Service Revenue", "Revenue",
+        AccountSubtype.OPERATING_REVENUE,
+    )
+    post_entry(client_id, date(2026, 3, 15), [
+        (accounts["cash"], 500, 0), (retained, 0, 500),
+    ], entry_type="Beginning Balance")
+    post_entry(client_id, date(2026, 3, 20), [
+        (accounts["cash"], 100, 0), (revenue, 0, 100),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(
+        client_id, date(2026, 3, 1), date(2026, 3, 31)
+    )
+    assert report["cash_beginning"] == 500
+    assert report["cash_ending"] == 600
+    assert report["actual_cash_change"] == 100
+    assert report["operating"]["total"] == 100
+    assert report["ready"] is True
+
+
+def test_blank_subtype_checking_is_included_but_blocks_ready_status(
+    client_id, accounts
+):
+    checking = _account(
+        client_id, "1010", "Chase Checking", "Asset", None,
+    )
+    contribution = _account(
+        client_id, "3100", "Owner Contribution", "Equity",
+        AccountSubtype.OWNER_CONTRIBUTION,
+    )
+    post_entry(client_id, date(2026, 2, 1), [
+        (checking, 300, 0), (contribution, 0, 300),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    assert report["cash_ending"] == 300
+    assert report["actual_cash_change"] == 300
+    assert report["financing"]["total"] == 300
+    assert report["ties"] is True
     assert report["classification_complete"] is False
-    assert report["operating_reconciled"] is False
     assert report["ready"] is False
+    assert report["unresolved_cash_accounts"] == [{
+        "account_number": "1010",
+        "name": "Chase Checking",
+        "subtype": None,
+    }]
+    assert any("need the Cash subtype" in warning for warning in report["warnings"])
 
 
 def test_noncash_debt_financed_asset_purchase_is_disclosed(
@@ -223,19 +281,14 @@ def test_comparative_cash_flow_merges_lines_and_periods(client_id, accounts):
 def test_offsetting_unclassified_entries_remain_visible_in_exports(
     client_id, accounts
 ):
-    debt = _account(
-        client_id, "2500", "Term Loan", "Liability",
-        AccountSubtype.LONG_TERM_LIABILITY,
-    )
-    interest = _account(
-        client_id, "7100", "Interest Expense", "Expense",
-        AccountSubtype.OTHER_EXPENSE,
+    suspense = _account(
+        client_id, "1999", "Legacy Suspense", "Asset", None,
     )
     post_entry(client_id, date(2026, 5, 1), [
-        (debt, 80, 0), (interest, 20, 0), (accounts["cash"], 0, 100),
+        (suspense, 100, 0), (accounts["cash"], 0, 100),
     ])
     post_entry(client_id, date(2026, 6, 1), [
-        (accounts["cash"], 100, 0), (debt, 0, 80), (interest, 0, 20),
+        (accounts["cash"], 100, 0), (suspense, 0, 100),
     ])
 
     report = ReportGenerator.cash_flow_statement(client_id, START, END)
@@ -248,7 +301,7 @@ def test_offsetting_unclassified_entries_remain_visible_in_exports(
     assert "UNCLASSIFIED CASH ACTIVITY" in labels
     assert "UNCLASSIFIED ENTRY DETAILS" in labels
     assert export.set_index("Item").loc["STATUS", "Amount"] == "REVIEW WARNINGS"
-    assert sum("entry mixes financing and operating activity" in label
+    assert sum("counterpart account needs a statement subtype" in label
                for label in labels) == 2
 
     comparison = ReportGenerator.comparative_cash_flow_statement(

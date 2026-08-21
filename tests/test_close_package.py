@@ -298,21 +298,16 @@ def test_close_package_renders_curated_statement_groups(client_id, accounts):
 def test_close_package_discloses_offsetting_unclassified_cash_entries(
     client_id, accounts
 ):
-    debt = Account(
-        client_id=client_id, account_number="2500", name="Term Loan",
-        type="Liability", subtype="Long-Term Liability",
+    suspense = Account(
+        client_id=client_id, account_number="1999", name="Legacy Suspense",
+        type="Asset", subtype=None,
     )
-    debt.save()
-    interest = Account(
-        client_id=client_id, account_number="7100", name="Interest Expense",
-        type="Expense", subtype="Other Expense",
-    )
-    interest.save()
+    suspense.save()
     post_entry(client_id, date(2026, 1, 10), [
-        (debt.id, 80, 0), (interest.id, 20, 0), (accounts["cash"], 0, 100),
+        (suspense.id, 100, 0), (accounts["cash"], 0, 100),
     ])
     post_entry(client_id, date(2026, 1, 20), [
-        (accounts["cash"], 100, 0), (debt.id, 0, 80), (interest.id, 0, 20),
+        (accounts["cash"], 100, 0), (suspense.id, 0, 100),
     ])
     tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
     snapshot = load_close_package_snapshot(client_id, *Q1)
@@ -325,7 +320,7 @@ def test_close_package_discloses_offsetting_unclassified_cash_entries(
     assert "CURRENT UNCLASSIFIED ENTRY DETAILS" in labels
     assert sum(
         isinstance(label, str)
-        and "entry mixes financing and operating activity" in label
+        and "counterpart account needs a statement subtype" in label
         for label in labels
     ) == 2
 
@@ -338,7 +333,7 @@ def test_close_package_discloses_offsetting_unclassified_cash_entries(
             for index in range(len(document))
         )
         assert "Unclassified Cash Activity Details" in text
-        assert text.count("entry mixes financing and operating activity") == 2
+        assert text.count("counterpart account needs a statement subtype") == 2
     finally:
         document.close()
 
@@ -512,6 +507,26 @@ def test_pdf_package_contains_every_section(booked_period, accounts):
         assert len(doc) >= 6
     finally:
         doc.close()
+
+
+def test_snapshot_reuses_current_cash_flow_when_building_comparison(
+    booked_period, monkeypatch
+):
+    original = ReportGenerator.cash_flow_statement
+    calls = []
+
+    def counted(client_id, start_date, end_date):
+        calls.append((start_date, end_date))
+        return original(client_id, start_date, end_date)
+
+    monkeypatch.setattr(
+        ReportGenerator, "cash_flow_statement", staticmethod(counted)
+    )
+    load_close_package_snapshot(booked_period, *Q1)
+    assert calls == [
+        Q1,
+        (date(2025, 1, 1), date(2025, 3, 31)),
+    ]
 
 
 def test_pdf_and_excel_can_share_one_captured_snapshot(

@@ -87,13 +87,18 @@ with tab1:
                         f"(current: {current}{suggested}{inactive})"
                     )
 
+                generation_key = f"review_subtype_generation_{review_type}"
+                generation = st.session_state.get(generation_key, 0)
                 with st.form(f"review_subtypes_{review_type}"):
                     st.markdown(f"**{AccountType.plural_label(review_type)}**")
                     selected_ids = st.multiselect(
                         "Accounts to update",
                         options=list(by_id),
                         format_func=_review_label,
-                        key=f"review_subtype_accounts_{review_type}",
+                        key=(
+                            f"review_subtype_accounts_{review_type}_"
+                            f"{generation}"
+                        ),
                     )
                     assigned_subtype = st.selectbox(
                         "Assign subtype",
@@ -114,6 +119,7 @@ with tab1:
                                     f"Updated {count} account"
                                     f"{'' if count == 1 else 's'}."
                                 )
+                                st.session_state[generation_key] = generation + 1
                                 st.rerun()
                             except Exception as exc:
                                 st.error(f"Could not update those accounts: {exc}")
@@ -281,6 +287,11 @@ with tab2:
         options=AccountType.ALL,
         key="add_account_type",
     )
+    add_subtype_key = "add_account_subtype"
+    add_subtype_scope_key = f"{add_subtype_key}_scope"
+    if st.session_state.get(add_subtype_scope_key) != account_type:
+        st.session_state[add_subtype_scope_key] = account_type
+        st.session_state[add_subtype_key] = None
 
     with st.form("add_account_form", clear_on_submit=True):
         account_number = st.text_input("Account Number", placeholder="e.g., 1000")
@@ -289,6 +300,7 @@ with tab2:
             "Statement Subtype (optional)",
             options=[None] + AccountSubtype.for_type(account_type),
             format_func=lambda value: value or "Review later",
+            key=add_subtype_key,
         )
         description = st.text_area(
             "Description/Memo (optional)",

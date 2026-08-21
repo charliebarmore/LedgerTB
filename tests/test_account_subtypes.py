@@ -47,6 +47,26 @@ def test_new_accounts_normalize_safe_aliases_and_preserve_unknown_text(client_id
     assert Account.get_by_id(custom.id, client_id).subtype == "CPA Custom Group"
 
 
+@pytest.mark.parametrize("legacy", ["Bank", "Checking", "Savings"])
+def test_legacy_bank_aliases_resolve_to_cash(legacy):
+    assert AccountSubtype.resolve(AccountType.ASSET, legacy) == AccountSubtype.CASH
+
+
+def test_legacy_name_detection_and_asset_aliases_are_conservative():
+    assert AccountSubtype.is_cash_like(
+        AccountType.ASSET, None, "Chase Business Checking"
+    )
+    assert not AccountSubtype.is_cash_like(
+        AccountType.EXPENSE, None, "Bank Fees"
+    )
+    assert AccountSubtype.resolve(AccountType.ASSET, "Trust") == (
+        AccountSubtype.OTHER_CURRENT_ASSET
+    )
+    assert AccountSubtype.resolve(AccountType.ASSET, "Equipment") == (
+        AccountSubtype.FIXED_ASSET
+    )
+
+
 def test_bulk_subtype_assignment_is_atomic_and_audited(client_id):
     first = Account(
         client_id=client_id, account_number="6100", name="Rent",
@@ -84,6 +104,11 @@ def test_bulk_subtype_assignment_is_atomic_and_audited(client_id):
         == AccountSubtype.OPERATING_EXPENSE
         for row in rows
     )
+
+    assert Account.bulk_assign_subtype(
+        client_id, [first.id, "stale", 999999],
+        AccountSubtype.OPERATING_EXPENSE,
+    ) == 1
 
     with pytest.raises(ValueError, match="one account type"):
         Account.bulk_assign_subtype(

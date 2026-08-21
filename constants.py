@@ -160,13 +160,27 @@ class AccountSubtype:
     # Ambiguous aliases that need the account name are handled in ``resolve``.
     _ALIASES = {
         AccountType.ASSET: {
+            "bank": CASH,
+            "bank account": CASH,
+            "checking": CASH,
+            "checking account": CASH,
+            "savings": CASH,
+            "savings account": CASH,
+            "money market": CASH,
+            "cash and cash equivalents": CASH,
             "receivable": ACCOUNTS_RECEIVABLE,
             "accounts receivable (a/r)": ACCOUNTS_RECEIVABLE,
             "a/r": ACCOUNTS_RECEIVABLE,
             "prepaid": OTHER_CURRENT_ASSET,
             "contra asset": ACCUMULATED_DEPRECIATION,
             "wip": INVENTORY,
-            "trust": OTHER_ASSET,
+            "trust": OTHER_CURRENT_ASSET,
+            "equipment": FIXED_ASSET,
+            "fixed assets": FIXED_ASSET,
+            "vehicle": FIXED_ASSET,
+            "vehicles": FIXED_ASSET,
+            "property and equipment": FIXED_ASSET,
+            "property, plant and equipment": FIXED_ASSET,
         },
         AccountType.LIABILITY: {
             "accrual": OTHER_CURRENT_LIABILITY,
@@ -279,6 +293,26 @@ class AccountSubtype:
         if not stripped:
             return None
         return cls.resolve(account_type, stripped, account_name) or stripped
+
+    @classmethod
+    def is_cash_like(
+        cls, account_type: str, value: str | None, account_name: str = ""
+    ) -> bool:
+        """Identify cash accounts consistently without silently curing legacy data.
+
+        Known aliases resolve normally. Strong name signals let reporting include
+        a legacy/blank-subtype bank account in cash while still marking the
+        account as needing subtype review.
+        """
+        if account_type != AccountType.ASSET:
+            return False
+        if cls.resolve(account_type, value, account_name) == cls.CASH:
+            return True
+        name = cls._norm(account_name)
+        strong_phrases = (
+            "cash", "checking", "savings", "money market", "bank",
+        )
+        return any(phrase in name for phrase in strong_phrases)
 
 
 class EntryType:

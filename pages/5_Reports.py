@@ -258,67 +258,27 @@ elif selected_report == "Income Statement":
 
     revenue_groups = _visible_is_groups(report['revenue_groups'])
     expense_groups = _visible_is_groups(report['expense_groups'])
-    revenue_by_key = {group['key']: group for group in revenue_groups}
-    expense_by_key = {group['key']: group for group in expense_groups}
+    for warning in report.get('statement_warnings', ()):
+        st.warning(warning)
 
-    def _append_is_group(rows, group, total_label=None):
-        rows.append(("group", group['group'], []))
-        rows.extend(
-            ("item", f"{item['account_number']} - {item['name']}",
-             _amounts(item))
-            for item in group['accounts']
-        )
-        rows.append((
-            "subtotal", total_label or f"Total {group['group']}",
-            _amounts(group['subtotal']),
-        ))
-
-    statement_rows = [("section", "Revenue", [])]
-    operating_revenue_group = revenue_by_key.get('operating_revenue')
-    if operating_revenue_group:
-        _append_is_group(statement_rows, operating_revenue_group)
-    elif not revenue_lines:
-        statement_rows.append(("note", "No revenue recorded", []))
-
-    cogs_group = expense_by_key.get('cost_of_goods_sold')
-    if cogs_group:
-        _append_is_group(statement_rows, cogs_group)
+    layout_report = {
+        **report,
+        'revenues': revenue_lines,
+        'expenses': expense_lines,
+        'revenue_groups': revenue_groups,
+        'expense_groups': expense_groups,
+        # The warning is already shown with warning styling above the table.
+        'statement_warnings': [],
+    }
+    statement_rows = []
+    for kind, label, value in ReportGenerator.income_statement_rows(
+        layout_report
+    ):
         statement_rows.append((
-            "total", "Gross Profit", _amounts(report['gross_profit'])
+            'subtotal' if kind == 'group_total' else kind,
+            label,
+            [] if value is None else _amounts(value),
         ))
-
-    operating_groups = [
-        expense_by_key[key]
-        for key in ('operating_expenses', 'depreciation_amortization')
-        if key in expense_by_key
-    ]
-    if operating_groups:
-        statement_rows.append(("section", "Operating Expenses", []))
-        for group in operating_groups:
-            _append_is_group(statement_rows, group)
-        if operating_revenue_group or cogs_group:
-            statement_rows.append((
-                "total", "Operating Income",
-                _amounts(report['operating_income']),
-            ))
-
-    other_groups = []
-    for key in ('other_income', 'unclassified'):
-        if key in revenue_by_key:
-            other_groups.append(revenue_by_key[key])
-    for key in ('other_expenses', 'unclassified'):
-        if key in expense_by_key:
-            other_groups.append(expense_by_key[key])
-    if other_groups:
-        statement_rows.append(("section", "Other and Unclassified", []))
-        for group in other_groups:
-            _append_is_group(statement_rows, group)
-
-    statement_rows.append(("subtotal", "Total Revenue",
-                           _amounts(report['total_revenue'])))
-    statement_rows.append(("subtotal", "Total Expenses",
-                           _amounts(report['total_expenses'])))
-    statement_rows.append(("total", "Net Income", _amounts(report['net_income'])))
 
     financial_statement(
         statement_rows,
