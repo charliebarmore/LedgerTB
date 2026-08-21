@@ -29,6 +29,9 @@ class ImportedTransaction:
     duplicate_of_id: Optional[int] = None
     dismissed_at: Optional[str] = None
     dismissed_by: Optional[str] = None
+    superseded_by_batch: Optional[str] = None
+    reversal_journal_entry_id: Optional[int] = None
+    replaces_transaction_id: Optional[int] = None
 
     # Display fields (not stored)
     bank_account_name: Optional[str] = None
@@ -61,8 +64,9 @@ class ImportedTransaction:
                     (client_id, import_batch, transaction_date, description, amount, bank_account_id,
                      suggested_account_id, status, journal_entry_id, source_id, source_filename,
                      source_row_number, row_fingerprint, idempotency_key, duplicate_override,
-                     duplicate_override_reason, duplicate_of_id, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     duplicate_override_reason, duplicate_of_id, superseded_by_batch,
+                     reversal_journal_entry_id, replaces_transaction_id, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         self.client_id,
@@ -82,6 +86,9 @@ class ImportedTransaction:
                         int(self.duplicate_override),
                         self.duplicate_override_reason,
                         self.duplicate_of_id,
+                        self.superseded_by_batch,
+                        self.reversal_journal_entry_id,
+                        self.replaces_transaction_id,
                         current_actor(),
                     )
                 )
@@ -111,6 +118,9 @@ class ImportedTransaction:
                     "duplicate_override": bool(old["duplicate_override"]),
                     "duplicate_override_reason": old["duplicate_override_reason"],
                     "duplicate_of_id": old["duplicate_of_id"],
+                    "superseded_by_batch": old["superseded_by_batch"],
+                    "reversal_journal_entry_id": old["reversal_journal_entry_id"],
+                    "replaces_transaction_id": old["replaces_transaction_id"],
                 }
                 cursor.execute(
                     """
@@ -119,7 +129,8 @@ class ImportedTransaction:
                         bank_account_id = ?, suggested_account_id = ?, status = ?, journal_entry_id = ?,
                         source_id = ?, source_filename = ?, source_row_number = ?, row_fingerprint = ?,
                         idempotency_key = ?, duplicate_override = ?, duplicate_override_reason = ?,
-                        duplicate_of_id = ?
+                        duplicate_of_id = ?, superseded_by_batch = ?,
+                        reversal_journal_entry_id = ?, replaces_transaction_id = ?
                     WHERE id = ? AND client_id = ?
                     """,
                     (
@@ -139,6 +150,9 @@ class ImportedTransaction:
                         int(self.duplicate_override),
                         self.duplicate_override_reason,
                         self.duplicate_of_id,
+                        self.superseded_by_batch,
+                        self.reversal_journal_entry_id,
+                        self.replaces_transaction_id,
                         self.id, self.client_id
                     )
                 )
@@ -160,6 +174,9 @@ class ImportedTransaction:
                 "duplicate_override": self.duplicate_override,
                 "duplicate_override_reason": self.duplicate_override_reason,
                 "duplicate_of_id": self.duplicate_of_id,
+                "superseded_by_batch": self.superseded_by_batch,
+                "reversal_journal_entry_id": self.reversal_journal_entry_id,
+                "replaces_transaction_id": self.replaces_transaction_id,
             }
             AuditLog.write(
                 cursor, self.client_id, "imported_transactions", self.id,
@@ -181,14 +198,19 @@ class ImportedTransaction:
     @staticmethod
     def get_by_status(client_id: int, status: str) -> List['ImportedTransaction']:
         """Get all transactions for a client with a specific status."""
-        if status == "Dismissed":
-            status_clause = "it.status = 'Pending' AND it.dismissed_at IS NOT NULL"
+        if status == "Reversed":
+            status_clause = "it.superseded_by_batch IS NOT NULL"
+            params = (client_id,)
+        elif status == "Dismissed":
+            status_clause = ("it.status = 'Pending' AND it.dismissed_at IS NOT NULL "
+                             "AND it.superseded_by_batch IS NULL")
             params = (client_id,)
         elif status == "Pending":
-            status_clause = "it.status = ? AND it.dismissed_at IS NULL"
+            status_clause = ("it.status = ? AND it.dismissed_at IS NULL "
+                             "AND it.superseded_by_batch IS NULL")
             params = (client_id, status)
         else:
-            status_clause = "it.status = ?"
+            status_clause = "it.status = ? AND it.superseded_by_batch IS NULL"
             params = (client_id, status)
         with get_cursor() as cursor:
             cursor.execute(
@@ -216,7 +238,8 @@ class ImportedTransaction:
             amount=to_dollars(row['amount']),
             bank_account_id=row['bank_account_id'],
             suggested_account_id=row['suggested_account_id'],
-            status="Dismissed" if row['dismissed_at'] else row['status'],
+            status=("Reversed" if row['superseded_by_batch'] else
+                    "Dismissed" if row['dismissed_at'] else row['status']),
             journal_entry_id=row['journal_entry_id'],
             source_id=row['source_id'],
             source_filename=row['source_filename'],
@@ -228,6 +251,9 @@ class ImportedTransaction:
             duplicate_of_id=row['duplicate_of_id'],
             dismissed_at=row['dismissed_at'],
             dismissed_by=row['dismissed_by'],
+            superseded_by_batch=row['superseded_by_batch'],
+            reversal_journal_entry_id=row['reversal_journal_entry_id'],
+            replaces_transaction_id=row['replaces_transaction_id'],
             bank_account_name=row['bank_account_name'],
             suggested_account_name=row['suggested_account_name']
         ) for row in rows]
@@ -238,7 +264,8 @@ class ImportedTransaction:
         with get_cursor() as cursor:
             cursor.execute(
                 "SELECT COUNT(*) FROM imported_transactions WHERE client_id = ? "
-                "AND status = 'Pending' AND dismissed_at IS NULL",
+                "AND status = 'Pending' AND dismissed_at IS NULL "
+                "AND superseded_by_batch IS NULL",
                 (client_id,)
             )
             count = cursor.fetchone()[0]
@@ -273,6 +300,7 @@ class ImportedTransaction:
                            or row["status"] != "Pending"
                            or row["journal_entry_id"] is not None
                            or row["dismissed_at"] is not None
+                           or row["superseded_by_batch"] is not None
                            for row in rows)):
                 raise ValueError(
                     "Only pending transactions for the selected client can be dismissed."
@@ -377,8 +405,9 @@ class ImportedTransaction:
                     (client_id, import_batch, transaction_date, description, amount, bank_account_id,
                      suggested_account_id, status, journal_entry_id, source_id, source_filename,
                      source_row_number, row_fingerprint, idempotency_key, duplicate_override,
-                     duplicate_override_reason, duplicate_of_id, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     duplicate_override_reason, duplicate_of_id, superseded_by_batch,
+                     reversal_journal_entry_id, replaces_transaction_id, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         transaction.client_id, transaction.import_batch,
@@ -390,6 +419,9 @@ class ImportedTransaction:
                         transaction.source_row_number, transaction.row_fingerprint,
                         transaction.idempotency_key, int(transaction.duplicate_override),
                         transaction.duplicate_override_reason, transaction.duplicate_of_id,
+                        transaction.superseded_by_batch,
+                        transaction.reversal_journal_entry_id,
+                        transaction.replaces_transaction_id,
                         current_actor(),
                     ),
                 )
@@ -413,6 +445,9 @@ class ImportedTransaction:
                         "duplicate_override": transaction.duplicate_override,
                         "duplicate_override_reason": transaction.duplicate_override_reason,
                         "duplicate_of_id": transaction.duplicate_of_id,
+                        "superseded_by_batch": transaction.superseded_by_batch,
+                        "reversal_journal_entry_id": transaction.reversal_journal_entry_id,
+                        "replaces_transaction_id": transaction.replaces_transaction_id,
                     },
                 )
 
@@ -514,13 +549,17 @@ class ImportedTransaction:
             query += " AND it.transaction_date <= ?"
             params.append(end_date.isoformat())
 
-        if status == "Dismissed":
-            query += " AND it.status = 'Pending' AND it.dismissed_at IS NOT NULL"
+        if status == "Reversed":
+            query += " AND it.superseded_by_batch IS NOT NULL"
+        elif status == "Dismissed":
+            query += (" AND it.status = 'Pending' AND it.dismissed_at IS NOT NULL"
+                      " AND it.superseded_by_batch IS NULL")
         elif status == "Pending":
-            query += " AND it.status = ? AND it.dismissed_at IS NULL"
+            query += (" AND it.status = ? AND it.dismissed_at IS NULL"
+                      " AND it.superseded_by_batch IS NULL")
             params.append(status)
         elif status:
-            query += " AND it.status = ?"
+            query += " AND it.status = ? AND it.superseded_by_batch IS NULL"
             params.append(status)
 
         if bank_account_id:
@@ -548,7 +587,8 @@ class ImportedTransaction:
             amount=to_dollars(row['amount']),
             bank_account_id=row['bank_account_id'],
             suggested_account_id=row['suggested_account_id'],
-            status="Dismissed" if row['dismissed_at'] else row['status'],
+            status=("Reversed" if row['superseded_by_batch'] else
+                    "Dismissed" if row['dismissed_at'] else row['status']),
             journal_entry_id=row['journal_entry_id'],
             source_id=row['source_id'],
             source_filename=row['source_filename'],
@@ -560,6 +600,9 @@ class ImportedTransaction:
             duplicate_of_id=row['duplicate_of_id'],
             dismissed_at=row['dismissed_at'],
             dismissed_by=row['dismissed_by'],
+            superseded_by_batch=row['superseded_by_batch'],
+            reversal_journal_entry_id=row['reversal_journal_entry_id'],
+            replaces_transaction_id=row['replaces_transaction_id'],
             bank_account_name=row['bank_account_name'],
             suggested_account_name=row['suggested_account_name'],
             is_cleared=row['reconciliation_id'] is not None,
@@ -587,13 +630,18 @@ class ImportedTransaction:
         if end_date:
             clauses.append("it.transaction_date <= ?")
             params.append(end_date.isoformat())
-        if status == "Dismissed":
+        if status == "Reversed":
+            clauses.append("it.superseded_by_batch IS NOT NULL")
+        elif status == "Dismissed":
             clauses.append("it.status = 'Pending' AND it.dismissed_at IS NOT NULL")
+            clauses.append("it.superseded_by_batch IS NULL")
         elif status == "Pending":
             clauses.append("it.status = ? AND it.dismissed_at IS NULL")
+            clauses.append("it.superseded_by_batch IS NULL")
             params.append(status)
         elif status:
             clauses.append("it.status = ?")
+            clauses.append("it.superseded_by_batch IS NULL")
             params.append(status)
         if bank_account_id:
             clauses.append("it.bank_account_id = ?")
@@ -650,7 +698,9 @@ class ImportedTransaction:
         query = """
             SELECT b.*,
                    a.name account_name,
-                   a.account_number account_number
+                   a.account_number account_number,
+                   obr.replacement_batch,
+                   rbr.original_batch
             FROM (
                 SELECT it.import_batch,
                        MIN(it.source_filename) source_filename,
@@ -678,10 +728,14 @@ class ImportedTransaction:
                 GROUP BY it.import_batch
             ) b
             LEFT JOIN accounts a ON a.id = b.bank_account_id
+            LEFT JOIN import_batch_reversals obr
+              ON obr.client_id = ? AND obr.original_batch = b.import_batch
+            LEFT JOIN import_batch_reversals rbr
+              ON rbr.client_id = ? AND rbr.replacement_batch = b.import_batch
             ORDER BY b.sort_key DESC, b.import_batch DESC
         """
         with get_cursor() as cursor:
-            cursor.execute(query, (client_id,))
+            cursor.execute(query, (client_id, client_id, client_id))
             rows = cursor.fetchall()
 
         return [{
@@ -704,6 +758,8 @@ class ImportedTransaction:
             "last_date": date.fromisoformat(row["last_date"]) if row["last_date"] else None,
             "imported_at": row["imported_at"],
             "created_by": row["created_by"],
+            "replacement_batch": row["replacement_batch"],
+            "original_batch": row["original_batch"],
         } for row in rows]
 
     @staticmethod
@@ -741,7 +797,8 @@ class ImportedTransaction:
             amount=to_dollars(row['amount']),
             bank_account_id=row['bank_account_id'],
             suggested_account_id=row['suggested_account_id'],
-            status="Dismissed" if row['dismissed_at'] else row['status'],
+            status=("Reversed" if row['superseded_by_batch'] else
+                    "Dismissed" if row['dismissed_at'] else row['status']),
             journal_entry_id=row['journal_entry_id'],
             source_id=row['source_id'],
             source_filename=row['source_filename'],
@@ -753,6 +810,9 @@ class ImportedTransaction:
             duplicate_of_id=row['duplicate_of_id'],
             dismissed_at=row['dismissed_at'],
             dismissed_by=row['dismissed_by'],
+            superseded_by_batch=row['superseded_by_batch'],
+            reversal_journal_entry_id=row['reversal_journal_entry_id'],
+            replaces_transaction_id=row['replaces_transaction_id'],
             bank_account_name=row['bank_account_name'],
             suggested_account_name=row['suggested_account_name'],
         ) for row in rows]

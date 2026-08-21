@@ -142,6 +142,8 @@ def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatc
     assert not page.exception
     filter_box = next(b for b in page.selectbox if b.label == "Account filter")
     assert filter_box.value is None  # nothing selected = all accounts
+    assert page.checkbox(key="gl_hide_reversed_imports").value is True
+    assert any("Excel downloads always include" in c.value for c in page.caption)
     body = " ".join(str(m.value) for m in page.markdown)
     for name in ("Cash", "Revenue", "Expense"):
         assert name in body, f"{name} section missing from the all-accounts GL"
@@ -458,3 +460,71 @@ def test_imported_journal_uses_guided_category_correction(
         original.id
     ]
     assert link["suggested_account_id"] == travel.id
+
+
+def test_import_history_reverses_batch_into_review_queue(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    _, imported = post_transaction(
+        client_id=client_id,
+        transaction={
+            "date": date(2026, 1, 10),
+            "description": "Wrong-account import",
+            "amount": -55,
+            "source_id": "reverse-page-source",
+            "source_filename": "bank.csv",
+            "source_row_number": 2,
+        },
+        target_account_id=accounts["expense"],
+        bank_account_id=accounts["cash"],
+        batch_id="reverse-page",
+        learn=False,
+    )
+    page = AppTest.from_file(
+        page_path("pages/4_Import_Transactions.py"), default_timeout=30
+    )
+    page.session_state["import_active_tab"] = "Import History"
+    page.run()
+    assert not page.exception
+
+    button = page.button(key="reverse_import_batch_reverse-page")
+    assert button.disabled
+    page.text_area(key="batch_reversal_reason_reverse-page").set_value(
+        "Imported against the wrong account"
+    ).run()
+    page.checkbox(key="batch_reversal_confirmation_reverse-page").check().run()
+    assert not page.button(key="reverse_import_batch_reverse-page").disabled
+    page.button(key="reverse_import_batch_reverse-page").click().run()
+
+    assert not page.exception
+    assert page.session_state["import_active_tab"] == "Review & Categorize"
+    original = ImportedTransaction.get_by_batch(client_id, "reverse-page")[0]
+    assert original.id == imported.id
+    assert original.status == "Reversed"
+    pending = ImportedTransaction.get_by_status(client_id, "Pending")
+    assert len(pending) == 1
+    assert pending[0].replaces_transaction_id == imported.id
+    assert len(page.session_state["transactions_to_review"]) == 1
+    assert page.session_state["transactions_to_review"][0]["staged_id"] == pending[0].id
+
+    transactions = AppTest.from_file(
+        page_path("pages/6_Transactions.py"), default_timeout=30
+    ).run()
+    assert not transactions.exception
+    transaction_captions = " ".join(str(item.value) for item in transactions.caption)
+    assert f"Replacement for transaction #{imported.id}" in transaction_captions
+    assert "Reversal JE #" in transaction_captions
+
+    reports = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    reports.session_state["active_report"] = "General Ledger"
+    reports.run()
+    assert not reports.exception
+    assert reports.checkbox(key="gl_hide_reversed_imports").value is True
+    assert any(
+        "fully reversed imports" in str(item.value) for item in reports.info
+    )
+    reports.checkbox(key="gl_hide_reversed_imports").uncheck().run()
+    assert not reports.exception

@@ -97,7 +97,8 @@ def classify_import_duplicates(transactions: Iterable[dict], client_id: int,
         cursor.execute(
             """
             SELECT id, transaction_date, description, amount, bank_account_id,
-                   journal_entry_id, row_fingerprint, idempotency_key
+                   journal_entry_id, row_fingerprint, idempotency_key,
+                   superseded_by_batch
             FROM imported_transactions WHERE client_id = ?
             """,
             (client_id,),
@@ -120,7 +121,12 @@ def classify_import_duplicates(transactions: Iterable[dict], client_id: int,
                        WHERE id = ?""",
                     (fingerprint, legacy_key, row["id"]),
                 )
-            by_fingerprint[fingerprint].append(row)
+            # Reversed/superseded imports no longer represent an active ledger
+            # posting. Keep their idempotency keys so the exact same source row
+            # still cannot be replayed, but do not make a replacement look like
+            # a duplicate merely because it has the same accounting facts.
+            if not row["superseded_by_batch"]:
+                by_fingerprint[fingerprint].append(row)
             if row["idempotency_key"]:
                 by_idempotency[row["idempotency_key"]] = row
         conn.commit()
@@ -135,6 +141,10 @@ def classify_import_duplicates(transactions: Iterable[dict], client_id: int,
     for index, transaction in enumerate(transactions, start=1):
         fingerprint = transaction["row_fingerprint"]
         exact = by_idempotency.get(transaction["idempotency_key"])
+        replaced_id = transaction.get("replaces_transaction_id")
+        if (exact and replaced_id and exact["id"] == replaced_id
+                and exact["superseded_by_batch"]):
+            exact = None
         if exact:
             _mark_duplicate(transaction, "previous_import", {
                 "transaction_id": exact["id"],
@@ -149,7 +159,16 @@ def classify_import_duplicates(transactions: Iterable[dict], client_id: int,
                 "upload_position": first.get("_upload_position"),
             })
         elif by_fingerprint.get(fingerprint):
-            prior = by_fingerprint[fingerprint][0]
+            eligible = [
+                prior for prior in by_fingerprint[fingerprint]
+                if not (replaced_id and prior["id"] == replaced_id
+                        and prior["superseded_by_batch"])
+            ]
+            prior = eligible[0] if eligible else None
+            if prior is None:
+                transaction["_upload_position"] = index
+                seen.setdefault(fingerprint, transaction)
+                continue
             _mark_duplicate(transaction, "previous_import", {
                 "transaction_id": prior["id"],
                 "entry_id": prior["journal_entry_id"],

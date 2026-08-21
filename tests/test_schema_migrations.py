@@ -17,6 +17,7 @@ def test_create_tables_builds_full_schema(db):
         "bank_reconciliations", "bank_reconciliation_items",
         "import_profiles", "review_policies", "firm_branding",
         "book_identity", "client_branding", "client_branding_proposals",
+        "import_batch_reversals",
     }
     assert expected.issubset(tables)
 
@@ -33,7 +34,7 @@ def test_create_tables_records_migrations(db):
         "011_firm_branding", "012_draft_entries", "013_import_dismissal",
         "014_assistant_review", "015_review_action", "016_book_identity",
         "017_close_map", "018_client_branding", "019_draft_correction_links",
-        "020_book_audit_events"]
+        "020_book_audit_events", "021_import_batch_reversal"]
     conn.close()
 
 
@@ -46,7 +47,7 @@ def test_create_tables_is_idempotent(db):
 
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM schema_migrations")
-    assert cur.fetchone()[0] == 20
+    assert cur.fetchone()[0] == 21
     conn.close()
 
 
@@ -75,7 +76,10 @@ def test_actor_columns_exist(db):
                           ("journal_entries", "created_by"),
                           ("imported_transactions", "created_by"),
                           ("imported_transactions", "dismissed_at"),
-                          ("imported_transactions", "dismissed_by")]:
+                          ("imported_transactions", "dismissed_by"),
+                          ("imported_transactions", "superseded_by_batch"),
+                          ("imported_transactions", "reversal_journal_entry_id"),
+                          ("imported_transactions", "replaces_transaction_id")]:
         cur.execute(f"PRAGMA table_info({table})")
         columns = {row[1] for row in cur.fetchall()}
         assert column in columns, f"{table} missing {column}"

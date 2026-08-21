@@ -476,6 +476,18 @@ elif selected_report == "General Ledger":
         st.error("General ledger start date cannot be after the end date.")
         st.stop()
 
+    hide_reversed_imports = st.checkbox(
+        "Hide fully reversed import corrections",
+        value=True,
+        help=("Hides an original imported entry and its reversal only when both "
+              "are inside this date range. Replacement entries stay visible."),
+        key="gl_hide_reversed_imports",
+    )
+    st.caption(
+        "This changes only the on-screen view. Excel downloads always include "
+        "the complete ledger and correction labels."
+    )
+
     if selected_account:
         accounts_to_show = [a for a in accounts if a.id == selected_account]
     else:
@@ -498,12 +510,42 @@ elif selected_report == "General Ledger":
                 if selected_account else
                 "No activity or balances in the selected period.")
     else:
-        if not selected_account:
-            st.caption(f"{len(shown)} accounts with activity or balances · "
+        displayed = []
+        hidden_row_count = 0
+        for account, entries in shown:
+            if hide_reversed_imports:
+                visible_entries, hidden_count = (
+                    ReportGenerator.compact_reversed_import_entries(
+                        entries, account.type
+                    )
+                )
+                hidden_row_count += hidden_count
+            else:
+                visible_entries = entries
+            has_visible_activity = any(e.entry_id for e in visible_entries)
+            carries_visible_balance = (
+                bool(visible_entries) and visible_entries[-1].balance != 0
+            )
+            if has_visible_activity or carries_visible_balance:
+                displayed.append((account, visible_entries))
+
+        if hidden_row_count:
+            st.caption(
+                f"{hidden_row_count} original/reversal ledger rows hidden from "
+                "this view."
+            )
+
+        if not displayed:
+            st.info(
+                "All activity in this period is from fully reversed imports. "
+                "Uncheck the option above to see the complete accounting detail."
+            )
+        elif not selected_account:
+            st.caption(f"{len(displayed)} accounts with activity or balances · "
                        f"{gl_start} – {gl_end}")
 
         open_options = {}
-        for account, entries in shown:
+        for account, entries in displayed:
             period_debits = sum(e.debit for e in entries if e.entry_id != 0)
             period_credits = sum(e.credit for e in entries if e.entry_id != 0)
             final_balance = entries[-1].balance if entries else 0
@@ -511,26 +553,33 @@ elif selected_report == "General Ledger":
             if not selected_account:
                 st.markdown(f"**{account.display_name()}**")
             ledger_table(
-                headers=["Date", "Entry #", "Description", "Reference",
+                headers=["Date", "Entry #", "Description", "Import correction",
+                         "Reference",
                          "Debit", "Credit", "Balance"],
                 rows=[
                     [e.entry_date.isoformat(),
                      f"#{e.entry_id}" if e.entry_id else "",
                      (e.description or "")[:48],
+                     e.import_correction_label,
                      (e.source_reference or "")[:24],
                      f"{e.debit:,.2f}" if e.debit > 0 else "",
                      f"{e.credit:,.2f}" if e.credit > 0 else "",
                      f"{e.balance:,.2f}"]
                     for e in entries
                 ],
-                align=["l", "l", "l", "l", "r", "r", "r"],
-                total_row=["", "", "Period totals · ending balance", "",
+                align=["l", "l", "l", "l", "l", "r", "r", "r"],
+                total_row=["", "", "Period totals · ending balance", "", "",
                            f"${period_debits:,.2f}", f"${period_credits:,.2f}",
                            f"${final_balance:,.2f}"],
+                row_classes=[
+                    ("muted" if e.is_reversed_import_detail else "")
+                    for e in entries
+                ],
             )
             open_options.update({
                 e.entry_id: (f"#{e.entry_id} · {e.entry_date} · "
-                             f"{(e.description or '')[:34]}")
+                             f"{(e.description or '')[:34]}"
+                             f"{' · ' + e.import_correction_label if e.import_correction_label else ''}")
                 for e in entries if e.entry_id
             })
 
