@@ -36,6 +36,20 @@ def test_account_subtypes_are_ordered_by_account_type():
     assert not AccountSubtype.is_canonical(AccountType.ASSET, "Receivable")
 
 
+def test_cash_name_fallback_never_overrides_an_explicit_non_cash_subtype():
+    for name in (
+        "Riverbank Property",
+        "Cash Register Equipment",
+        "Cash Surrender Value of Life Insurance",
+    ):
+        assert not AccountSubtype.is_cash_like(
+            AccountType.ASSET, AccountSubtype.FIXED_ASSET, name
+        )
+
+    assert AccountSubtype.is_cash_like(AccountType.ASSET, None, "Main Bank Account")
+    assert not AccountSubtype.is_cash_like(AccountType.ASSET, None, "Riverbank Lot")
+
+
 def test_txn_statuses():
     assert (TxnStatus.PENDING, TxnStatus.CATEGORIZED, TxnStatus.POSTED,
             TxnStatus.DISMISSED) == \

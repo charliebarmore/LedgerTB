@@ -790,6 +790,11 @@ def build_close_package(
     _append_comparative_statement_total(
         ws, "NET CHANGE IN CASH", comparative_cash_flow["computed_cash_change"]
     )
+    reconciliation = comparative_cash_flow["reconciliation_difference"]
+    if reconciliation["current"] or reconciliation["prior"]:
+        _append_comparative_statement_total(
+            ws, "CASH FLOW RECONCILIATION DIFFERENCE", reconciliation
+        )
     _append_comparative_statement_total(
         ws, "CASH AT BEGINNING OF PERIOD", comparative_cash_flow["cash_beginning"]
     )
@@ -820,6 +825,29 @@ def build_close_package(
             cells = _append_literal_row(ws, [
                 (f"{entry['entry_date']} | Entry #{entry['entry_id']} | "
                  f"{entry['reason']} | {entry['description'] or 'No description'} | "
+                 f"Accounts {accounts}"),
+                "", "", "", "",
+            ])
+            cells[amount_column - 1].value = entry["amount"]
+            cells[amount_column - 1].number_format = _MONEY_FMT
+
+    for period_name, entries, amount_column in [
+        ("CURRENT NONCASH INVESTING AND FINANCING ACTIVITY",
+         comparative_cash_flow["current_noncash_items"], 2),
+        ("PRIOR-YEAR NONCASH INVESTING AND FINANCING ACTIVITY",
+         comparative_cash_flow["prior_noncash_items"], 3),
+    ]:
+        if not entries:
+            continue
+        _append_literal_row(ws, ["", "", "", "", ""])
+        heading_cells = _append_literal_row(ws, [period_name, "", "", "", ""])
+        for cell in heading_cells:
+            cell.font = _HEADER_FONT
+        for entry in entries:
+            accounts = ", ".join(entry["accounts"]) or "none"
+            cells = _append_literal_row(ws, [
+                (f"{entry['entry_date']} | Entry #{entry['entry_id']} | "
+                 f"{entry['description'] or 'No description'} | "
                  f"Accounts {accounts}"),
                 "", "", "", "",
             ])
@@ -1259,23 +1287,32 @@ def build_close_package_pdf(
             ),
             Spacer(1, 8),
         ]
+    cash_rollforward_rows = [
+        ["NET CHANGE IN CASH"] + _pdf_comparison_values(
+            comparative_cash_flow["computed_cash_change"], totals=True
+        ),
+    ]
+    reconciliation = comparative_cash_flow["reconciliation_difference"]
+    if reconciliation["current"] or reconciliation["prior"]:
+        cash_rollforward_rows.append(
+            ["CASH FLOW RECONCILIATION DIFFERENCE"]
+            + _pdf_comparison_values(reconciliation, totals=True)
+        )
+    cash_rollforward_rows.extend([
+        ["CASH AT BEGINNING OF PERIOD"] + _pdf_comparison_values(
+            comparative_cash_flow["cash_beginning"], totals=True
+        ),
+        ["CASH AT END OF PERIOD"] + _pdf_comparison_values(
+            comparative_cash_flow["cash_ending"], totals=True
+        ),
+    ])
     cash_rollforward = _pdf_table(
         ["", "Current", "Prior Year", "$ Change", "% Change"],
-        [
-            ["NET CHANGE IN CASH"] + _pdf_comparison_values(
-                comparative_cash_flow["computed_cash_change"], totals=True
-            ),
-            ["CASH AT BEGINNING OF PERIOD"] + _pdf_comparison_values(
-                comparative_cash_flow["cash_beginning"], totals=True
-            ),
-            ["CASH AT END OF PERIOD"] + _pdf_comparison_values(
-                comparative_cash_flow["cash_ending"], totals=True
-            ),
-        ],
+        cash_rollforward_rows,
         [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
         money_from=1,
-        bold_data_rows=[0, 1, 2],
-        ruled_data_rows=[0, 2],
+        bold_data_rows=list(range(len(cash_rollforward_rows))),
+        ruled_data_rows=[0, len(cash_rollforward_rows) - 1],
     )
     cash_quality_block = [cash_rollforward]
     if cash_flow["warnings"]:
@@ -1308,13 +1345,13 @@ def build_close_package_pdf(
             Spacer(1, 10),
             Paragraph("Noncash Investing and Financing Activity", heading_2),
             _pdf_table(
-                ["Date", "Entry #", "Description", "Accounts"],
+                ["Date", "Entry #", "Description", "Accounts", "Amount"],
                 [[item["entry_date"], str(item["entry_id"]),
                   _wrap(item["description"] or "No description"),
-                  ", ".join(item["accounts"])]
+                  ", ".join(item["accounts"]), _money(item["amount"])]
                  for item in cash_flow["noncash_items"]],
-                [1.0 * inch, 0.75 * inch, 5.5 * inch, 2.0 * inch],
-                money_from=None,
+                [0.9 * inch, 0.65 * inch, 4.5 * inch, 2.0 * inch, 1.0 * inch],
+                money_from=4,
             ),
         ]
     story.append(PageBreak())

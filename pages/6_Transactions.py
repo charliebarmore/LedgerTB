@@ -77,7 +77,7 @@ with col4:
     # Status filter
     status_filter = st.selectbox(
         "Status",
-        options=["All", "Posted", "Pending", "Categorized", "Dismissed"],
+        options=["All", "Posted", "Pending", "Categorized", "Dismissed", "Reversed"],
         index=0
     )
 
@@ -226,6 +226,8 @@ else:
             st.text(t.description[:40] if t.description else "")
             if t.journal_entry_id:
                 st.caption(f"JE #{t.journal_entry_id}")
+            if t.replaces_transaction_id:
+                st.caption(f"Replacement for transaction #{t.replaces_transaction_id}")
 
         with cols[2]:
             color = "green" if t.amount >= 0 else "red"
@@ -244,6 +246,12 @@ else:
                 st.markdown(":orange[Pending]")
             elif t.status == "Dismissed":
                 st.markdown(":gray[Dismissed]")
+            elif t.status == "Reversed":
+                st.markdown(":gray[Reversed]")
+                if t.superseded_by_batch:
+                    st.caption(f"Replaced by {t.superseded_by_batch}")
+                if t.reversal_journal_entry_id:
+                    st.caption(f"Reversal JE #{t.reversal_journal_entry_id}")
             else:
                 st.markdown(f":blue[{t.status}]")
 

@@ -4,6 +4,8 @@ string literals so a typo becomes an ImportError rather than a silent
 misclassification, and so the option lists live in one place.
 """
 
+import re
+
 
 class AccountType:
     ASSET = "Asset"
@@ -306,13 +308,14 @@ class AccountSubtype:
         """
         if account_type != AccountType.ASSET:
             return False
-        if cls.resolve(account_type, value, account_name) == cls.CASH:
-            return True
+        resolved = cls.resolve(account_type, value, account_name)
+        if resolved is not None:
+            return resolved == cls.CASH
         name = cls._norm(account_name)
-        strong_phrases = (
-            "cash", "checking", "savings", "money market", "bank",
-        )
-        return any(phrase in name for phrase in strong_phrases)
+        return bool(re.search(
+            r"\b(?:cash|checking|savings|bank)\b|\bmoney\s+market\b",
+            name,
+        ))
 
 
 class EntryType:

@@ -1,4 +1,6 @@
 """The close package must tie to the books it summarizes."""
+from copy import deepcopy
+from dataclasses import replace
 from datetime import date
 from io import BytesIO
 
@@ -7,6 +9,7 @@ import pytest
 
 import pypdfium2 as pdfium
 
+from constants import AccountSubtype
 from models.reports import ReportGenerator
 from models.account import Account
 from models.journal_entry import JournalEntry, JournalEntryLine
@@ -334,6 +337,91 @@ def test_close_package_discloses_offsetting_unclassified_cash_entries(
         )
         assert "Unclassified Cash Activity Details" in text
         assert text.count("counterpart account needs a statement subtype") == 2
+    finally:
+        document.close()
+
+
+def test_close_package_discloses_noncash_amount_in_excel_and_pdf(
+    client_id, accounts
+):
+    equipment = Account(
+        client_id=client_id, account_number="1500", name="Equipment",
+        type="Asset", subtype=AccountSubtype.FIXED_ASSET,
+    )
+    equipment.save()
+    debt = Account(
+        client_id=client_id, account_number="2500", name="Equipment Note",
+        type="Liability", subtype=AccountSubtype.LONG_TERM_LIABILITY,
+    )
+    debt.save()
+    post_entry(client_id, date(2026, 2, 1), [
+        (equipment.id, 500, 0), (debt.id, 0, 500),
+    ])
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+    snapshot = load_close_package_snapshot(client_id, *Q1)
+
+    workbook = openpyxl.load_workbook(BytesIO(build_close_package(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read()))
+    sheet = workbook["Cash Flow"]
+    heading_row = next(
+        row for row in range(1, sheet.max_row + 1)
+        if sheet.cell(row, 1).value
+        == "CURRENT NONCASH INVESTING AND FINANCING ACTIVITY"
+    )
+    assert sheet.cell(heading_row + 1, 2).value == pytest.approx(500)
+
+    document = pdfium.PdfDocument(build_close_package_pdf(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read())
+    try:
+        text = "\n".join(
+            document[index].get_textpage().get_text_range()
+            for index in range(len(document))
+        )
+        assert "Noncash Investing and Financing Activity" in text
+        assert "500.00" in text
+    finally:
+        document.close()
+
+
+def test_close_package_prints_cash_flow_reconciliation_difference(
+    booked_period, accounts
+):
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(booked_period, *Q1)
+    snapshot = load_close_package_snapshot(booked_period, *Q1)
+    cash_flow = deepcopy(snapshot.cash_flow)
+    comparative = deepcopy(snapshot.comparative_cash_flow)
+    cash_flow["reconciliation_difference"] = 25
+    cash_flow["ties"] = False
+    cash_flow["ready"] = False
+    comparative["reconciliation_difference"]["current"] = 25
+    comparative["current_ties"] = False
+    comparative["current_ready"] = False
+    snapshot = replace(
+        snapshot, cash_flow=cash_flow, comparative_cash_flow=comparative
+    )
+
+    workbook = openpyxl.load_workbook(BytesIO(build_close_package(
+        booked_period, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read()))
+    sheet = workbook["Cash Flow"]
+    values = {
+        sheet.cell(row, 1).value: sheet.cell(row, 2).value
+        for row in range(1, sheet.max_row + 1)
+    }
+    assert values["CASH FLOW RECONCILIATION DIFFERENCE"] == pytest.approx(25)
+
+    document = pdfium.PdfDocument(build_close_package_pdf(
+        booked_period, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read())
+    try:
+        text = "\n".join(
+            document[index].get_textpage().get_text_range()
+            for index in range(len(document))
+        )
+        assert "CASH FLOW RECONCILIATION DIFFERENCE" in text
+        assert "25.00" in text
     finally:
         document.close()
 

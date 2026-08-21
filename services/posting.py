@@ -139,14 +139,21 @@ def post_transaction(
         )
         existing = cursor.fetchone()
         staged_row_id = None
+        # Replacement lineage is trusted only when it comes from the durable
+        # staged row below. A caller-supplied id must never become a way to skip
+        # duplicate protection.
+        replaces_transaction_id = None
         if existing and existing["dismissed_at"] is not None:
             raise ValueError(
                 "This staged transaction was dismissed and can no longer be posted."
             )
         if existing and existing["journal_entry_id"] is None and existing["status"] == "Pending":
+            if existing["superseded_by_batch"] is not None:
+                raise ValueError("This staged transaction was superseded and cannot be posted.")
             # An assistant-staged row awaiting review: this post IS its
             # completion, not a retry — adopt the record instead of refusing.
             staged_row_id = existing["id"]
+            replaces_transaction_id = existing["replaces_transaction_id"]
             existing = None
         if existing:
             existing_entry = JournalEntry.get_by_id(existing["journal_entry_id"], client_id=client_id)
@@ -165,18 +172,24 @@ def post_transaction(
                 row_fingerprint=existing["row_fingerprint"],
                 idempotency_key=existing["idempotency_key"],
                 duplicate_override=bool(existing["duplicate_override"]),
-                duplicate_override_reason=existing["duplicate_override_reason"],
-                duplicate_of_id=existing["duplicate_of_id"],
-            )
+                    duplicate_override_reason=existing["duplicate_override_reason"],
+                    duplicate_of_id=existing["duplicate_of_id"],
+                    superseded_by_batch=existing["superseded_by_batch"],
+                    reversal_journal_entry_id=existing["reversal_journal_entry_id"],
+                    replaces_transaction_id=existing["replaces_transaction_id"],
+                )
 
         cursor.execute(
             """
             SELECT id, journal_entry_id FROM imported_transactions
             WHERE client_id = ? AND row_fingerprint = ?
               AND journal_entry_id IS NOT NULL
+              AND superseded_by_batch IS NULL
+              AND (? IS NULL OR id != ?)
             ORDER BY id LIMIT 1
             """,
-            (client_id, transaction["row_fingerprint"]),
+            (client_id, transaction["row_fingerprint"],
+             replaces_transaction_id, replaces_transaction_id),
         )
         duplicate = cursor.fetchone()
         if duplicate and not duplicate_override:
@@ -206,6 +219,7 @@ def post_transaction(
             duplicate_override=duplicate_override,
             duplicate_override_reason=override_reason or None,
             duplicate_of_id=duplicate["id"] if duplicate else None,
+            replaces_transaction_id=replaces_transaction_id,
         )
         imported_txn.save(conn=conn)
 

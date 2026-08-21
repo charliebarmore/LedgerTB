@@ -174,6 +174,69 @@ def test_cash_flow_report_renders_quality_check_and_export(
     )
 
 
+def test_legacy_income_statement_defaults_to_classic_layout(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    legacy_revenue = Account(
+        client_id=client_id, account_number="4199", name="Legacy Revenue",
+        type="Revenue", subtype=None,
+    )
+    legacy_revenue.save()
+    post_entry(client_id, date(2026, 1, 15), [
+        (accounts["cash"], 500, 0), (legacy_revenue.id, 0, 500),
+    ])
+
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.session_state["active_report"] = "Income Statement"
+    page.run()
+
+    assert not page.exception
+    assert page.toggle(key="is_group_subtypes").value is False
+    assert any("classic layout" in str(item.value) for item in page.info)
+
+    page.toggle(key="is_group_subtypes").set_value(True).run()
+    assert not page.exception
+    assert page.toggle(key="is_group_subtypes").value is True
+
+
+def test_cash_flow_report_prints_reconciliation_difference(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    post_entry(client_id, date(2026, 1, 15), [
+        (accounts["cash"], 500, 0), (accounts["revenue"], 0, 500),
+    ])
+
+    from models.reports import ReportGenerator
+
+    original = ReportGenerator.comparative_cash_flow_statement
+
+    def untied(*args, **kwargs):
+        report = original(*args, **kwargs)
+        report["reconciliation_difference"]["current"] = 25
+        report["current_ties"] = False
+        report["current_ready"] = False
+        return report
+
+    monkeypatch.setattr(
+        ReportGenerator, "comparative_cash_flow_statement", staticmethod(untied)
+    )
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.session_state["active_report"] = "Cash Flow"
+    page.run()
+
+    assert not page.exception
+    html = "\n".join(
+        str(item.body) for item in page.get("html") if hasattr(item, "body")
+    )
+    assert "Cash Flow Reconciliation Difference" in html
+
+
 def test_period_picker_drives_the_worksheet_dates(client_id, accounts, monkeypatch):
     """Picking a Period must move From/To (keyed date inputs ignore value=)."""
     _select_client(monkeypatch, client_id)
@@ -219,6 +282,8 @@ def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatc
     assert not page.exception
     filter_box = next(b for b in page.selectbox if b.label == "Account filter")
     assert filter_box.value is None  # nothing selected = all accounts
+    assert page.checkbox(key="gl_hide_reversed_imports").value is True
+    assert any("Excel downloads always include" in c.value for c in page.caption)
     body = " ".join(str(m.value) for m in page.markdown)
     for name in ("Cash", "Revenue", "Expense"):
         assert name in body, f"{name} section missing from the all-accounts GL"
@@ -535,3 +600,71 @@ def test_imported_journal_uses_guided_category_correction(
         original.id
     ]
     assert link["suggested_account_id"] == travel.id
+
+
+def test_import_history_reverses_batch_into_review_queue(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    _, imported = post_transaction(
+        client_id=client_id,
+        transaction={
+            "date": date(2026, 1, 10),
+            "description": "Wrong-account import",
+            "amount": -55,
+            "source_id": "reverse-page-source",
+            "source_filename": "bank.csv",
+            "source_row_number": 2,
+        },
+        target_account_id=accounts["expense"],
+        bank_account_id=accounts["cash"],
+        batch_id="reverse-page",
+        learn=False,
+    )
+    page = AppTest.from_file(
+        page_path("pages/4_Import_Transactions.py"), default_timeout=30
+    )
+    page.session_state["import_active_tab"] = "Import History"
+    page.run()
+    assert not page.exception
+
+    button = page.button(key="reverse_import_batch_reverse-page")
+    assert button.disabled
+    page.text_area(key="batch_reversal_reason_reverse-page").set_value(
+        "Imported against the wrong account"
+    ).run()
+    page.checkbox(key="batch_reversal_confirmation_reverse-page").check().run()
+    assert not page.button(key="reverse_import_batch_reverse-page").disabled
+    page.button(key="reverse_import_batch_reverse-page").click().run()
+
+    assert not page.exception
+    assert page.session_state["import_active_tab"] == "Review & Categorize"
+    original = ImportedTransaction.get_by_batch(client_id, "reverse-page")[0]
+    assert original.id == imported.id
+    assert original.status == "Reversed"
+    pending = ImportedTransaction.get_by_status(client_id, "Pending")
+    assert len(pending) == 1
+    assert pending[0].replaces_transaction_id == imported.id
+    assert len(page.session_state["transactions_to_review"]) == 1
+    assert page.session_state["transactions_to_review"][0]["staged_id"] == pending[0].id
+
+    transactions = AppTest.from_file(
+        page_path("pages/6_Transactions.py"), default_timeout=30
+    ).run()
+    assert not transactions.exception
+    transaction_captions = " ".join(str(item.value) for item in transactions.caption)
+    assert f"Replacement for transaction #{imported.id}" in transaction_captions
+    assert "Reversal JE #" in transaction_captions
+
+    reports = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    reports.session_state["active_report"] = "General Ledger"
+    reports.run()
+    assert not reports.exception
+    assert reports.checkbox(key="gl_hide_reversed_imports").value is True
+    assert any(
+        "fully reversed imports" in str(item.value) for item in reports.info
+    )
+    reports.checkbox(key="gl_hide_reversed_imports").uncheck().run()
+    assert not reports.exception

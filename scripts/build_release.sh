@@ -45,9 +45,9 @@ LEDGERTB_MODE=selfcheck "$BIN"
 
 if [ -n "${LEDGERTB_CODESIGN_ID:-}" ]; then
   echo "==> Signing bundle with Developer ID"
-  # No --timestamp for local builds: it only matters for notarization.
-  # notarize.sh re-signs the finished bundle with a secure timestamp.
-  codesign --force --deep --options runtime \
+  # Disable timestamping for local builds; notarize.sh re-signs the finished
+  # bundle with the secure timestamp required for distribution.
+  codesign --force --deep --options runtime --timestamp=none \
     --entitlements scripts/entitlements.plist \
     -s "$LEDGERTB_CODESIGN_ID" "$APP"
 fi

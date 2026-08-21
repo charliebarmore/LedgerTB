@@ -242,8 +242,117 @@ def test_noncash_debt_financed_asset_purchase_is_disclosed(
     report = ReportGenerator.cash_flow_statement(client_id, START, END)
     assert report["actual_cash_change"] == 0
     assert report["noncash_items"][0]["accounts"] == ["1500", "2500"]
+    assert report["noncash_items"][0]["amount"] == 500
     assert report["ties"] is True
     assert report["ready"] is True
+
+
+def test_partially_financed_purchase_reports_only_cash_on_the_face(
+    client_id, accounts
+):
+    equipment = _account(
+        client_id, "1500", "Equipment", "Asset", AccountSubtype.FIXED_ASSET,
+    )
+    debt = _account(
+        client_id, "2500", "Equipment Note", "Liability",
+        AccountSubtype.LONG_TERM_LIABILITY,
+    )
+    entry = post_entry(client_id, date(2026, 8, 1), [
+        (equipment, 500, 0), (debt, 0, 400), (accounts["cash"], 0, 100),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    assert report["actual_cash_change"] == -100
+    assert report["investing"]["total"] == -100
+    assert report["financing"]["total"] == 0
+    assert report["noncash_items"] == [{
+        "entry_id": entry.id,
+        "entry_date": "2026-08-01",
+        "description": "test entry",
+        "accounts": ["1500", "2500"],
+        "amount": 400,
+    }]
+    assert report["ties"] is True
+    assert report["ready"] is True
+
+
+def test_debt_proceeds_and_repayments_are_presented_gross(client_id, accounts):
+    debt = _account(
+        client_id, "2500", "Term Loan", "Liability",
+        AccountSubtype.LONG_TERM_LIABILITY,
+    )
+    post_entry(client_id, date(2026, 2, 1), [
+        (accounts["cash"], 500, 0), (debt, 0, 500),
+    ])
+    post_entry(client_id, date(2026, 3, 1), [
+        (debt, 100, 0), (accounts["cash"], 0, 100),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    lines = {line["name"]: line["amount"] for line in report["financing"]["lines"]}
+    assert lines == {
+        "Term Loan — Proceeds": 500,
+        "Term Loan — Repayments": -100,
+    }
+    assert report["financing"]["total"] == 400
+    assert report["ready"] is True
+
+
+def test_named_noncash_operating_adjustment_reconciles_owner_paid_expense(
+    client_id, accounts
+):
+    expense = _account(
+        client_id, "6100", "Rent Expense", "Expense",
+        AccountSubtype.OPERATING_EXPENSE,
+    )
+    contribution = _account(
+        client_id, "3100", "Owner Contribution", "Equity",
+        AccountSubtype.OWNER_CONTRIBUTION,
+    )
+    entry = post_entry(client_id, date(2026, 4, 1), [
+        (expense, 100, 0), (contribution, 0, 100),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    adjustment = next(
+        line for line in report["operating"]["lines"]
+        if line["key"] == "noncash_operating_activity"
+    )
+    assert adjustment["name"] == (
+        f"Noncash Operating Activity — Entry #{entry.id}"
+    )
+    assert adjustment["amount"] == 100
+    assert report["operating"]["total"] == 0
+    assert report["noncash_items"][0]["amount"] == 100
+    assert report["operating_reconciled"] is True
+    assert report["classification_complete"] is True
+    assert report["ready"] is True
+
+
+def test_unsubtyped_noncash_account_blocks_classification_and_names_the_plug(
+    client_id, accounts
+):
+    receivable = _account(
+        client_id, "1100", "Legacy Receivable", "Asset", None,
+    )
+    revenue = _account(
+        client_id, "4100", "Service Revenue", "Revenue",
+        AccountSubtype.OPERATING_REVENUE,
+    )
+    post_entry(client_id, date(2026, 4, 1), [
+        (receivable, 100, 0), (revenue, 0, 100),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    plug = next(
+        line for line in report["operating"]["lines"]
+        if line["key"] == "unresolved_operating_reconciliation"
+    )
+    assert "1100" in plug["name"]
+    assert report["operating_reconciled"] is False
+    assert report["classification_complete"] is False
+    assert report["ready"] is False
+    assert any("1100" in warning for warning in report["warnings"])
 
 
 def test_comparative_cash_flow_merges_lines_and_periods(client_id, accounts):
