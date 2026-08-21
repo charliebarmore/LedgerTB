@@ -25,6 +25,9 @@ from services.categorization import CategorizationService
 from services.pattern_learning import PatternLearner
 from services.posting import post_transaction
 from services.import_identity import classify_import_duplicates, hash_source
+from services.import_batch_reversal import (
+    preview_import_batch_reversal, reverse_import_batch,
+)
 from services.document_import import (
     extract_document, parse_statement_text, parse_statement_with_ai,
 )
@@ -87,6 +90,37 @@ def apply_duplicate_checks(transactions):
             transaction["include"] = False
             duplicate_count += 1
     return duplicate_count
+
+
+def prepare_staged_for_review(staged_transactions):
+    """Turn durable pending rows into the page's normal review-row shape."""
+    staged_rows = [{
+        "staged_id": transaction.id,
+        "batch_id": transaction.import_batch,
+        "date": transaction.transaction_date,
+        "description": transaction.description,
+        "amount": transaction.amount,
+        "client_id": client_id,
+        "bank_account_id": transaction.bank_account_id,
+        "source_id": transaction.source_id,
+        "source_filename": transaction.source_filename,
+        "source_row_number": transaction.source_row_number,
+        "row_fingerprint": transaction.row_fingerprint,
+        "idempotency_key": transaction.idempotency_key,
+        "suggested_account_id": transaction.suggested_account_id,
+        "replaces_transaction_id": transaction.replaces_transaction_id,
+        "source_account": bool(transaction.replaces_transaction_id),
+    } for transaction in staged_transactions]
+    duplicate_count = classify_import_duplicates(
+        staged_rows, client_id,
+        exclude_ids=frozenset(transaction.id for transaction in staged_transactions),
+    )
+    ensure_row_ids(staged_rows)
+    for row in staged_rows:
+        row["include"] = not row.get("is_duplicate", False)
+        if row.get("suggested_account_id"):
+            st.session_state[row_key("cat", row)] = row["suggested_account_id"]
+    return staged_rows, duplicate_count
 
 # Initialize session state
 if 'imported_data' not in st.session_state:
@@ -1340,28 +1374,7 @@ elif selected_tab == "Review & Categorize":
                     "review.", icon="📥")
         with _sc2:
             if st.button("Load staged", key="load_staged_imports", width="stretch"):
-                staged_rows = [{
-                    "staged_id": t.id,
-                    "batch_id": t.import_batch,
-                    "date": t.transaction_date,
-                    "description": t.description,
-                    "amount": t.amount,
-                    "client_id": client_id,
-                    "bank_account_id": t.bank_account_id,
-                    "source_id": t.source_id,
-                    "source_filename": t.source_filename,
-                    "source_row_number": t.source_row_number,
-                    "row_fingerprint": t.row_fingerprint,
-                    "idempotency_key": t.idempotency_key,
-                } for t in _staged]
-                # Exclude the rows' own records or each would match itself.
-                duplicate_count = classify_import_duplicates(
-                    staged_rows, client_id,
-                    exclude_ids=frozenset(t.id for t in _staged),
-                )
-                ensure_row_ids(staged_rows)
-                for row in staged_rows:
-                    row["include"] = not row.get("is_duplicate", False)
+                staged_rows, duplicate_count = prepare_staged_for_review(_staged)
                 st.session_state.transactions_to_review = (
                     st.session_state.transactions_to_review + staged_rows)
                 st.session_state.import_complete = False
@@ -2103,6 +2116,10 @@ elif selected_tab == "Import History":
             return batch["account_name"] or "—"
 
         def _batch_status(batch):
+            if batch["replacement_batch"]:
+                return f"Reversed → {batch['replacement_batch']}"
+            if batch["original_batch"]:
+                return f"Replacement for {batch['original_batch']}"
             if batch["pending_count"] or batch["categorized_count"]:
                 unposted = batch["pending_count"] + batch["categorized_count"]
                 text = f"{batch['posted_count']} posted, {unposted} not yet posted"
@@ -2172,17 +2189,134 @@ elif selected_tab == "Import History":
                 f"present ({continuity.present_count} rows, no gaps)."
             )
 
-        if batch["pending_count"] or batch["categorized_count"]:
+        if ((batch["pending_count"] or batch["categorized_count"])
+                and not batch["replacement_batch"]):
             st.info(
                 f"{batch['posted_count']} of {batch['row_count']} rows are posted to the "
                 f"ledger. The rest are waiting in **Review & Categorize**."
             )
-        if batch["dismissed_count"]:
+        if batch["dismissed_count"] and not batch["replacement_batch"]:
             st.caption(
                 f"{batch['dismissed_count']} row"
                 f"{'' if batch['dismissed_count'] == 1 else 's'} dismissed from review; "
                 "the source record and audit history were retained."
             )
+
+        preview = preview_import_batch_reversal(client_id, selected_batch)
+        if preview.replacement_batch:
+            st.info(
+                f"This batch was reversed. Its replacement batch is "
+                f"**{preview.replacement_batch}**; the original rows and journal "
+                "entries remain in the audit trail."
+            )
+        elif batch["original_batch"]:
+            st.caption(
+                f"This is the re-review batch created from **{batch['original_batch']}**."
+            )
+        else:
+            with st.expander("Undo this import and review it again", expanded=False):
+                st.warning(
+                    "LedgerTB will add reversing entries for transactions that were "
+                    "already posted, keep the original history, and return every row "
+                    "to Review & Categorize. Nothing is deleted."
+                )
+                reverse_cols = st.columns(3)
+                reverse_cols[0].metric("Rows to re-review", preview.row_count)
+                reverse_cols[1].metric("Posted entries to reverse", preview.posted_count)
+                reverse_cols[2].metric("Unposted rows to replace", preview.unposted_count)
+
+                for blocker in preview.blockers:
+                    st.error(blocker)
+
+                reversal_date = st.date_input(
+                    "Reversal date", value=date.today(),
+                    key=f"batch_reversal_date_{selected_batch}",
+                    help="The equal-and-opposite journal entries use this date.",
+                )
+                reversal_reason = st.text_area(
+                    "Why are you undoing this import?",
+                    key=f"batch_reversal_reason_{selected_batch}",
+                    placeholder="Example: Imported against the wrong bank account",
+                ).strip()
+                replacement_account_options = {0: "Keep the account from the original import"}
+                replacement_account_options.update({
+                    account.id: account.display_name()
+                    for account in importable_accounts
+                })
+                replacement_bank_account_id = st.selectbox(
+                    "Bank or credit-card account for the new review",
+                    options=list(replacement_account_options),
+                    format_func=lambda account_id: replacement_account_options[account_id],
+                    key=f"batch_reversal_account_{selected_batch}",
+                    help=(
+                        "Keep the original account when only the categories were wrong. "
+                        "Choose another account when the import went to the wrong bank "
+                        "or credit card."
+                    ),
+                )
+                confirmed = st.checkbox(
+                    "I understand that LedgerTB will add reversing entries and keep "
+                    "the original import in the history.",
+                    key=f"batch_reversal_confirmation_{selected_batch}",
+                )
+                if st.button(
+                    "Undo import and review again",
+                    type="primary",
+                    key=f"reverse_import_batch_{selected_batch}",
+                    disabled=(not preview.can_reverse or not reversal_reason or not confirmed),
+                ):
+                    try:
+                        result = reverse_import_batch(
+                            client_id=client_id,
+                            batch_id=selected_batch,
+                            reversal_date=reversal_date,
+                            reason=reversal_reason,
+                            replacement_bank_account_id=(
+                                replacement_bank_account_id or None
+                            ),
+                        )
+                        replacement_rows = ImportedTransaction.get_by_batch(
+                            client_id, result.replacement_batch
+                        )
+                        review_rows, duplicate_count = prepare_staged_for_review(
+                            replacement_rows
+                        )
+                        loaded_ids = {
+                            row.get("staged_id")
+                            for row in st.session_state.transactions_to_review
+                        }
+                        st.session_state.transactions_to_review.extend(
+                            row for row in review_rows
+                            if row.get("staged_id") not in loaded_ids
+                        )
+                        st.session_state.import_active_tab = "Review & Categorize"
+                        st.session_state.import_complete = False
+                        st.session_state.import_complete_msg = None
+                        st.session_state.post_result = {
+                            "level": "info",
+                            "text": (
+                                "The import was undone. "
+                                f"{result.reversed_postings} reversing entr"
+                                f"{'y was' if result.reversed_postings == 1 else 'ies were'} "
+                                f"added, and {result.row_count} row"
+                                f"{'' if result.row_count == 1 else 's'} "
+                                f"{'is' if result.row_count == 1 else 'are'} ready for review."
+                            ),
+                        }
+                        if duplicate_count:
+                            st.session_state.post_result = {
+                                "level": "warning",
+                                "text": (
+                                    f"The import was undone and its {result.row_count} row"
+                                    f"{'' if result.row_count == 1 else 's'} are ready for "
+                                    f"review. {duplicate_count} potential duplicate"
+                                    f"{'' if duplicate_count == 1 else 's'} were left "
+                                    "unselected."
+                                ),
+                            }
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Could not reverse this import: {exc}")
 
         # The stronger check: re-supply the file and compare row by row. Only a
         # comparison against the source can catch rows dropped off the end.
