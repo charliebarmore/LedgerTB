@@ -13,7 +13,7 @@ from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
-from constants import AccountType
+from constants import AccountSubtype, AccountType
 from services.coa_import import assign_missing_numbers, parse_coa_csv
 
 # Initialize database
@@ -49,6 +49,80 @@ with tab1:
 
     # Get accounts
     accounts = Account.get_all(client_id, active_only=not show_inactive)
+
+    review_accounts = [
+        account
+        for account in Account.get_all(client_id, active_only=False)
+        if not AccountSubtype.is_canonical(account.type, account.subtype)
+    ]
+    if review_accounts:
+        with st.expander(
+            f"Review statement subtypes ({len(review_accounts)})",
+            expanded=False,
+        ):
+            st.caption(
+                "These accounts have a blank or older subtype. Select accounts "
+                "of one type and assign the financial-statement grouping they "
+                "should use. Existing values remain unchanged until you apply one."
+            )
+            for review_type in AccountType.ALL:
+                type_review = [
+                    account for account in review_accounts
+                    if account.type == review_type
+                ]
+                if not type_review:
+                    continue
+                by_id = {account.id: account for account in type_review}
+
+                def _review_label(account_id, lookup=by_id):
+                    item = lookup[account_id]
+                    current = item.subtype or "blank"
+                    suggestion = AccountSubtype.resolve(
+                        item.type, item.subtype, item.name
+                    )
+                    suggested = f" → suggested: {suggestion}" if suggestion else ""
+                    inactive = " · inactive" if not item.is_active else ""
+                    return (
+                        f"{item.account_number} - {item.name} "
+                        f"(current: {current}{suggested}{inactive})"
+                    )
+
+                generation_key = f"review_subtype_generation_{review_type}"
+                generation = st.session_state.get(generation_key, 0)
+                with st.form(f"review_subtypes_{review_type}"):
+                    st.markdown(f"**{AccountType.plural_label(review_type)}**")
+                    selected_ids = st.multiselect(
+                        "Accounts to update",
+                        options=list(by_id),
+                        format_func=_review_label,
+                        key=(
+                            f"review_subtype_accounts_{review_type}_"
+                            f"{generation}"
+                        ),
+                    )
+                    assigned_subtype = st.selectbox(
+                        "Assign subtype",
+                        options=AccountSubtype.for_type(review_type),
+                        key=f"review_subtype_value_{review_type}",
+                    )
+                    if st.form_submit_button(
+                        "Apply to selected accounts", type="primary"
+                    ):
+                        if not selected_ids:
+                            st.warning("Select at least one account to update.")
+                        else:
+                            try:
+                                count = Account.bulk_assign_subtype(
+                                    client_id, selected_ids, assigned_subtype
+                                )
+                                st.success(
+                                    f"Updated {count} account"
+                                    f"{'' if count == 1 else 's'}."
+                                )
+                                st.session_state[generation_key] = generation + 1
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Could not update those accounts: {exc}")
 
     if not accounts:
         st.info("No accounts found. Add some accounts to get started.")
@@ -104,15 +178,52 @@ with tab1:
                 st.divider()
                 st.subheader(f"Edit Account: {account.display_name()}")
 
+                original_type = account.type
+                type_key = f"edit_account_type_{account.id}"
+                subtype_key = f"edit_account_subtype_{account.id}"
+                subtype_scope_key = f"{subtype_key}_scope"
+                new_type = st.selectbox(
+                    "Account Type",
+                    options=AccountType.ALL,
+                    index=AccountType.ALL.index(original_type),
+                    key=type_key,
+                )
+                subtype_options = [None] + AccountSubtype.for_type(new_type)
+                current_subtype = (
+                    account.subtype
+                    if AccountSubtype.is_canonical(new_type, account.subtype)
+                    else None
+                )
+                subtype_scope = (new_type, account.subtype)
+                if st.session_state.get(subtype_scope_key) != subtype_scope:
+                    st.session_state[subtype_scope_key] = subtype_scope
+                    st.session_state[subtype_key] = current_subtype
+
                 with st.form("edit_account_form"):
                     new_number = st.text_input("Account Number", value=account.account_number)
                     new_name = st.text_input("Account Name", value=account.name)
-                    new_type = st.selectbox(
-                        "Account Type",
-                        options=AccountType.ALL,
-                        index=AccountType.ALL.index(account.type)
+                    new_subtype = st.selectbox(
+                        "Statement Subtype",
+                        options=subtype_options,
+                        format_func=lambda value: value or "Review required",
+                        key=subtype_key,
                     )
-                    new_subtype = st.text_input("Subtype", value=account.subtype or "")
+                    if account.subtype and current_subtype is None:
+                        suggestion = AccountSubtype.resolve(
+                            new_type, account.subtype, account.name
+                        )
+                        suggestion_text = (
+                            f" Suggested replacement: {suggestion}." if suggestion else ""
+                        )
+                        disposition = (
+                            "It will be preserved unless you choose a replacement."
+                            if new_type == original_type else
+                            "It will be cleared when you save unless you choose a replacement."
+                        )
+                        st.caption(
+                            f"Current legacy value: {account.subtype}."
+                            f"{suggestion_text} {disposition}"
+                        )
                     new_description = st.text_area(
                         "Description/Memo",
                         value=account.description or "",
@@ -127,7 +238,16 @@ with tab1:
                             account.account_number = new_number
                             account.name = new_name
                             account.type = new_type
-                            account.subtype = new_subtype if new_subtype else None
+                            if (
+                                new_subtype is None
+                                and new_type == original_type
+                                and not AccountSubtype.is_canonical(
+                                    original_type, account.subtype
+                                )
+                            ):
+                                pass  # preserve the legacy value on unrelated edits
+                            else:
+                                account.subtype = new_subtype
                             account.description = new_description if new_description else None
                             account.is_active = new_active
 
@@ -162,14 +282,26 @@ with tab1:
 with tab2:
     st.subheader("Add New Account")
 
+    account_type = st.selectbox(
+        "Account Type",
+        options=AccountType.ALL,
+        key="add_account_type",
+    )
+    add_subtype_key = "add_account_subtype"
+    add_subtype_scope_key = f"{add_subtype_key}_scope"
+    if st.session_state.get(add_subtype_scope_key) != account_type:
+        st.session_state[add_subtype_scope_key] = account_type
+        st.session_state[add_subtype_key] = None
+
     with st.form("add_account_form", clear_on_submit=True):
         account_number = st.text_input("Account Number", placeholder="e.g., 1000")
         account_name = st.text_input("Account Name", placeholder="e.g., Cash - Operating")
-        account_type = st.selectbox(
-            "Account Type",
-            options=AccountType.ALL
+        subtype = st.selectbox(
+            "Statement Subtype (optional)",
+            options=[None] + AccountSubtype.for_type(account_type),
+            format_func=lambda value: value or "Review later",
+            key=add_subtype_key,
         )
-        subtype = st.text_input("Subtype (optional)", placeholder="e.g., Cash, Fixed Asset, etc.")
         description = st.text_area(
             "Description/Memo (optional)",
             placeholder="e.g., Chase Business Checking ****1234",
@@ -185,7 +317,7 @@ with tab2:
                     account_number=account_number,
                     name=account_name,
                     type=account_type,
-                    subtype=subtype if subtype else None,
+                    subtype=subtype,
                     description=description if description else None
                 )
 
@@ -209,10 +341,10 @@ with tab3:
     _template = (
         "Account Number,Name,Type,Subtype,Description\n"
         "1000,Cash - Operating,Asset,Cash,\n"
-        "2000,Accounts Payable,Liability,Payable,\n"
-        "3000,Owner's Equity,Equity,,\n"
-        "4000,Service Revenue,Revenue,,\n"
-        "6000,Office Expense,Expense,,\n"
+        "2000,Accounts Payable,Liability,Accounts Payable,\n"
+        "3000,Owner's Equity,Equity,Owner Contribution,\n"
+        "4000,Service Revenue,Revenue,Operating Revenue,\n"
+        "6000,Office Expense,Expense,Operating Expense,\n"
     )
     st.download_button("Download template CSV", data=_template,
                        file_name="chart_of_accounts_template.csv", mime="text/csv")

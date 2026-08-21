@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 from typing import List, Optional, Dict
 from datetime import date
 from database.connection import get_cursor
-from constants import AccountType
+from constants import AccountSubtype, AccountType
 from money import to_cents, to_dollars
 from utils.fiscal_dates import (
     fiscal_year_bounds,
@@ -135,6 +135,27 @@ class ReportGenerator:
         }
 
     @staticmethod
+    def _optional_comparison_value(
+        current: Optional[float], prior: Optional[float], available: bool
+    ) -> Dict:
+        """Comparison shape for a subtotal that is intentionally unavailable."""
+        if current is None:
+            return {
+                'current': None,
+                'prior': None if not available else prior,
+                'change': None,
+                'change_percent': None,
+            }
+        if not available or prior is None:
+            return {
+                'current': round(current, 2),
+                'prior': None,
+                'change': None,
+                'change_percent': None,
+            }
+        return ReportGenerator._comparison_value(current, prior, True)
+
+    @staticmethod
     def _merge_statement_lines(
         current: List[Dict], prior: List[Dict], available: bool
     ) -> List[Dict]:
@@ -165,6 +186,141 @@ class ReportGenerator:
             ))
             rows.append(row)
         return rows
+
+    @staticmethod
+    def _resolved_statement_subtype(item: Dict, account_type: str) -> Optional[str]:
+        # Balance-sheet earnings are synthetic rows, not chart accounts. They
+        # belong in retained earnings without changing the established flat
+        # line contract, where their raw subtype remains None.
+        if (
+            account_type == AccountType.EQUITY
+            and not item.get('account_number')
+            and item.get('name') in {'Retained Earnings', 'Current Year Earnings'}
+        ):
+            return AccountSubtype.RETAINED_EARNINGS
+        return AccountSubtype.resolve(
+            account_type, item.get('subtype'), item.get('name', '')
+        )
+
+    @staticmethod
+    def _group_statement_lines(
+        items: List[Dict],
+        account_type: str,
+        *,
+        comparative: bool = False,
+        prior_available: bool = True,
+    ) -> List[Dict]:
+        """Group flat statement lines without altering the flat contract."""
+        definitions = AccountSubtype.statement_groups_for_type(account_type)
+        buckets = {
+            key: {
+                'key': key,
+                'group': label,
+                'subtypes': list(subtypes),
+                'accounts': [],
+            }
+            for key, label, subtypes in definitions
+        }
+        subtype_to_key = {
+            subtype: key
+            for key, _label, subtypes in definitions
+            for subtype in subtypes
+        }
+        unclassified = {
+            'key': 'unclassified',
+            'group': f"Unclassified {AccountType.plural_label(account_type)}",
+            'subtypes': [],
+            'accounts': [],
+        }
+
+        for item in items:
+            statement_subtype = ReportGenerator._resolved_statement_subtype(
+                item, account_type
+            )
+            grouped_item = dict(item)
+            grouped_item['statement_subtype'] = statement_subtype
+            key = subtype_to_key.get(statement_subtype)
+            target = buckets.get(key) if key else unclassified
+            target['accounts'].append(grouped_item)
+
+        # Never present accumulated depreciation as a negative net PP&E group
+        # when no fixed-asset cost account resolved alongside it. Moving the
+        # orphaned contra lines to Unclassified keeps total assets unchanged
+        # while making the incomplete classification visible.
+        if account_type == AccountType.ASSET:
+            ppe = buckets.get('property_equipment_net')
+            if ppe:
+                def has_amount(item, field):
+                    value = item.get(field)
+                    return value not in (None, 0)
+
+                if comparative:
+                    incomplete = any(
+                        any(
+                            item['statement_subtype']
+                            == AccountSubtype.ACCUMULATED_DEPRECIATION
+                            and has_amount(item, field)
+                            for item in ppe['accounts']
+                        )
+                        and not any(
+                            item['statement_subtype'] == AccountSubtype.FIXED_ASSET
+                            and has_amount(item, field)
+                            for item in ppe['accounts']
+                        )
+                        for field in ('current', 'prior')
+                        if field != 'prior' or prior_available
+                    )
+                else:
+                    incomplete = (
+                        any(
+                            item['statement_subtype']
+                            == AccountSubtype.ACCUMULATED_DEPRECIATION
+                            and has_amount(item, 'balance')
+                            for item in ppe['accounts']
+                        )
+                        and not any(
+                            item['statement_subtype'] == AccountSubtype.FIXED_ASSET
+                            and has_amount(item, 'balance')
+                            for item in ppe['accounts']
+                        )
+                    )
+                if incomplete:
+                    unclassified['accounts'].extend(ppe['accounts'])
+                    ppe['accounts'] = []
+
+        ordered = [buckets[key] for key, _label, _subtypes in definitions]
+        ordered.append(unclassified)
+        groups = [group for group in ordered if group['accounts']]
+        for group in groups:
+            if comparative:
+                current_cents = sum(
+                    to_cents(item['current']) for item in group['accounts']
+                )
+                prior_cents = sum(
+                    to_cents(item['prior'] or 0) for item in group['accounts']
+                )
+                group['subtotal'] = ReportGenerator._comparison_value(
+                    to_dollars(current_cents), to_dollars(prior_cents),
+                    prior_available,
+                )
+            else:
+                group['subtotal'] = sum(
+                    item['balance'] for item in group['accounts']
+                )
+        return groups
+
+    @staticmethod
+    def _groups_to_dollars(groups: List[Dict]) -> None:
+        for group in groups:
+            group['subtotal'] = to_dollars(group['subtotal'])
+            for item in group['accounts']:
+                item['balance'] = to_dollars(item['balance'])
+
+    @staticmethod
+    def _group_subtotal(groups: List[Dict], key: str) -> int:
+        return next(
+            (group['subtotal'] for group in groups if group['key'] == key), 0
+        )
 
     @staticmethod
     def trial_balance(client_id: int, as_of_date: Optional[date] = None) -> List[TrialBalanceRow]:
@@ -434,12 +590,14 @@ class ReportGenerator:
                 SELECT
                     a.account_number,
                     a.name,
+                    a.subtype,
                     COALESCE(SUM(jel.credit), 0) - COALESCE(SUM(jel.debit), 0) as balance
                 FROM accounts a
                 LEFT JOIN (
                     journal_entry_lines jel
                     JOIN journal_entries je ON jel.journal_entry_id = je.id
                         AND je.entry_date >= ? AND je.entry_date <= ?
+                        AND je.entry_type NOT IN ('Beginning Balance', 'Closing')
                 ) ON a.id = jel.account_id
                 WHERE a.client_id = ? AND a.type = 'Revenue'
                 GROUP BY a.id
@@ -451,6 +609,7 @@ class ReportGenerator:
                 {
                     'account_number': row['account_number'],
                     'name': row['name'],
+                    'subtype': row['subtype'],
                     'balance': row['balance']  # cents
                 }
                 for row in cursor.fetchall()
@@ -462,12 +621,14 @@ class ReportGenerator:
                 SELECT
                     a.account_number,
                     a.name,
+                    a.subtype,
                     COALESCE(SUM(jel.debit), 0) - COALESCE(SUM(jel.credit), 0) as balance
                 FROM accounts a
                 LEFT JOIN (
                     journal_entry_lines jel
                     JOIN journal_entries je ON jel.journal_entry_id = je.id
                         AND je.entry_date >= ? AND je.entry_date <= ?
+                        AND je.entry_type NOT IN ('Beginning Balance', 'Closing')
                 ) ON a.id = jel.account_id
                 WHERE a.client_id = ? AND a.type = 'Expense'
                 GROUP BY a.id
@@ -479,13 +640,60 @@ class ReportGenerator:
                 {
                     'account_number': row['account_number'],
                     'name': row['name'],
+                    'subtype': row['subtype'],
                     'balance': row['balance']  # cents
                 }
                 for row in cursor.fetchall()
             ]
             total_expenses = sum(e['balance'] for e in expenses)  # cents, exact
 
+        revenue_groups = ReportGenerator._group_statement_lines(
+            revenues, AccountType.REVENUE
+        )
+        expense_groups = ReportGenerator._group_statement_lines(
+            expenses, AccountType.EXPENSE
+        )
+        operating_revenue = ReportGenerator._group_subtotal(
+            revenue_groups, 'operating_revenue'
+        )
+        other_income = ReportGenerator._group_subtotal(
+            revenue_groups, 'other_income'
+        )
+        cost_of_goods_sold = ReportGenerator._group_subtotal(
+            expense_groups, 'cost_of_goods_sold'
+        )
+        operating_expenses = ReportGenerator._group_subtotal(
+            expense_groups, 'operating_expenses'
+        )
+        depreciation_amortization = ReportGenerator._group_subtotal(
+            expense_groups, 'depreciation_amortization'
+        )
+        other_expenses = ReportGenerator._group_subtotal(
+            expense_groups, 'other_expenses'
+        )
+        unresolved_groups = [
+            group for group in revenue_groups + expense_groups
+            if group['key'] == 'unclassified' and group['accounts']
+        ]
+        multistep_ready = not unresolved_groups
+        statement_warnings = []
+        if not multistep_ready:
+            statement_warnings.append(
+                "Gross Profit and Operating Income are hidden until every "
+                "Revenue and Expense account has a statement subtype."
+            )
+        gross_profit = (
+            operating_revenue - cost_of_goods_sold
+            if multistep_ready else None
+        )
+        operating_income = (
+            gross_profit - operating_expenses - depreciation_amortization
+            if multistep_ready else None
+        )
+
         # All aggregation above is in exact integer cents; convert to dollars for output.
+        ReportGenerator._groups_to_dollars(revenue_groups)
+        ReportGenerator._groups_to_dollars(expense_groups)
         for r in revenues:
             r['balance'] = to_dollars(r['balance'])
         for e in expenses:
@@ -495,10 +703,26 @@ class ReportGenerator:
             'start_date': start_date,
             'end_date': end_date,
             'revenues': revenues,
+            'revenue_groups': revenue_groups,
             'total_revenue': to_dollars(total_revenue),
             'expenses': expenses,
+            'expense_groups': expense_groups,
             'total_expenses': to_dollars(total_expenses),
-            'net_income': to_dollars(total_revenue - total_expenses)
+            'operating_revenue': to_dollars(operating_revenue),
+            'other_income': to_dollars(other_income),
+            'cost_of_goods_sold': to_dollars(cost_of_goods_sold),
+            'gross_profit': (
+                None if gross_profit is None else to_dollars(gross_profit)
+            ),
+            'operating_expenses': to_dollars(operating_expenses),
+            'depreciation_amortization': to_dollars(depreciation_amortization),
+            'operating_income': (
+                None if operating_income is None else to_dollars(operating_income)
+            ),
+            'other_expenses': to_dollars(other_expenses),
+            'net_income': to_dollars(total_revenue - total_expenses),
+            'multistep_ready': multistep_ready,
+            'statement_warnings': statement_warnings,
         }
 
     @staticmethod
@@ -513,15 +737,36 @@ class ReportGenerator:
         current = ReportGenerator.income_statement(client_id, start_date, end_date)
         prior = ReportGenerator.income_statement(client_id, prior_start, prior_end)
         available = ReportGenerator._has_history(client_id, prior_end)
+        revenues = ReportGenerator._merge_statement_lines(
+            current['revenues'], prior['revenues'], available
+        )
+        expenses = ReportGenerator._merge_statement_lines(
+            current['expenses'], prior['expenses'], available
+        )
+        multistep_ready = (
+            current['multistep_ready']
+            and (not available or prior['multistep_ready'])
+        )
+        statement_warnings = list(current['statement_warnings'])
+        if available:
+            statement_warnings.extend(
+                f"Prior year: {warning}"
+                for warning in prior['statement_warnings']
+                if f"Prior year: {warning}" not in statement_warnings
+            )
         return {
             'current_period': {'start': start_date, 'end': end_date},
             'prior_period': {'start': prior_start, 'end': prior_end},
             'prior_available': available,
-            'revenues': ReportGenerator._merge_statement_lines(
-                current['revenues'], prior['revenues'], available
+            'revenues': revenues,
+            'revenue_groups': ReportGenerator._group_statement_lines(
+                revenues, AccountType.REVENUE, comparative=True,
+                prior_available=available,
             ),
-            'expenses': ReportGenerator._merge_statement_lines(
-                current['expenses'], prior['expenses'], available
+            'expenses': expenses,
+            'expense_groups': ReportGenerator._group_statement_lines(
+                expenses, AccountType.EXPENSE, comparative=True,
+                prior_available=available,
             ),
             'total_revenue': ReportGenerator._comparison_value(
                 current['total_revenue'], prior['total_revenue'], available
@@ -529,10 +774,151 @@ class ReportGenerator:
             'total_expenses': ReportGenerator._comparison_value(
                 current['total_expenses'], prior['total_expenses'], available
             ),
+            'operating_revenue': ReportGenerator._comparison_value(
+                current['operating_revenue'], prior['operating_revenue'], available
+            ),
+            'other_income': ReportGenerator._comparison_value(
+                current['other_income'], prior['other_income'], available
+            ),
+            'cost_of_goods_sold': ReportGenerator._comparison_value(
+                current['cost_of_goods_sold'], prior['cost_of_goods_sold'], available
+            ),
+            'gross_profit': ReportGenerator._optional_comparison_value(
+                current['gross_profit'], prior['gross_profit'], available
+            ),
+            'operating_expenses': ReportGenerator._comparison_value(
+                current['operating_expenses'], prior['operating_expenses'], available
+            ),
+            'depreciation_amortization': ReportGenerator._comparison_value(
+                current['depreciation_amortization'],
+                prior['depreciation_amortization'], available,
+            ),
+            'operating_income': ReportGenerator._optional_comparison_value(
+                current['operating_income'], prior['operating_income'], available
+            ),
+            'other_expenses': ReportGenerator._comparison_value(
+                current['other_expenses'], prior['other_expenses'], available
+            ),
             'net_income': ReportGenerator._comparison_value(
                 current['net_income'], prior['net_income'], available
             ),
+            'multistep_ready': multistep_ready,
+            'statement_warnings': statement_warnings,
         }
+
+    @staticmethod
+    def income_statement_rows(report: Dict, *, grouped: bool = True) -> List[tuple]:
+        """One statement layout shared by UI, standalone exports, and close package."""
+        rows = []
+
+        def label(item):
+            number = item.get('account_number') or ''
+            return f"{number} - {item['name']}" if number else item['name']
+
+        def append_group(group):
+            rows.append(('group', group['group'], None))
+            rows.extend(
+                ('item', label(item), item) for item in group['accounts']
+            )
+            rows.append((
+                'group_total', f"Total {group['group']}", group['subtotal']
+            ))
+
+        revenue_groups = report['revenue_groups']
+        expense_groups = report['expense_groups']
+        revenue_by_key = {group['key']: group for group in revenue_groups}
+        expense_by_key = {group['key']: group for group in expense_groups}
+
+        if not grouped:
+            rows.append(('section', 'Revenue', None))
+            rows.extend(
+                ('item', label(item), item) for item in report['revenues']
+            )
+            if not report['revenues']:
+                rows.append(('note', 'No revenue recorded', None))
+            rows.append(('section', 'Expenses', None))
+            rows.extend(
+                ('item', label(item), item) for item in report['expenses']
+            )
+            if not report['expenses']:
+                rows.append(('note', 'No expenses recorded', None))
+        elif not report.get('multistep_ready', True):
+            rows.append(('section', 'Revenue', None))
+            if revenue_groups:
+                for group in revenue_groups:
+                    append_group(group)
+            else:
+                rows.append(('note', 'No revenue recorded', None))
+
+            rows.append(('section', 'Expenses', None))
+            if expense_groups:
+                for group in expense_groups:
+                    append_group(group)
+            else:
+                rows.append(('note', 'No expenses recorded', None))
+            rows.extend(
+                ('note', warning, None)
+                for warning in report.get('statement_warnings', ())
+            )
+        else:
+            operating_revenue = revenue_by_key.get('operating_revenue')
+            cogs = expense_by_key.get('cost_of_goods_sold')
+            if operating_revenue or cogs:
+                rows.append(('section', 'Revenue', None))
+                if operating_revenue:
+                    append_group(operating_revenue)
+                elif cogs:
+                    rows.append(('note', 'No operating revenue recorded', None))
+                if cogs:
+                    append_group(cogs)
+                    rows.append(('total', 'Gross Profit', report['gross_profit']))
+
+            operating_groups = [
+                expense_by_key[key]
+                for key in ('operating_expenses', 'depreciation_amortization')
+                if key in expense_by_key
+            ]
+            if operating_groups:
+                rows.append(('section', 'Operating Expenses', None))
+                for group in operating_groups:
+                    append_group(group)
+                if operating_revenue or cogs:
+                    rows.append((
+                        'total', 'Operating Income', report['operating_income']
+                    ))
+
+            other_groups = []
+            for key in ('other_income',):
+                if key in revenue_by_key:
+                    other_groups.append(revenue_by_key[key])
+            for key in ('other_expenses',):
+                if key in expense_by_key:
+                    other_groups.append(expense_by_key[key])
+            if other_groups:
+                rows.append(('section', 'Other Income and Expenses', None))
+                for group in other_groups:
+                    append_group(group)
+
+            if not revenue_groups and not expense_groups:
+                rows.extend([
+                    ('section', 'Revenue', None),
+                    ('note', 'No revenue recorded', None),
+                    ('section', 'Expenses', None),
+                    ('note', 'No expenses recorded', None),
+                ])
+
+        rows.extend([
+            ('subtotal', 'Total Revenue', report['total_revenue']),
+            ('subtotal', 'Total Expenses', report['total_expenses']),
+            ('total', 'NET INCOME', report['net_income']),
+        ])
+        return rows
+
+    @staticmethod
+    def _income_statement_export_label(label: str) -> str:
+        if label in {'Gross Profit', 'Operating Income'}:
+            return label.upper()
+        return label
 
     @staticmethod
     def balance_sheet(client_id: int, as_of_date: date) -> Dict:
@@ -627,7 +1013,19 @@ class ReportGenerator:
             total_liabilities = sum(l['balance'] for l in liabilities)  # cents
             total_equity = sum(e['balance'] for e in equity)          # cents
 
+        asset_groups = ReportGenerator._group_statement_lines(
+            assets, AccountType.ASSET
+        )
+        liability_groups = ReportGenerator._group_statement_lines(
+            liabilities, AccountType.LIABILITY
+        )
+        equity_groups = ReportGenerator._group_statement_lines(
+            equity, AccountType.EQUITY
+        )
+
         # All aggregation above is in exact integer cents; convert to dollars for output.
+        for statement_groups in (asset_groups, liability_groups, equity_groups):
+            ReportGenerator._groups_to_dollars(statement_groups)
         for group in (assets, liabilities, equity):
             for item in group:
                 item['balance'] = to_dollars(item['balance'])
@@ -635,10 +1033,13 @@ class ReportGenerator:
         return {
             'as_of_date': as_of_date,
             'assets': assets,
+            'asset_groups': asset_groups,
             'total_assets': to_dollars(total_assets),
             'liabilities': liabilities,
+            'liability_groups': liability_groups,
             'total_liabilities': to_dollars(total_liabilities),
             'equity': equity,
+            'equity_groups': equity_groups,
             'total_equity': to_dollars(total_equity),
             'total_liabilities_equity': to_dollars(total_liabilities + total_equity)
         }
@@ -650,18 +1051,33 @@ class ReportGenerator:
         current = ReportGenerator.balance_sheet(client_id, as_of_date)
         prior = ReportGenerator.balance_sheet(client_id, prior_as_of)
         available = ReportGenerator._has_history(client_id, prior_as_of)
+        assets = ReportGenerator._merge_statement_lines(
+            current['assets'], prior['assets'], available
+        )
+        liabilities = ReportGenerator._merge_statement_lines(
+            current['liabilities'], prior['liabilities'], available
+        )
+        equity = ReportGenerator._merge_statement_lines(
+            current['equity'], prior['equity'], available
+        )
         return {
             'current_as_of': as_of_date,
             'prior_as_of': prior_as_of,
             'prior_available': available,
-            'assets': ReportGenerator._merge_statement_lines(
-                current['assets'], prior['assets'], available
+            'assets': assets,
+            'asset_groups': ReportGenerator._group_statement_lines(
+                assets, AccountType.ASSET, comparative=True,
+                prior_available=available,
             ),
-            'liabilities': ReportGenerator._merge_statement_lines(
-                current['liabilities'], prior['liabilities'], available
+            'liabilities': liabilities,
+            'liability_groups': ReportGenerator._group_statement_lines(
+                liabilities, AccountType.LIABILITY, comparative=True,
+                prior_available=available,
             ),
-            'equity': ReportGenerator._merge_statement_lines(
-                current['equity'], prior['equity'], available
+            'equity': equity,
+            'equity_groups': ReportGenerator._group_statement_lines(
+                equity, AccountType.EQUITY, comparative=True,
+                prior_available=available,
             ),
             'total_assets': ReportGenerator._comparison_value(
                 current['total_assets'], prior['total_assets'], available
@@ -686,6 +1102,745 @@ class ReportGenerator:
                 round(prior['total_assets'], 2)
                 == round(prior['total_liabilities_equity'], 2)
             ),
+        }
+
+    @staticmethod
+    def cash_flow_statement(
+        client_id: int,
+        start_date: date,
+        end_date: date,
+    ) -> Dict:
+        """Derived statement of cash flows using the indirect method.
+
+        Operating cash starts with period profit (excluding Beginning Balance
+        and Closing entries), then reconciles noncash and working-capital
+        changes. Investing and financing amounts come from cash-affecting
+        journal entries rather than raw balance deltas. Ambiguous entries stay
+        explicit in an unclassified section; they are never silently forced
+        into Operating merely to make the statement look complete.
+        """
+        require_valid_range(start_date, end_date, "Cash flow statement")
+        start_iso, end_iso = start_date.isoformat(), end_date.isoformat()
+
+        with get_cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT a.id AS account_id, a.account_number, a.name,
+                       a.type AS account_type, a.subtype,
+                       COALESCE(SUM(CASE
+                           WHEN je.entry_date < ?
+                             OR (je.entry_type = 'Beginning Balance'
+                                 AND je.entry_date <= ?)
+                           THEN jel.debit - jel.credit ELSE 0 END), 0)
+                           AS opening_debit_balance,
+                       COALESCE(SUM(CASE WHEN je.entry_date <= ?
+                           THEN jel.debit - jel.credit ELSE 0 END), 0)
+                           AS ending_debit_balance
+                FROM accounts a
+                LEFT JOIN journal_entry_lines jel ON jel.account_id = a.id
+                LEFT JOIN journal_entries je ON je.id = jel.journal_entry_id
+                WHERE a.client_id = ?
+                GROUP BY a.id
+                ORDER BY a.account_number
+                """,
+                (start_iso, end_iso, end_iso, client_id),
+            )
+            balance_rows = [dict(row) for row in cursor.fetchall()]
+
+            cursor.execute(
+                """
+                SELECT je.id AS entry_id, je.entry_date, je.entry_type,
+                       je.description, a.id AS account_id, a.account_number,
+                       a.name, a.type AS account_type, a.subtype,
+                       jel.debit, jel.credit
+                FROM journal_entries je
+                JOIN journal_entry_lines jel ON jel.journal_entry_id = je.id
+                JOIN accounts a ON a.id = jel.account_id
+                WHERE je.client_id = ? AND je.entry_date BETWEEN ? AND ?
+                ORDER BY je.entry_date, je.id, jel.id
+                """,
+                (client_id, start_iso, end_iso),
+            )
+            activity_rows = [dict(row) for row in cursor.fetchall()]
+
+        def resolved(row):
+            return AccountSubtype.resolve(
+                row['account_type'], row.get('subtype'), row.get('name', '')
+            )
+
+        cash_rows = [
+            row for row in balance_rows
+            if AccountSubtype.is_cash_like(
+                row['account_type'], row.get('subtype'), row.get('name', '')
+            )
+        ]
+        cash_account_ids = {row['account_id'] for row in cash_rows}
+        active_account_ids = {
+            row['account_id'] for row in activity_rows
+            if row['debit'] or row['credit']
+        }
+        active_account_ids.update(
+            row['account_id'] for row in balance_rows
+            if row['opening_debit_balance'] or row['ending_debit_balance']
+        )
+        active_cash_rows = [
+            row for row in cash_rows if row['account_id'] in active_account_ids
+        ]
+        unresolved_cash_rows = [
+            row for row in active_cash_rows
+            if resolved(row) != AccountSubtype.CASH
+        ]
+        cash_account_ready = bool(cash_rows)
+        cash_beginning = sum(row['opening_debit_balance'] for row in cash_rows)
+        cash_ending = sum(row['ending_debit_balance'] for row in cash_rows)
+        actual_cash_change = cash_ending - cash_beginning
+
+        # Period profit and its noncash adjustments come from activity, not the
+        # current income-statement output, because a posted Closing entry must
+        # not erase the period's earnings from this reconciliation.
+        net_income = 0
+        depreciation_amortization = 0
+        gain_adjustment = 0
+        loss_adjustment = 0
+        for row in activity_rows:
+            if row['entry_type'] in ('Beginning Balance', 'Closing'):
+                continue
+            amount = row['credit'] - row['debit']
+            subtype = resolved(row)
+            if row['account_type'] == AccountType.REVENUE:
+                net_income += amount
+                if subtype == AccountSubtype.GAIN_ON_ASSET_DISPOSAL:
+                    gain_adjustment -= amount
+            elif row['account_type'] == AccountType.EXPENSE:
+                expense = -amount
+                net_income -= expense
+                if subtype == AccountSubtype.DEPRECIATION_AMORTIZATION:
+                    depreciation_amortization += expense
+                elif subtype == AccountSubtype.LOSS_ON_ASSET_DISPOSAL:
+                    loss_adjustment += expense
+
+        balance_by_subtype = {}
+        for row in balance_rows:
+            subtype = resolved(row)
+            if not subtype:
+                continue
+            multiplier = (
+                1 if row['account_type'] in AccountType.DEBIT_NORMAL else -1
+            )
+            opening = row['opening_debit_balance'] * multiplier
+            ending = row['ending_debit_balance'] * multiplier
+            values = balance_by_subtype.setdefault(
+                subtype, {'opening': 0, 'ending': 0, 'account_ids': []}
+            )
+            values['opening'] += opening
+            values['ending'] += ending
+            values['account_ids'].append(row['account_id'])
+
+        operating_lines = [
+            {'key': 'net_income', 'name': 'Net Income', 'amount': net_income},
+        ]
+        if depreciation_amortization:
+            operating_lines.append({
+                'key': 'depreciation_amortization',
+                'name': 'Depreciation & Amortization',
+                'amount': depreciation_amortization,
+            })
+        if gain_adjustment:
+            operating_lines.append({
+                'key': 'gains_on_asset_disposals',
+                'name': 'Gains on Asset Disposals',
+                'amount': gain_adjustment,
+            })
+        if loss_adjustment:
+            operating_lines.append({
+                'key': 'losses_on_asset_disposals',
+                'name': 'Losses on Asset Disposals',
+                'amount': loss_adjustment,
+            })
+
+        working_capital = [
+            (AccountSubtype.ACCOUNTS_RECEIVABLE, 'accounts_receivable',
+             'Change in Accounts Receivable', -1),
+            (AccountSubtype.INVENTORY, 'inventory',
+             'Change in Inventory', -1),
+            (AccountSubtype.OTHER_CURRENT_ASSET, 'other_current_assets',
+             'Change in Other Current Assets', -1),
+            (AccountSubtype.ACCOUNTS_PAYABLE, 'accounts_payable',
+             'Change in Accounts Payable', 1),
+            (AccountSubtype.CREDIT_CARD, 'credit_cards',
+             'Change in Credit Cards', 1),
+            (AccountSubtype.OTHER_CURRENT_LIABILITY,
+             'other_current_liabilities',
+             'Change in Other Current Liabilities', 1),
+        ]
+        for subtype, key, label, direction in working_capital:
+            values = balance_by_subtype.get(subtype)
+            if not values:
+                continue
+            adjustment = direction * (values['ending'] - values['opening'])
+            if adjustment:
+                operating_lines.append({
+                    'key': key,
+                    'name': label,
+                    'amount': adjustment,
+                    'account_ids': values['account_ids'],
+                })
+
+        entries = {}
+        for row in activity_rows:
+            entries.setdefault(row['entry_id'], []).append(row)
+
+        section_activity = {
+            'operating': {}, 'investing': {}, 'financing': {},
+            'unclassified': {},
+        }
+        unclassified_entries = []
+        noncash_items = []
+        operating_reconciliation_context = []
+
+        def counterpart_section(row):
+            subtype = resolved(row)
+            account_type = row['account_type']
+            if account_type in (AccountType.REVENUE, AccountType.EXPENSE):
+                return 'operating'
+            if account_type == AccountType.ASSET:
+                if subtype in (
+                    AccountSubtype.ACCOUNTS_RECEIVABLE,
+                    AccountSubtype.INVENTORY,
+                    AccountSubtype.OTHER_CURRENT_ASSET,
+                ):
+                    return 'operating'
+                if subtype in (
+                    AccountSubtype.FIXED_ASSET,
+                    AccountSubtype.ACCUMULATED_DEPRECIATION,
+                    AccountSubtype.OTHER_ASSET,
+                ):
+                    return 'investing'
+                return 'unclassified'
+            if account_type == AccountType.LIABILITY:
+                if subtype in (
+                    AccountSubtype.ACCOUNTS_PAYABLE,
+                    AccountSubtype.CREDIT_CARD,
+                    AccountSubtype.OTHER_CURRENT_LIABILITY,
+                ):
+                    return 'operating'
+                if subtype in (
+                    AccountSubtype.SHORT_TERM_DEBT,
+                    AccountSubtype.LONG_TERM_LIABILITY,
+                ):
+                    return 'financing'
+                return 'unclassified'
+            if account_type == AccountType.EQUITY:
+                if subtype in (
+                    AccountSubtype.OWNER_CONTRIBUTION,
+                    AccountSubtype.OWNER_DISTRIBUTION,
+                    AccountSubtype.RETAINED_EARNINGS,
+                    AccountSubtype.OTHER_EQUITY,
+                ):
+                    return 'financing'
+                return 'unclassified'
+            return 'unclassified'
+
+        def add_section_amount(section, target, amount, entry_id):
+            direction = 'inflow' if amount > 0 else 'outflow'
+            account_id = target['account_id'] if target else 0
+            fallback_names = {
+                'operating': 'Net Operating Cash Activity',
+                'investing': 'Net Investing Cash Activity',
+                'financing': 'Net Financing Cash Activity',
+                'unclassified': 'Mixed or Unclassified Activity',
+            }
+            name = target['name'] if target else fallback_names[section]
+            split_direction = False
+            if target and section == 'financing':
+                subtype = resolved(target)
+                if subtype in (
+                    AccountSubtype.SHORT_TERM_DEBT,
+                    AccountSubtype.LONG_TERM_LIABILITY,
+                ):
+                    split_direction = True
+                    label = 'Proceeds' if amount > 0 else 'Repayments'
+                    name = f"{name} — {label}"
+            key = (account_id, direction) if split_direction else account_id
+            line_key = (
+                f"account:{account_id}:{direction}"
+                if split_direction else f"account:{account_id}"
+            )
+            line = section_activity[section].setdefault(key, {
+                'key': line_key,
+                'account_id': target['account_id'] if target else None,
+                'account_number': target['account_number'] if target else '',
+                'name': name,
+                'amount': 0,
+                'entry_ids': [],
+            })
+            line['amount'] += amount
+            line['entry_ids'].append(entry_id)
+
+        def record_noncash(entry_id, lines, amount):
+            """Record one noncash component with its dollar-bearing context."""
+            if amount <= 0:
+                return
+            accounts = list(dict.fromkeys(
+                line['account_number'] for line in lines
+                if line['account_number']
+            ))
+            noncash_items.append({
+                'entry_id': entry_id,
+                'entry_date': lines[0]['entry_date'],
+                'description': lines[0]['description'] or '',
+                'accounts': accounts,
+                'amount': amount,
+            })
+
+            operating_amount = sum(
+                line['credit'] - line['debit'] for line in lines
+                if counterpart_section(line) == 'operating'
+            )
+            if operating_amount:
+                operating_reconciliation_context.append({
+                    'entry_id': entry_id,
+                    'kind': 'noncash',
+                    'adjustment': -amount if operating_amount > 0 else amount,
+                    'accounts': accounts,
+                })
+
+        for entry_id, lines in entries.items():
+            cash_lines = [
+                line for line in lines if line['account_id'] in cash_account_ids
+            ]
+            cash_change = sum(
+                line['debit'] - line['credit'] for line in cash_lines
+            )
+            counterparts = [
+                line for line in lines if line['account_id'] not in cash_account_ids
+            ]
+
+            # Beginning Balance entries establish opening balances even when
+            # an imported legacy book dates them after the report start.
+            if lines[0]['entry_type'] == 'Beginning Balance':
+                continue
+
+            if lines[0]['entry_type'] == 'Closing' and not cash_change:
+                continue
+
+            counterpart_sections = {
+                counterpart_section(line) for line in counterparts
+            }
+            if not cash_change:
+                meaningful_noncash = [
+                    line for line in counterparts
+                    if counterpart_section(line) in ('investing', 'financing')
+                    and resolved(line) != AccountSubtype.ACCUMULATED_DEPRECIATION
+                ]
+                if meaningful_noncash:
+                    signed_amounts = [
+                        line['credit'] - line['debit'] for line in counterparts
+                    ]
+                    record_noncash(
+                        entry_id,
+                        counterparts,
+                        min(
+                            sum(amount for amount in signed_amounts if amount > 0),
+                            -sum(amount for amount in signed_amounts if amount < 0),
+                        ),
+                    )
+                unresolved = [
+                    line for line in counterparts
+                    if counterpart_section(line) == 'unclassified'
+                ]
+                if unresolved:
+                    operating_reconciliation_context.append({
+                        'entry_id': entry_id,
+                        'kind': 'unclassified',
+                        'adjustment': None,
+                        'accounts': list(dict.fromkeys(
+                            line['account_number'] for line in unresolved
+                            if line['account_number']
+                        )),
+                    })
+                continue
+
+            reason = None
+            if lines[0]['entry_type'] == 'Closing':
+                section = 'unclassified'
+                reason = f"{lines[0]['entry_type']} entry affects cash"
+            elif 'unclassified' in counterpart_sections or not counterparts:
+                section = 'unclassified'
+                reason = 'counterpart account needs a statement subtype'
+            elif 'investing' in counterpart_sections and 'operating' in counterpart_sections:
+                operating_subtypes = {
+                    resolved(line) for line in counterparts
+                    if counterpart_section(line) == 'operating'
+                }
+                disposal_adjusters = {
+                    AccountSubtype.GAIN_ON_ASSET_DISPOSAL,
+                    AccountSubtype.LOSS_ON_ASSET_DISPOSAL,
+                }
+                if operating_subtypes <= disposal_adjusters:
+                    section = 'investing'
+                else:
+                    section = None
+            elif len(counterpart_sections) > 1:
+                section = None
+            elif 'investing' in counterpart_sections:
+                section = 'investing'
+            elif 'financing' in counterpart_sections:
+                section = 'financing'
+            else:
+                section = 'operating'
+
+            if section is None:
+                allocations = [
+                    (counterpart_section(line), line,
+                     line['credit'] - line['debit'])
+                    for line in counterparts
+                    if line['credit'] != line['debit']
+                ]
+                cash_direction = 1 if cash_change > 0 else -1
+                cash_side = [
+                    allocation for allocation in allocations
+                    if allocation[2] * cash_direction > 0
+                ]
+                opposite_side = [
+                    allocation for allocation in allocations
+                    if allocation[2] * cash_direction < 0
+                ]
+                if opposite_side:
+                    cash_sections = {item[0] for item in cash_side}
+                    if len(cash_sections) == 1 and 'unclassified' not in cash_sections:
+                        noncash_amount = sum(abs(item[2]) for item in opposite_side)
+                        record_noncash(entry_id, counterparts, noncash_amount)
+                        allocated_section = next(iter(cash_sections))
+                        target = cash_side[0][1] if len(cash_side) == 1 else None
+                        add_section_amount(
+                            allocated_section, target, cash_change, entry_id
+                        )
+                        continue
+                elif sum(amount for _, _, amount in allocations) == cash_change:
+                    for allocated_section, target, amount in allocations:
+                        add_section_amount(
+                            allocated_section, target, amount, entry_id
+                        )
+                    continue
+                section = 'unclassified'
+                reason = 'mixed entry could not be allocated exactly'
+
+            matching_targets = [
+                line for line in counterparts
+                if counterpart_section(line) == section
+            ]
+            target = matching_targets[0] if len(matching_targets) == 1 else None
+            add_section_amount(section, target, cash_change, entry_id)
+            if section == 'unclassified':
+                unclassified_entries.append({
+                    'entry_id': entry_id,
+                    'entry_date': lines[0]['entry_date'],
+                    'description': lines[0]['description'] or '',
+                    'amount': cash_change,
+                    'reason': reason or 'classification needs review',
+                    'account_numbers': [
+                        line['account_number'] for line in counterparts
+                    ],
+                })
+
+        def section_lines(section):
+            return [
+                line for line in section_activity[section].values()
+                if line['amount']
+            ]
+
+        direct_operating_cash = sum(
+            line['amount'] for line in section_lines('operating')
+        )
+        preliminary_operating_cash = sum(
+            line['amount'] for line in operating_lines
+        )
+        operating_difference = direct_operating_cash - preliminary_operating_cash
+        operating_reconciled = operating_difference == 0
+        if operating_difference:
+            derived_context = [
+                item for item in operating_reconciliation_context
+                if item['kind'] == 'noncash'
+            ]
+            unresolved_context = [
+                item for item in operating_reconciliation_context
+                if item['kind'] == 'unclassified'
+            ]
+            derived_adjustment = sum(
+                item['adjustment'] for item in derived_context
+            )
+            if derived_adjustment == operating_difference and not unresolved_context:
+                entry_ids = ', '.join(
+                    f"#{item['entry_id']}" for item in derived_context
+                )
+                reconciliation_key = 'noncash_operating_activity'
+                reconciliation_name = (
+                    f"Noncash Operating Activity — Entry {entry_ids}"
+                    if len(derived_context) == 1 else
+                    f"Noncash Operating Activity — Entries {entry_ids}"
+                )
+                operating_reconciled = True
+            else:
+                reconciliation_key = 'unresolved_operating_reconciliation'
+                unresolved_accounts = list(dict.fromkeys(
+                    account
+                    for item in unresolved_context
+                    for account in item['accounts']
+                ))
+                reconciliation_name = (
+                    "Unresolved Operating Reconciliation — accounts "
+                    + ', '.join(unresolved_accounts)
+                    if unresolved_accounts else
+                    'Unresolved Operating Reconciliation'
+                )
+            operating_lines.append({
+                'key': reconciliation_key,
+                'name': reconciliation_name,
+                'amount': operating_difference,
+            })
+
+        investing_lines = section_lines('investing')
+        financing_lines = section_lines('financing')
+        unclassified_lines = section_lines('unclassified')
+        investing_cash = sum(line['amount'] for line in investing_lines)
+        financing_cash = sum(line['amount'] for line in financing_lines)
+        unclassified_cash = sum(line['amount'] for line in unclassified_lines)
+        computed_cash_change = (
+            direct_operating_cash + investing_cash
+            + financing_cash + unclassified_cash
+        )
+        reconciliation_difference = actual_cash_change - computed_cash_change
+        ties = (
+            reconciliation_difference == 0
+            and cash_beginning + computed_cash_change == cash_ending
+        )
+        unresolved_noncash = [
+            item for item in operating_reconciliation_context
+            if item['kind'] == 'unclassified'
+        ]
+        classification_complete = (
+            not unclassified_entries
+            and cash_account_ready
+            and not unresolved_cash_rows
+            and not unresolved_noncash
+            and operating_reconciled
+        )
+
+        warnings = []
+        if not cash_rows:
+            warnings.append(
+                "No Cash-subtype accounts were found. Review the chart of accounts."
+            )
+        if unresolved_cash_rows:
+            labels = ', '.join(
+                f"{row['account_number']} {row['name']}".strip()
+                for row in unresolved_cash_rows
+            )
+            warnings.append(
+                f"Cash-like account{'s' if len(unresolved_cash_rows) != 1 else ''} "
+                f"need the Cash subtype: {labels}."
+            )
+        if unclassified_entries:
+            warnings.append(
+                f"{len(unclassified_entries)} cash-affecting entr"
+                f"{'y needs' if len(unclassified_entries) == 1 else 'ies need'} "
+                "classification review."
+            )
+        if unresolved_noncash:
+            labels = ', '.join(dict.fromkeys(
+                account
+                for item in unresolved_noncash
+                for account in item['accounts']
+            )) or 'unknown account'
+            warnings.append(
+                "Noncash activity includes account(s) that need a statement "
+                f"subtype: {labels}."
+            )
+        if not operating_reconciled:
+            warnings.append(
+                "The indirect operating reconciliation has an unresolved difference."
+            )
+        if noncash_items:
+            warnings.append(
+                f"{len(noncash_items)} noncash investing or financing entr"
+                f"{'y is' if len(noncash_items) == 1 else 'ies are'} disclosed separately."
+            )
+        if not ties:
+            warnings.append("Computed cash movement does not tie to the cash accounts.")
+
+        def money_line(line):
+            converted = dict(line)
+            converted['amount'] = to_dollars(line['amount'])
+            return converted
+
+        return {
+            'start_date': start_date,
+            'end_date': end_date,
+            'operating': {
+                'lines': [money_line(line) for line in operating_lines],
+                'total': to_dollars(direct_operating_cash),
+                'reconciliation_difference': to_dollars(operating_difference),
+            },
+            'investing': {
+                'lines': [money_line(line) for line in investing_lines],
+                'total': to_dollars(investing_cash),
+            },
+            'financing': {
+                'lines': [money_line(line) for line in financing_lines],
+                'total': to_dollars(financing_cash),
+            },
+            'unclassified': {
+                'lines': [money_line(line) for line in unclassified_lines],
+                'entries': [
+                    {**entry, 'amount': to_dollars(entry['amount'])}
+                    for entry in unclassified_entries
+                ],
+                'total': to_dollars(unclassified_cash),
+            },
+            'noncash_items': [
+                {**item, 'amount': to_dollars(item['amount'])}
+                for item in noncash_items
+            ],
+            'cash_beginning': to_dollars(cash_beginning),
+            'cash_ending': to_dollars(cash_ending),
+            'actual_cash_change': to_dollars(actual_cash_change),
+            'computed_cash_change': to_dollars(computed_cash_change),
+            'reconciliation_difference': to_dollars(reconciliation_difference),
+            'ties': ties,
+            'operating_reconciled': operating_reconciled,
+            'classification_complete': classification_complete,
+            'cash_account_ready': cash_account_ready,
+            'unresolved_cash_accounts': [
+                {
+                    'account_number': row['account_number'],
+                    'name': row['name'],
+                    'subtype': row.get('subtype'),
+                }
+                for row in unresolved_cash_rows
+            ],
+            'ready': ties and operating_reconciled and classification_complete,
+            'warnings': warnings,
+        }
+
+    @staticmethod
+    def comparative_cash_flow_statement(
+        client_id: int,
+        start_date: date,
+        end_date: date,
+        *,
+        current_report: Optional[Dict] = None,
+        prior_report: Optional[Dict] = None,
+    ) -> Dict:
+        """Cash flow statement with the same prior-year period alongside it."""
+        require_valid_range(start_date, end_date, "Cash flow statement")
+        prior_start, prior_end = prior_year_period(start_date, end_date)
+        current = current_report or ReportGenerator.cash_flow_statement(
+            client_id, start_date, end_date
+        )
+        prior = prior_report or ReportGenerator.cash_flow_statement(
+            client_id, prior_start, prior_end
+        )
+        available = ReportGenerator._has_history(client_id, prior_end)
+
+        def line_key(line):
+            return (
+                line.get('key') or '',
+                line.get('account_number') or '',
+                line.get('name') or '',
+            )
+
+        def merge_lines(current_lines, prior_lines):
+            current_by_key = {line_key(line): line for line in current_lines}
+            prior_by_key = {line_key(line): line for line in prior_lines}
+            keys = list(current_by_key)
+            keys.extend(key for key in prior_by_key if key not in current_by_key)
+            merged = []
+            for key in keys:
+                current_line = current_by_key.get(key)
+                prior_line = prior_by_key.get(key)
+                source = current_line or prior_line
+                row = {
+                    field: source[field]
+                    for field in (
+                        'key', 'account_id', 'account_number', 'name',
+                        'account_ids',
+                    )
+                    if field in source
+                }
+                row.update(ReportGenerator._comparison_value(
+                    current_line['amount'] if current_line else 0,
+                    prior_line['amount'] if prior_line else 0,
+                    available,
+                ))
+                merged.append(row)
+            return merged
+
+        def section(name):
+            return {
+                'lines': merge_lines(
+                    current[name]['lines'], prior[name]['lines']
+                ),
+                'total': ReportGenerator._comparison_value(
+                    current[name]['total'], prior[name]['total'], available
+                ),
+            }
+
+        operating = section('operating')
+        operating['reconciliation_difference'] = (
+            ReportGenerator._comparison_value(
+                current['operating']['reconciliation_difference'],
+                prior['operating']['reconciliation_difference'],
+                available,
+            )
+        )
+        unclassified = section('unclassified')
+        unclassified['current_entries'] = current['unclassified']['entries']
+        unclassified['prior_entries'] = (
+            prior['unclassified']['entries'] if available else []
+        )
+
+        return {
+            'current_period': {'start': start_date, 'end': end_date},
+            'prior_period': {'start': prior_start, 'end': prior_end},
+            'prior_available': available,
+            'operating': operating,
+            'investing': section('investing'),
+            'financing': section('financing'),
+            'unclassified': unclassified,
+            'cash_beginning': ReportGenerator._comparison_value(
+                current['cash_beginning'], prior['cash_beginning'], available
+            ),
+            'cash_ending': ReportGenerator._comparison_value(
+                current['cash_ending'], prior['cash_ending'], available
+            ),
+            'actual_cash_change': ReportGenerator._comparison_value(
+                current['actual_cash_change'], prior['actual_cash_change'], available
+            ),
+            'computed_cash_change': ReportGenerator._comparison_value(
+                current['computed_cash_change'],
+                prior['computed_cash_change'], available,
+            ),
+            'reconciliation_difference': ReportGenerator._comparison_value(
+                current['reconciliation_difference'],
+                prior['reconciliation_difference'], available,
+            ),
+            'current_ties': current['ties'],
+            'prior_ties': prior['ties'] if available else None,
+            'current_operating_reconciled': current['operating_reconciled'],
+            'prior_operating_reconciled': (
+                prior['operating_reconciled'] if available else None
+            ),
+            'current_classification_complete': current['classification_complete'],
+            'prior_classification_complete': (
+                prior['classification_complete'] if available else None
+            ),
+            'current_ready': current['ready'],
+            'prior_ready': prior['ready'] if available else None,
+            'current_warnings': current['warnings'],
+            'prior_warnings': prior['warnings'] if available else [],
+            'current_noncash_items': current['noncash_items'],
+            'prior_noncash_items': prior['noncash_items'] if available else [],
         }
 
     @staticmethod
@@ -952,48 +2107,75 @@ class ReportGenerator:
         ])
 
     @staticmethod
-    def income_statement_to_dataframe(report: Dict) -> pd.DataFrame:
-        """Convert income statement to pandas DataFrame for export."""
+    def income_statement_to_dataframe(
+        report: Dict, *, grouped: bool = True
+    ) -> pd.DataFrame:
+        """Convert a grouped, multi-step income statement for export."""
         rows = []
 
-        rows.append({'Item': 'REVENUE', 'Amount': ''})
-        for r in report['revenues']:
-            rows.append({'Item': f"  {r['account_number']} - {r['name']}", 'Amount': r['balance']})
-        rows.append({'Item': 'Total Revenue', 'Amount': report['total_revenue']})
-
-        rows.append({'Item': '', 'Amount': ''})
-        rows.append({'Item': 'EXPENSES', 'Amount': ''})
-        for e in report['expenses']:
-            rows.append({'Item': f"  {e['account_number']} - {e['name']}", 'Amount': e['balance']})
-        rows.append({'Item': 'Total Expenses', 'Amount': report['total_expenses']})
-
-        rows.append({'Item': '', 'Amount': ''})
-        rows.append({'Item': 'NET INCOME', 'Amount': report['net_income']})
+        for kind, label, value in ReportGenerator.income_statement_rows(
+            report, grouped=grouped
+        ):
+            label = ReportGenerator._income_statement_export_label(label)
+            prefix = (
+                '    ' if kind == 'item'
+                else '  ' if kind in {'group', 'group_total', 'note'}
+                else ''
+            )
+            rows.append({
+                'Item': f"{prefix}{label}",
+                'Amount': '' if value is None else (
+                    value['balance'] if kind == 'item' else value
+                ),
+            })
 
         return pd.DataFrame(rows)
 
     @staticmethod
-    def balance_sheet_to_dataframe(report: Dict) -> pd.DataFrame:
+    def balance_sheet_to_dataframe(
+        report: Dict, *, grouped: bool = True
+    ) -> pd.DataFrame:
         """Convert balance sheet to pandas DataFrame for export."""
         rows = []
 
-        rows.append({'Item': 'ASSETS', 'Amount': ''})
-        for a in report['assets']:
-            rows.append({'Item': f"  {a['account_number']} - {a['name']}", 'Amount': a['balance']})
-        rows.append({'Item': 'Total Assets', 'Amount': report['total_assets']})
+        def append_section(title, groups, items, total_label, total):
+            rows.append({'Item': title, 'Amount': ''})
+            if grouped:
+                for group in groups:
+                    rows.append({'Item': f"  {group['group']}", 'Amount': ''})
+                    for item in group['accounts']:
+                        label = (
+                            f"    {item['account_number']} - {item['name']}"
+                            if item['account_number'] else f"    {item['name']}"
+                        )
+                        rows.append({'Item': label, 'Amount': item['balance']})
+                    rows.append({
+                        'Item': f"  Total {group['group']}",
+                        'Amount': group['subtotal'],
+                    })
+            else:
+                for item in items:
+                    label = (
+                        f"  {item['account_number']} - {item['name']}"
+                        if item['account_number'] else f"  {item['name']}"
+                    )
+                    rows.append({'Item': label, 'Amount': item['balance']})
+            rows.append({'Item': total_label, 'Amount': total})
 
+        append_section(
+            'ASSETS', report['asset_groups'], report['assets'],
+            'Total Assets', report['total_assets']
+        )
         rows.append({'Item': '', 'Amount': ''})
-        rows.append({'Item': 'LIABILITIES', 'Amount': ''})
-        for l in report['liabilities']:
-            rows.append({'Item': f"  {l['account_number']} - {l['name']}", 'Amount': l['balance']})
-        rows.append({'Item': 'Total Liabilities', 'Amount': report['total_liabilities']})
-
+        append_section(
+            'LIABILITIES', report['liability_groups'], report['liabilities'],
+            'Total Liabilities', report['total_liabilities'],
+        )
         rows.append({'Item': '', 'Amount': ''})
-        rows.append({'Item': 'EQUITY', 'Amount': ''})
-        for e in report['equity']:
-            label = f"  {e['account_number']} - {e['name']}" if e['account_number'] else f"  {e['name']}"
-            rows.append({'Item': label, 'Amount': e['balance']})
-        rows.append({'Item': 'Total Equity', 'Amount': report['total_equity']})
+        append_section(
+            'EQUITY', report['equity_groups'], report['equity'],
+            'Total Equity', report['total_equity']
+        )
 
         rows.append({'Item': '', 'Amount': ''})
         rows.append({'Item': 'TOTAL LIABILITIES & EQUITY', 'Amount': report['total_liabilities_equity']})
@@ -1001,66 +2183,79 @@ class ReportGenerator:
         return pd.DataFrame(rows)
 
     @staticmethod
-    def comparative_income_statement_to_dataframe(report: Dict) -> pd.DataFrame:
-        """Convert a comparative income statement to an exportable table."""
+    def comparative_income_statement_to_dataframe(
+        report: Dict, *, grouped: bool = True
+    ) -> pd.DataFrame:
+        """Convert a comparative, multi-step income statement for export."""
         rows = []
 
-        def append_section(title, items, total_label, total):
-            rows.append({'Item': title, 'Current': '', 'Prior Year': '',
-                         'Change': '', 'Change %': ''})
-            for item in items:
-                rows.append({
-                    'Item': f"  {item['account_number']} - {item['name']}",
-                    'Current': item['current'],
-                    'Prior Year': '' if item['prior'] is None else item['prior'],
-                    'Change': '' if item['change'] is None else item['change'],
-                    'Change %': ('' if item['change_percent'] is None
-                                 else item['change_percent']),
-                })
-            rows.append({
-                'Item': total_label,
-                'Current': total['current'],
-                'Prior Year': '' if total['prior'] is None else total['prior'],
-                'Change': '' if total['change'] is None else total['change'],
-                'Change %': ('' if total['change_percent'] is None
-                             else total['change_percent']),
-            })
+        def values(item):
+            return {
+                'Current': item['current'],
+                'Prior Year': '' if item['prior'] is None else item['prior'],
+                'Change': '' if item['change'] is None else item['change'],
+                'Change %': ('' if item['change_percent'] is None
+                             else item['change_percent']),
+            }
 
-        append_section('REVENUE', report['revenues'], 'Total Revenue',
-                       report['total_revenue'])
-        rows.append({'Item': ''})
-        append_section('EXPENSES', report['expenses'], 'Total Expenses',
-                       report['total_expenses'])
-        rows.append({'Item': ''})
-        total = report['net_income']
-        rows.append({
-            'Item': 'NET INCOME', 'Current': total['current'],
-            'Prior Year': '' if total['prior'] is None else total['prior'],
-            'Change': '' if total['change'] is None else total['change'],
-            'Change %': ('' if total['change_percent'] is None
-                         else total['change_percent']),
-        })
+        for kind, label, value in ReportGenerator.income_statement_rows(
+            report, grouped=grouped
+        ):
+            label = ReportGenerator._income_statement_export_label(label)
+            prefix = (
+                '    ' if kind == 'item'
+                else '  ' if kind in {'group', 'group_total', 'note'}
+                else ''
+            )
+            row = {'Item': f"{prefix}{label}"}
+            if value is not None:
+                row.update(values(value))
+            rows.append(row)
         return pd.DataFrame(rows)
 
     @staticmethod
-    def comparative_balance_sheet_to_dataframe(report: Dict) -> pd.DataFrame:
+    def comparative_balance_sheet_to_dataframe(
+        report: Dict, *, grouped: bool = True
+    ) -> pd.DataFrame:
         """Convert a comparative balance sheet to an exportable table."""
         rows = []
 
-        def append_section(title, items, total_label, total):
+        def append_section(title, groups, items, total_label, total):
             rows.append({'Item': title, 'Current': '', 'Prior Year': '',
                          'Change': '', 'Change %': ''})
-            for item in items:
-                number = item['account_number']
-                rows.append({
-                    'Item': f"  {number} - {item['name']}" if number
-                            else f"  {item['name']}",
-                    'Current': item['current'],
-                    'Prior Year': '' if item['prior'] is None else item['prior'],
-                    'Change': '' if item['change'] is None else item['change'],
-                    'Change %': ('' if item['change_percent'] is None
-                                 else item['change_percent']),
-                })
+            display_groups = groups if grouped else [{
+                'group': None, 'accounts': items, 'subtotal': None,
+            }]
+            for group in display_groups:
+                if grouped:
+                    rows.append({'Item': f"  {group['group']}"})
+                for item in group['accounts']:
+                    number = item['account_number']
+                    rows.append({
+                        'Item': (
+                            f"    {number} - {item['name']}" if grouped and number
+                            else f"    {item['name']}" if grouped
+                            else f"  {number} - {item['name']}" if number
+                            else f"  {item['name']}"
+                        ),
+                        'Current': item['current'],
+                        'Prior Year': '' if item['prior'] is None else item['prior'],
+                        'Change': '' if item['change'] is None else item['change'],
+                        'Change %': ('' if item['change_percent'] is None
+                                     else item['change_percent']),
+                    })
+                if grouped:
+                    subtotal = group['subtotal']
+                    rows.append({
+                        'Item': f"  Total {group['group']}",
+                        'Current': subtotal['current'],
+                        'Prior Year': ('' if subtotal['prior'] is None
+                                       else subtotal['prior']),
+                        'Change': ('' if subtotal['change'] is None
+                                   else subtotal['change']),
+                        'Change %': ('' if subtotal['change_percent'] is None
+                                     else subtotal['change_percent']),
+                    })
             rows.append({
                 'Item': total_label, 'Current': total['current'],
                 'Prior Year': '' if total['prior'] is None else total['prior'],
@@ -1069,14 +2264,15 @@ class ReportGenerator:
                              else total['change_percent']),
             })
 
-        append_section('ASSETS', report['assets'], 'Total Assets',
-                       report['total_assets'])
+        append_section('ASSETS', report['asset_groups'], report['assets'],
+                       'Total Assets', report['total_assets'])
         rows.append({'Item': ''})
-        append_section('LIABILITIES', report['liabilities'], 'Total Liabilities',
+        append_section('LIABILITIES', report['liability_groups'],
+                       report['liabilities'], 'Total Liabilities',
                        report['total_liabilities'])
         rows.append({'Item': ''})
-        append_section('EQUITY', report['equity'], 'Total Equity',
-                       report['total_equity'])
+        append_section('EQUITY', report['equity_groups'], report['equity'],
+                       'Total Equity', report['total_equity'])
         rows.append({'Item': ''})
         total = report['total_liabilities_equity']
         rows.append({
@@ -1086,6 +2282,237 @@ class ReportGenerator:
             'Change %': ('' if total['change_percent'] is None
                          else total['change_percent']),
         })
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def cash_flow_statement_to_dataframe(report: Dict) -> pd.DataFrame:
+        """Convert cash flow plus its readiness disclosures for export."""
+        rows = []
+
+        def append_section(title, section, total_label):
+            rows.append({'Item': title, 'Amount': ''})
+            for line in section['lines']:
+                rows.append({'Item': f"  {line['name']}", 'Amount': line['amount']})
+            rows.append({'Item': total_label, 'Amount': section['total']})
+
+        append_section(
+            'OPERATING ACTIVITIES', report['operating'],
+            'Net Cash Provided by Operating Activities',
+        )
+        rows.append({'Item': '', 'Amount': ''})
+        append_section(
+            'INVESTING ACTIVITIES', report['investing'],
+            'Net Cash Provided by Investing Activities',
+        )
+        rows.append({'Item': '', 'Amount': ''})
+        append_section(
+            'FINANCING ACTIVITIES', report['financing'],
+            'Net Cash Provided by Financing Activities',
+        )
+        unclassified_entries = report['unclassified']['entries']
+        if report['unclassified']['lines'] or unclassified_entries:
+            rows.append({'Item': '', 'Amount': ''})
+            append_section(
+                'UNCLASSIFIED CASH ACTIVITY', report['unclassified'],
+                'Net Unclassified Cash Activity',
+            )
+        rows.extend([
+            {'Item': '', 'Amount': ''},
+            {'Item': 'NET CHANGE IN CASH', 'Amount': report['computed_cash_change']},
+            {'Item': 'Cash at Beginning of Period', 'Amount': report['cash_beginning']},
+            {'Item': 'CASH AT END OF PERIOD', 'Amount': report['cash_ending']},
+            {'Item': 'Reconciliation Difference',
+             'Amount': report['reconciliation_difference']},
+            {'Item': 'Operating Reconciliation Difference',
+             'Amount': report['operating']['reconciliation_difference']},
+            {'Item': '', 'Amount': ''},
+            {'Item': 'STATUS',
+             'Amount': 'READY' if report['ready'] else 'REVIEW WARNINGS'},
+            {'Item': 'Cash Tie-Out',
+             'Amount': 'PASS' if report['ties'] else 'REVIEW'},
+            {'Item': 'Operating Reconciliation',
+             'Amount': 'PASS' if report['operating_reconciled'] else 'REVIEW'},
+            {'Item': 'Classification',
+             'Amount': 'PASS' if report['classification_complete'] else 'REVIEW'},
+        ])
+        rows.extend(
+            {'Item': f"Warning: {warning}", 'Amount': ''}
+            for warning in report['warnings']
+        )
+        if unclassified_entries:
+            rows.extend([
+                {'Item': '', 'Amount': ''},
+                {'Item': 'UNCLASSIFIED ENTRY DETAILS', 'Amount': ''},
+            ])
+            for entry in unclassified_entries:
+                accounts = ', '.join(entry['account_numbers']) or 'none'
+                description = entry['description'] or 'No description'
+                rows.append({
+                    'Item': (
+                        f"  {entry['entry_date']} · Entry #{entry['entry_id']} · "
+                        f"{entry['reason']} · {description} · Accounts {accounts}"
+                    ),
+                    'Amount': entry['amount'],
+                })
+        if report['noncash_items']:
+            rows.extend([
+                {'Item': '', 'Amount': ''},
+                {'Item': 'NONCASH INVESTING AND FINANCING ACTIVITY', 'Amount': ''},
+            ])
+            for entry in report['noncash_items']:
+                rows.append({
+                    'Item': (
+                        f"  {entry['entry_date']} · Entry #{entry['entry_id']} · "
+                        f"{entry['description'] or 'No description'} · "
+                        f"Accounts {', '.join(entry['accounts'])}"
+                    ),
+                    'Amount': entry['amount'],
+                })
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def comparative_cash_flow_statement_to_dataframe(report: Dict) -> pd.DataFrame:
+        """Convert a current/PY cash flow statement to an exportable table."""
+        rows = []
+
+        def values(item):
+            return {
+                'Current': item['current'],
+                'Prior Year': '' if item['prior'] is None else item['prior'],
+                'Change': '' if item['change'] is None else item['change'],
+                'Change %': ('' if item['change_percent'] is None
+                             else item['change_percent']),
+            }
+
+        def append_section(title, section, total_label):
+            rows.append({'Item': title})
+            for line in section['lines']:
+                rows.append({'Item': f"  {line['name']}", **values(line)})
+            rows.append({'Item': total_label, **values(section['total'])})
+
+        append_section(
+            'OPERATING ACTIVITIES', report['operating'],
+            'Net Cash Provided by Operating Activities',
+        )
+        rows.append({'Item': ''})
+        append_section(
+            'INVESTING ACTIVITIES', report['investing'],
+            'Net Cash Provided by Investing Activities',
+        )
+        rows.append({'Item': ''})
+        append_section(
+            'FINANCING ACTIVITIES', report['financing'],
+            'Net Cash Provided by Financing Activities',
+        )
+        current_entries = report['unclassified']['current_entries']
+        prior_entries = report['unclassified']['prior_entries']
+        if report['unclassified']['lines'] or current_entries or prior_entries:
+            rows.append({'Item': ''})
+            append_section(
+                'UNCLASSIFIED CASH ACTIVITY', report['unclassified'],
+                'Net Unclassified Cash Activity',
+            )
+        rows.extend([
+            {'Item': ''},
+            {'Item': 'NET CHANGE IN CASH', **values(report['computed_cash_change'])},
+            {'Item': 'Cash at Beginning of Period', **values(report['cash_beginning'])},
+            {'Item': 'CASH AT END OF PERIOD', **values(report['cash_ending'])},
+            {'Item': 'Reconciliation Difference',
+             **values(report['reconciliation_difference'])},
+        ])
+        rows.extend([
+            {'Item': 'Operating Reconciliation Difference',
+             **values(report['operating']['reconciliation_difference'])},
+            {'Item': ''},
+            {
+                'Item': 'STATUS',
+                'Current': ('READY' if report['current_ready']
+                            else 'REVIEW WARNINGS'),
+                'Prior Year': (
+                    '' if not report['prior_available'] else
+                    ('READY' if report['prior_ready'] else 'REVIEW WARNINGS')
+                ),
+            },
+            {
+                'Item': 'Cash Tie-Out',
+                'Current': 'PASS' if report['current_ties'] else 'REVIEW',
+                'Prior Year': (
+                    '' if report['prior_ties'] is None else
+                    ('PASS' if report['prior_ties'] else 'REVIEW')
+                ),
+            },
+            {
+                'Item': 'Operating Reconciliation',
+                'Current': ('PASS' if report['current_operating_reconciled']
+                            else 'REVIEW'),
+                'Prior Year': (
+                    '' if report['prior_operating_reconciled'] is None else
+                    ('PASS' if report['prior_operating_reconciled'] else 'REVIEW')
+                ),
+            },
+            {
+                'Item': 'Classification',
+                'Current': ('PASS' if report['current_classification_complete']
+                            else 'REVIEW'),
+                'Prior Year': (
+                    '' if report['prior_classification_complete'] is None else
+                    ('PASS' if report['prior_classification_complete'] else 'REVIEW')
+                ),
+            },
+        ])
+        rows.extend(
+            {'Item': f"Current warning: {warning}"}
+            for warning in report['current_warnings']
+        )
+        rows.extend(
+            {'Item': f"Prior-year warning: {warning}"}
+            for warning in report['prior_warnings']
+        )
+
+        def append_entry_details(title, entries, amount_column):
+            if not entries:
+                return
+            rows.extend([{'Item': ''}, {'Item': title}])
+            for entry in entries:
+                accounts = ', '.join(entry['account_numbers']) or 'none'
+                description = entry['description'] or 'No description'
+                rows.append({
+                    'Item': (
+                        f"  {entry['entry_date']} · Entry #{entry['entry_id']} · "
+                        f"{entry['reason']} · {description} · Accounts {accounts}"
+                    ),
+                    amount_column: entry['amount'],
+                })
+
+        append_entry_details(
+            'CURRENT UNCLASSIFIED ENTRY DETAILS', current_entries, 'Current'
+        )
+        append_entry_details(
+            'PRIOR-YEAR UNCLASSIFIED ENTRY DETAILS', prior_entries, 'Prior Year'
+        )
+
+        def append_noncash_details(title, entries, amount_column):
+            if not entries:
+                return
+            rows.extend([{'Item': ''}, {'Item': title}])
+            for entry in entries:
+                rows.append({
+                    'Item': (
+                        f"  {entry['entry_date']} · Entry #{entry['entry_id']} · "
+                        f"{entry['description'] or 'No description'} · "
+                        f"Accounts {', '.join(entry['accounts'])}"
+                    ),
+                    amount_column: entry['amount'],
+                })
+
+        append_noncash_details(
+            'CURRENT NONCASH INVESTING AND FINANCING ACTIVITY',
+            report['current_noncash_items'], 'Current',
+        )
+        append_noncash_details(
+            'PRIOR-YEAR NONCASH INVESTING AND FINANCING ACTIVITY',
+            report['prior_noncash_items'], 'Prior Year',
+        )
         return pd.DataFrame(rows)
 
     @staticmethod

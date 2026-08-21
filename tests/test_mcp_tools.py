@@ -71,10 +71,21 @@ def test_statements_and_ledger(client_id, accounts):
     assert inc["total_revenue"] == 500.0
     assert inc["total_expenses"] == 120.0
     assert inc["net_income"] == 380.0
+    assert inc["revenue_groups"][0]["key"] == "unclassified"
+    assert inc["revenue_groups"][0]["subtotal"] == 500.0
 
     bs = mcp_tools.balance_sheet(client_id, "2026-12-31")
     assert bs["balanced"] is True
     assert bs["total_assets"] == 380.0
+    assert bs["asset_groups"][0]["key"] == "current_assets"
+
+    cash_flow = mcp_tools.cash_flow_statement(
+        client_id, "2026-01-01", "2026-12-31"
+    )
+    assert cash_flow["actual_cash_change"] == 380.0
+    assert cash_flow["operating"]["total"] == 380.0
+    assert cash_flow["ties"] is True
+    assert cash_flow["ready"] is True
 
     from models.account import Account
     cash_number = Account.get_by_id(accounts["cash"], client_id=client_id).account_number

@@ -1,4 +1,6 @@
 """The close package must tie to the books it summarizes."""
+from copy import deepcopy
+from dataclasses import replace
 from datetime import date
 from io import BytesIO
 
@@ -7,7 +9,9 @@ import pytest
 
 import pypdfium2 as pdfium
 
+from constants import AccountSubtype
 from models.reports import ReportGenerator
+from models.account import Account
 from models.journal_entry import JournalEntry, JournalEntryLine
 from services.close_package import (
     build_close_package,
@@ -71,6 +75,7 @@ def test_workbook_sheets_and_tie_outs(booked_period, accounts):
     assert wb.sheetnames == [
         "Summary", "Income Statement", "Balance Sheet", "Trial Balance",
         "Transactions", "Adjusting Entries", "Receipts & Disbursements",
+        "Cash Flow",
     ]
 
     # Core financial statements are part of the package, not separate exports.
@@ -91,6 +96,15 @@ def test_workbook_sheets_and_tie_outs(booked_period, accounts):
     assert balance_values["Total Assets"] == pytest.approx(690.0)
     assert balance_values["TOTAL LIABILITIES & EQUITY"] == pytest.approx(690.0)
     assert balance_values["BALANCE CHECK"] == pytest.approx(0.0)
+
+    cash_flow = wb["Cash Flow"]
+    cash_flow_values = {
+        cash_flow.cell(row=i, column=1).value: cash_flow.cell(row=i, column=2).value
+        for i in range(1, cash_flow.max_row + 1)
+    }
+    assert cash_flow_values["NET CHANGE IN CASH"] == pytest.approx(190.0)
+    assert cash_flow_values["CASH AT END OF PERIOD"] == pytest.approx(690.0)
+    assert cash_flow_values["STATUS"] == "READY"
 
     # Every supporting-table header must fit its Excel column. This guards the
     # close package against unreadable Activity/AJE/receipt headers.
@@ -125,7 +139,7 @@ def test_workbook_sheets_and_tie_outs(booked_period, accounts):
     cells = {summary.cell(row=i, column=1).value: summary.cell(row=i, column=2).value
              for i in range(1, summary.max_row + 1)}
     assert cells["In balance"] == "YES"
-    assert cells["Final trial balance — total debits"] == pytest.approx(
+    assert cells["Final trial balance - total debits"] == pytest.approx(
         sum(r.adjusted_dr for r in tb_rows)
     )
 
@@ -192,8 +206,224 @@ def test_close_package_includes_line_by_line_prior_year_comparisons(
         assert "Prior Year" in text
         assert "Prior period:" in text
         assert "PY Final Dr" in text
+        assert "CASH AT BEGINNING OF PERIOD" in text
     finally:
         doc.close()
+
+
+def test_close_package_renders_curated_statement_groups(client_id, accounts):
+    def make(number, name, account_type, subtype):
+        account = Account(
+            client_id=client_id, account_number=number, name=name,
+            type=account_type, subtype=subtype,
+        )
+        account.save()
+        return account.id
+
+    fixed_asset = make("1500", "Equipment", "Asset", "Fixed Asset")
+    contribution = make(
+        "3100", "Owner Contribution", "Equity", "Owner Contribution"
+    )
+    revenue = make(
+        "4100", "Product Revenue", "Revenue", "Operating Revenue"
+    )
+    cogs = make(
+        "5100", "Product Costs", "Expense", "Cost of Goods Sold"
+    )
+    operating_expense = make(
+        "6100", "Rent Expense", "Expense", "Operating Expense"
+    )
+
+    post_entry(client_id, date(2026, 1, 2), [
+        (accounts["cash"], 500, 0), (contribution, 0, 500),
+    ])
+    post_entry(client_id, date(2026, 1, 15), [
+        (accounts["cash"], 300, 0), (revenue, 0, 300),
+    ])
+    post_entry(client_id, date(2026, 1, 16), [
+        (cogs, 100, 0), (accounts["cash"], 0, 100),
+    ])
+    post_entry(client_id, date(2026, 1, 17), [
+        (operating_expense, 50, 0), (accounts["cash"], 0, 50),
+    ])
+    post_entry(client_id, date(2026, 1, 18), [
+        (fixed_asset, 100, 0), (accounts["cash"], 0, 100),
+    ])
+
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+    snapshot = load_close_package_snapshot(client_id, *Q1)
+    package = build_close_package(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    )
+    wb = openpyxl.load_workbook(BytesIO(package.read()))
+
+    income = wb["Income Statement"]
+    income_rows = {
+        income.cell(row, 1).value: income.cell(row, 2).value
+        for row in range(1, income.max_row + 1)
+    }
+    assert income_rows["  Operating Revenue"] is None
+    assert income_rows["  Total Operating Revenue"] == pytest.approx(300)
+    assert income_rows["  Cost of Goods Sold"] is None
+    assert income_rows["Gross Profit"] == pytest.approx(200)
+    assert income_rows["Operating Income"] == pytest.approx(150)
+
+    balance = wb["Balance Sheet"]
+    balance_rows = {
+        balance.cell(row, 1).value: balance.cell(row, 2).value
+        for row in range(1, balance.max_row + 1)
+    }
+    assert balance_rows["  Current Assets"] is None
+    assert balance_rows["  Total Current Assets"] == pytest.approx(550)
+    assert balance_rows["  Property and Equipment, Net"] is None
+    assert balance_rows["  Total Property and Equipment, Net"] == pytest.approx(100)
+    assert balance_rows["  Contributed Capital"] is None
+
+    pdf = build_close_package_pdf(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    )
+    doc = pdfium.PdfDocument(pdf.read())
+    try:
+        text = "\n".join(
+            doc[index].get_textpage().get_text_range()
+            for index in range(len(doc))
+        )
+        for label in [
+            "Operating Revenue", "Cost of Goods Sold", "Gross Profit",
+            "Operating Income", "Current Assets",
+            "Property and Equipment, Net", "Contributed Capital",
+        ]:
+            assert label in text
+    finally:
+        doc.close()
+
+
+def test_close_package_discloses_offsetting_unclassified_cash_entries(
+    client_id, accounts
+):
+    suspense = Account(
+        client_id=client_id, account_number="1999", name="Legacy Suspense",
+        type="Asset", subtype=None,
+    )
+    suspense.save()
+    post_entry(client_id, date(2026, 1, 10), [
+        (suspense.id, 100, 0), (accounts["cash"], 0, 100),
+    ])
+    post_entry(client_id, date(2026, 1, 20), [
+        (accounts["cash"], 100, 0), (suspense.id, 0, 100),
+    ])
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+    snapshot = load_close_package_snapshot(client_id, *Q1)
+
+    workbook = openpyxl.load_workbook(BytesIO(build_close_package(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read()))
+    sheet = workbook["Cash Flow"]
+    labels = [sheet.cell(row, 1).value for row in range(1, sheet.max_row + 1)]
+    assert "CURRENT UNCLASSIFIED ENTRY DETAILS" in labels
+    assert sum(
+        isinstance(label, str)
+        and "counterpart account needs a statement subtype" in label
+        for label in labels
+    ) == 2
+
+    document = pdfium.PdfDocument(build_close_package_pdf(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read())
+    try:
+        text = "\n".join(
+            document[index].get_textpage().get_text_range()
+            for index in range(len(document))
+        )
+        assert "Unclassified Cash Activity Details" in text
+        assert text.count("counterpart account needs a statement subtype") == 2
+    finally:
+        document.close()
+
+
+def test_close_package_discloses_noncash_amount_in_excel_and_pdf(
+    client_id, accounts
+):
+    equipment = Account(
+        client_id=client_id, account_number="1500", name="Equipment",
+        type="Asset", subtype=AccountSubtype.FIXED_ASSET,
+    )
+    equipment.save()
+    debt = Account(
+        client_id=client_id, account_number="2500", name="Equipment Note",
+        type="Liability", subtype=AccountSubtype.LONG_TERM_LIABILITY,
+    )
+    debt.save()
+    post_entry(client_id, date(2026, 2, 1), [
+        (equipment.id, 500, 0), (debt.id, 0, 500),
+    ])
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+    snapshot = load_close_package_snapshot(client_id, *Q1)
+
+    workbook = openpyxl.load_workbook(BytesIO(build_close_package(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read()))
+    sheet = workbook["Cash Flow"]
+    heading_row = next(
+        row for row in range(1, sheet.max_row + 1)
+        if sheet.cell(row, 1).value
+        == "CURRENT NONCASH INVESTING AND FINANCING ACTIVITY"
+    )
+    assert sheet.cell(heading_row + 1, 2).value == pytest.approx(500)
+
+    document = pdfium.PdfDocument(build_close_package_pdf(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read())
+    try:
+        text = "\n".join(
+            document[index].get_textpage().get_text_range()
+            for index in range(len(document))
+        )
+        assert "Noncash Investing and Financing Activity" in text
+        assert "500.00" in text
+    finally:
+        document.close()
+
+
+def test_close_package_prints_cash_flow_reconciliation_difference(
+    booked_period, accounts
+):
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(booked_period, *Q1)
+    snapshot = load_close_package_snapshot(booked_period, *Q1)
+    cash_flow = deepcopy(snapshot.cash_flow)
+    comparative = deepcopy(snapshot.comparative_cash_flow)
+    cash_flow["reconciliation_difference"] = 25
+    cash_flow["ties"] = False
+    cash_flow["ready"] = False
+    comparative["reconciliation_difference"]["current"] = 25
+    comparative["current_ties"] = False
+    comparative["current_ready"] = False
+    snapshot = replace(
+        snapshot, cash_flow=cash_flow, comparative_cash_flow=comparative
+    )
+
+    workbook = openpyxl.load_workbook(BytesIO(build_close_package(
+        booked_period, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read()))
+    sheet = workbook["Cash Flow"]
+    values = {
+        sheet.cell(row, 1).value: sheet.cell(row, 2).value
+        for row in range(1, sheet.max_row + 1)
+    }
+    assert values["CASH FLOW RECONCILIATION DIFFERENCE"] == pytest.approx(25)
+
+    document = pdfium.PdfDocument(build_close_package_pdf(
+        booked_period, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read())
+    try:
+        text = "\n".join(
+            document[index].get_textpage().get_text_range()
+            for index in range(len(document))
+        )
+        assert "CASH FLOW RECONCILIATION DIFFERENCE" in text
+        assert "25.00" in text
+    finally:
+        document.close()
 
 
 def test_annual_close_package_includes_close_map(client_id, accounts):
@@ -350,6 +580,7 @@ def test_pdf_package_contains_every_section(booked_period, accounts):
         text = "\n".join(pages)
         for heading in ["Close Package", "Summary", "Cash Activity",
                         "Income Statement", "Balance Sheet",
+                        "Statement of Cash Flows",
                         "Final Trial Balance", "Transactions",
                         "Adjusting Journal Entries"]:
             assert heading in text, f"missing section {heading!r}"
@@ -359,10 +590,31 @@ def test_pdf_package_contains_every_section(booked_period, accounts):
         assert "240.00" in text          # total revenue
         assert "190.00" in text          # net income
         assert "Balance sheet is in balance." in text
+        assert "CASH AT BEGINNING OF PERIOD" in text
         assert "TOTALS" in text
         assert len(doc) >= 6
     finally:
         doc.close()
+
+
+def test_snapshot_reuses_current_cash_flow_when_building_comparison(
+    booked_period, monkeypatch
+):
+    original = ReportGenerator.cash_flow_statement
+    calls = []
+
+    def counted(client_id, start_date, end_date):
+        calls.append((start_date, end_date))
+        return original(client_id, start_date, end_date)
+
+    monkeypatch.setattr(
+        ReportGenerator, "cash_flow_statement", staticmethod(counted)
+    )
+    load_close_package_snapshot(booked_period, *Q1)
+    assert calls == [
+        Q1,
+        (date(2025, 1, 1), date(2025, 3, 31)),
+    ]
 
 
 def test_pdf_and_excel_can_share_one_captured_snapshot(

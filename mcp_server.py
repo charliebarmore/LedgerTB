@@ -244,6 +244,19 @@ def balance_sheet(client_id: int, as_of: str,
 
 
 @server.tool()
+def cash_flow_statement(client_id: int, start: str, end: str,
+                        compare_to_prior_year: bool = False) -> dict:
+    """Derived indirect-method cash flow for an ISO date range. Returns
+    operating, investing, financing, and explicitly unclassified activity;
+    cash tie-out, operating-reconciliation, and classification-quality flags;
+    plus optional prior-year comparison. Review warnings before relying on it."""
+    _require_level("read")
+    return mcp_tools.cash_flow_statement(
+        client_id, start, end, compare_to_prior_year
+    )
+
+
+@server.tool()
 def general_ledger(client_id: int, account_number: str,
                    start: str = "", end: str = "") -> dict:
     """One account's ledger for a period: dated entries with running balance.

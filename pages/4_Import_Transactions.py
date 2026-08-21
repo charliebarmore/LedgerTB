@@ -32,6 +32,7 @@ from services.document_import import (
     extract_document, parse_statement_text, parse_statement_with_ai,
 )
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+from constants import AccountSubtype
 from database import init_database
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
@@ -136,8 +137,15 @@ if 'document_transactions' not in st.session_state:
 
 # Get accounts - include credit cards and other liability accounts for imports
 accounts = Account.get_all(client_id, active_only=True)
-cash_accounts = [a for a in accounts if a.subtype == 'Cash']
-credit_card_accounts = [a for a in accounts if a.subtype == 'Payable' and 'credit card' in a.name.lower()]
+cash_accounts = [
+    a for a in accounts
+    if AccountSubtype.resolve(a.type, a.subtype, a.name) == AccountSubtype.CASH
+]
+credit_card_accounts = [
+    a for a in accounts
+    if AccountSubtype.resolve(a.type, a.subtype, a.name)
+    == AccountSubtype.CREDIT_CARD
+]
 # Combine cash and credit card accounts for bank account selection
 importable_accounts = cash_accounts + credit_card_accounts
 expense_accounts = [a for a in accounts if a.type == 'Expense']
@@ -282,11 +290,28 @@ if selected_tab == "Upload CSV":
 
                 # Quick add new account
                 with st.expander("+ Add New Account"):
+                    new_acct_type = st.selectbox(
+                        "Type",
+                        options=['Asset', 'Liability'],
+                        key="quick_add_bank_account_type",
+                    )
+                    bank_subtype_key = "quick_add_bank_account_subtype"
+                    bank_subtype_scope_key = f"{bank_subtype_key}_scope"
+                    if (
+                        st.session_state.get(bank_subtype_scope_key)
+                        != new_acct_type
+                    ):
+                        st.session_state[bank_subtype_scope_key] = new_acct_type
+                        st.session_state[bank_subtype_key] = None
                     with st.form("quick_add_bank_account", clear_on_submit=True):
                         new_acct_number = st.text_input("Account Number", placeholder="e.g., 1010")
                         new_acct_name = st.text_input("Account Name", placeholder="e.g., Chase Checking")
-                        new_acct_type = st.selectbox("Type", options=['Asset', 'Liability'])
-                        new_acct_subtype = st.text_input("Subtype (optional)", placeholder="e.g., Cash")
+                        new_acct_subtype = st.selectbox(
+                            "Statement Subtype (optional)",
+                            options=[None] + AccountSubtype.for_type(new_acct_type),
+                            format_func=lambda value: value or "Review later",
+                            key=bank_subtype_key,
+                        )
                         new_acct_desc = st.text_input("Description (optional)", placeholder="e.g., ****1234")
 
                         if st.form_submit_button("Add Account", type="primary"):
@@ -297,7 +322,7 @@ if selected_tab == "Upload CSV":
                                         account_number=new_acct_number,
                                         name=new_acct_name,
                                         type=new_acct_type,
-                                        subtype=new_acct_subtype if new_acct_subtype else None,
+                                        subtype=new_acct_subtype,
                                         description=new_acct_desc if new_acct_desc else None
                                     )
                                     new_account.save()
@@ -1465,7 +1490,7 @@ elif selected_tab == "Review & Categorize":
             number = (st.session_state.get(_fkey("number", target_key)) or "").strip()
             name = (st.session_state.get(_fkey("name", target_key)) or "").strip()
             acct_type = st.session_state.get(_fkey("type", target_key)) or "Expense"
-            subtype = (st.session_state.get(_fkey("subtype", target_key)) or "").strip()
+            subtype = st.session_state.get(_fkey("subtype", target_key))
             if not number or not name:
                 st.session_state.quick_add_account_error = "Account number and name are both required."
                 return
@@ -1475,7 +1500,7 @@ elif selected_tab == "Review & Categorize":
                     account_number=number,
                     name=name,
                     type=acct_type,
-                    subtype=subtype or None,
+                    subtype=subtype,
                 )
                 new_id = account.save()
             except Exception as exc:
@@ -1507,11 +1532,27 @@ elif selected_tab == "Review & Categorize":
                 with c2:
                     st.text_input("Name", key=_fkey("name", target_key), placeholder="Office Supplies")
                 with c3:
-                    st.selectbox("Type", options=['Expense', 'Revenue', 'Asset', 'Liability', 'Equity'],
-                                 key=_fkey("type", target_key),
-                                 help="Most transaction categories are Expense or Revenue")
+                    quick_type = st.selectbox(
+                        "Type",
+                        options=['Expense', 'Revenue', 'Asset', 'Liability', 'Equity'],
+                        key=_fkey("type", target_key),
+                        help="Most transaction categories are Expense or Revenue",
+                    )
                 with c4:
-                    st.text_input("Subtype (optional)", key=_fkey("subtype", target_key))
+                    subtype_key = _fkey("subtype", target_key)
+                    subtype_scope_key = f"{subtype_key}_scope"
+                    if (
+                        st.session_state.get(subtype_scope_key)
+                        != quick_type
+                    ):
+                        st.session_state[subtype_scope_key] = quick_type
+                        st.session_state[subtype_key] = None
+                    st.selectbox(
+                        "Statement Subtype",
+                        options=[None] + AccountSubtype.for_type(quick_type),
+                        key=subtype_key,
+                        format_func=lambda value: value or "Review later",
+                    )
                 if st.session_state.get("quick_add_account_error"):
                     st.error(st.session_state.pop("quick_add_account_error"))
                 b1, b2, _ = st.columns([1, 1, 4])

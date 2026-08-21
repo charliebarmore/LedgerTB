@@ -1,5 +1,7 @@
 import sqlite3
 
+from constants import AccountSubtype
+
 
 # Entity type definitions (legal structure)
 ENTITY_TYPES = {
@@ -435,6 +437,22 @@ def get_accounts_for_client(entity_type: str, business_type: str) -> list:
         if account[0] not in seen:
             seen.add(account[0])
             unique_accounts.append(account)
+
+    # New books use the curated statement vocabulary even though these source
+    # templates retain their older, more granular labels for compatibility and
+    # readability. Known aliases are canonicalized here; nothing touches an
+    # existing book until its user explicitly reviews that chart.
+    unique_accounts = [
+        (
+            number,
+            name,
+            account_type,
+            AccountSubtype.normalize_for_storage(
+                account_type, subtype, account_name=name
+            ),
+        )
+        for number, name, account_type, subtype in unique_accounts
+    ]
 
     # Sort by account number
     unique_accounts.sort(key=lambda x: x[0])

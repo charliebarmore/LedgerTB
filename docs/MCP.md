@@ -156,3 +156,11 @@ directly (append-only, audited). Try: *"Here's my July bank statement PDF — st
 transactions into account 1001"* or *"Propose the accrual for the July
 retainer and explain your accounts."* Everything waits for you in the
 app.
+
+Financial-statement tools retain their original flat account arrays and totals
+and also return additive grouped sections. `cash_flow_statement` returns a
+derived indirect-method statement for a date range, optionally compared with
+the prior year. Treat its three quality fields separately: `ties` proves the
+cash arithmetic, `operating_reconciled` proves the indirect operating bridge,
+and `classification_complete` proves that no cash-affecting entry remains in
+the explicit unclassified section. `ready` is true only when all three pass.

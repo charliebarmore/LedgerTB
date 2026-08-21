@@ -78,7 +78,10 @@ def gl_drill_down(options, key, start_date, end_date):
 if 'active_report' not in st.session_state:
     st.session_state.active_report = "Trial Balance"
 
-report_options = ["Trial Balance", "Income Statement", "Balance Sheet", "General Ledger"]
+report_options = [
+    "Trial Balance", "Income Statement", "Balance Sheet", "Cash Flow",
+    "General Ledger",
+]
 
 # Report selector (segmented tabs; programmatically controllable via
 # st.session_state.active_report from the sidebar quick links and GL drills).
@@ -219,6 +222,28 @@ elif selected_report == "Income Statement":
     if not report['prior_available']:
         st.caption("No prior-year book history is available for this period.")
 
+    has_unclassified_is = any(
+        group['key'] == 'unclassified'
+        for group in report['revenue_groups'] + report['expense_groups']
+    )
+    apply_default_on_change(
+        "is_group_subtypes",
+        (client_id, is_start, is_end, has_unclassified_is),
+        not has_unclassified_is,
+    )
+    group_is = st.toggle(
+        "Group by statement subtype",
+        key="is_group_subtypes",
+        help=("Turn this off for the familiar flat statement. Accounts need a "
+              "curated subtype before the grouped statement is fully useful."),
+    )
+    if has_unclassified_is and not group_is:
+        st.info(
+            "This statement is using the classic layout because one or more "
+            "accounts still need a statement subtype. Review them on the Chart "
+            "of Accounts page when you are ready to use grouped statements."
+        )
+
     # Get accounts for drill-down
     accounts = Account.get_all(client_id, active_only=False)
     account_id_lookup = {a.account_number: a.id for a in accounts}
@@ -242,28 +267,40 @@ elif selected_report == "Income Statement":
         else [item for item in report['expenses'] if item['current'] != 0]
     )
 
-    statement_rows = [("section", "Revenue", [])]
-    if revenue_lines:
-        statement_rows += [
-            ("item", f"{r['account_number']} - {r['name']}", _amounts(r))
-            for r in revenue_lines
-        ]
-    else:
-        statement_rows.append(("note", "No revenue recorded", []))
-    statement_rows.append(("subtotal", "Total Revenue",
-                           _amounts(report['total_revenue'])))
+    def _visible_is_groups(groups):
+        visible = []
+        for group in groups:
+            accounts = (
+                group['accounts'] if compare_py else
+                [item for item in group['accounts'] if item['current'] != 0]
+            )
+            if accounts:
+                visible.append({**group, 'accounts': accounts})
+        return visible
 
-    statement_rows.append(("section", "Expenses", []))
-    if expense_lines:
-        statement_rows += [
-            ("item", f"{e['account_number']} - {e['name']}", _amounts(e))
-            for e in expense_lines
-        ]
-    else:
-        statement_rows.append(("note", "No expenses recorded", []))
-    statement_rows.append(("subtotal", "Total Expenses",
-                           _amounts(report['total_expenses'])))
-    statement_rows.append(("total", "Net Income", _amounts(report['net_income'])))
+    revenue_groups = _visible_is_groups(report['revenue_groups'])
+    expense_groups = _visible_is_groups(report['expense_groups'])
+    for warning in report.get('statement_warnings', ()):
+        st.warning(warning)
+
+    layout_report = {
+        **report,
+        'revenues': revenue_lines,
+        'expenses': expense_lines,
+        'revenue_groups': revenue_groups,
+        'expense_groups': expense_groups,
+        # The warning is already shown with warning styling above the table.
+        'statement_warnings': [],
+    }
+    statement_rows = []
+    for kind, label, value in ReportGenerator.income_statement_rows(
+        layout_report, grouped=group_is
+    ):
+        statement_rows.append((
+            'subtotal' if kind == 'group_total' else kind,
+            label,
+            [] if value is None else _amounts(value),
+        ))
 
     financial_statement(
         statement_rows,
@@ -289,9 +326,12 @@ elif selected_report == "Income Statement":
     # Export
     st.divider()
     df = (
-        ReportGenerator.comparative_income_statement_to_dataframe(report)
+        ReportGenerator.comparative_income_statement_to_dataframe(
+            report, grouped=group_is
+        )
         if compare_py else ReportGenerator.income_statement_to_dataframe(
-            ReportGenerator.income_statement(client_id, is_start, is_end)
+            ReportGenerator.income_statement(client_id, is_start, is_end),
+            grouped=group_is,
         )
     )
 
@@ -331,6 +371,31 @@ elif selected_report == "Balance Sheet":
     if not report['prior_available']:
         st.caption("No prior-year book history is available for this date.")
 
+    has_unclassified_bs = any(
+        group['key'] == 'unclassified'
+        for group in (
+            report['asset_groups'] + report['liability_groups']
+            + report['equity_groups']
+        )
+    )
+    apply_default_on_change(
+        "bs_group_subtypes",
+        (client_id, bs_date, has_unclassified_bs),
+        not has_unclassified_bs,
+    )
+    group_bs = st.toggle(
+        "Group by statement subtype",
+        key="bs_group_subtypes",
+        help=("Turn this off for the familiar flat statement. Accounts need a "
+              "curated subtype before the grouped statement is fully useful."),
+    )
+    if has_unclassified_bs and not group_bs:
+        st.info(
+            "This statement is using the classic layout because one or more "
+            "accounts still need a statement subtype. Review them on the Chart "
+            "of Accounts page when you are ready to use grouped statements."
+        )
+
     # Get accounts for drill-down
     accounts = Account.get_all(client_id, active_only=False)
     account_id_lookup = {a.account_number: a.id for a in accounts}
@@ -352,25 +417,54 @@ elif selected_report == "Balance Sheet":
     liability_lines = _bs_lines(report['liabilities'])
     equity_lines = _bs_lines(report['equity'])
 
-    def _section(title, entries, subtotal_label, subtotal_value):
+    def _visible_bs_groups(groups):
+        visible = []
+        for group in groups:
+            accounts = (
+                group['accounts'] if compare_py else
+                [item for item in group['accounts'] if item['current'] != 0]
+            )
+            if accounts:
+                visible.append({**group, 'accounts': accounts})
+        return visible
+
+    def _section(title, groups, flat_items, subtotal_label, subtotal_value):
         rows = [("section", title, [])]
-        if entries:
-            rows += [
-                ("item", (f"{e['account_number']} - {e['name']}"
-                          if e['account_number'] else e['name']),
-                 _bs_amounts(e))
-                for e in entries
-            ]
+        if group_bs:
+            visible_groups = _visible_bs_groups(groups)
+            for group in visible_groups:
+                rows.append(("group", group['group'], []))
+                rows.extend(
+                    ("item", (f"{item['account_number']} - {item['name']}"
+                              if item['account_number'] else item['name']),
+                     _bs_amounts(item))
+                    for item in group['accounts']
+                )
+                rows.append((
+                    "subtotal", f"Total {group['group']}",
+                    _bs_amounts(group['subtotal']),
+                ))
+            has_lines = bool(visible_groups)
         else:
+            rows.extend(
+                ("item", (f"{item['account_number']} - {item['name']}"
+                          if item['account_number'] else item['name']),
+                 _bs_amounts(item))
+                for item in flat_items
+            )
+            has_lines = bool(flat_items)
+        if not has_lines:
             rows.append(("note", f"No {title.lower()} recorded", []))
-        rows.append(("subtotal", subtotal_label, _bs_amounts(subtotal_value)))
+        rows.append(("total", subtotal_label, _bs_amounts(subtotal_value)))
         return rows
 
     statement_rows = (
-        _section("Assets", asset_lines, "Total Assets", report['total_assets'])
-        + _section("Liabilities", liability_lines,
+        _section("Assets", report['asset_groups'], asset_lines,
+                 "Total Assets", report['total_assets'])
+        + _section("Liabilities", report['liability_groups'], liability_lines,
                    "Total Liabilities", report['total_liabilities'])
-        + _section("Equity", equity_lines, "Total Equity", report['total_equity'])
+        + _section("Equity", report['equity_groups'], equity_lines,
+                   "Total Equity", report['total_equity'])
         + [("total", "Total Liabilities & Equity",
             _bs_amounts(report['total_liabilities_equity']))]
     )
@@ -402,9 +496,11 @@ elif selected_report == "Balance Sheet":
     # Export
     st.divider()
     df = (
-        ReportGenerator.comparative_balance_sheet_to_dataframe(report)
+        ReportGenerator.comparative_balance_sheet_to_dataframe(
+            report, grouped=group_bs
+        )
         if compare_py else ReportGenerator.balance_sheet_to_dataframe(
-            ReportGenerator.balance_sheet(client_id, bs_date)
+            ReportGenerator.balance_sheet(client_id, bs_date), grouped=group_bs
         )
     )
 
@@ -420,6 +516,202 @@ elif selected_report == "Balance Sheet":
         on_click=AuditLog.log_event,
         args=(client_id, "EXPORT", "balance_sheet_export", {
             "format": "xlsx", "as_of_date": bs_date, "row_count": len(df),
+        }),
+    )
+
+elif selected_report == "Cash Flow":
+    st.subheader("Statement of Cash Flows")
+
+    col1, col2, col3 = st.columns([1, 1, 2])
+    with col1:
+        cf_start = st.date_input(
+            "Start Date", value=current_fy_start, key="cf_start"
+        )
+    with col2:
+        cf_end = st.date_input("End Date", value=date.today(), key="cf_end")
+
+    if cf_start > cf_end:
+        st.error("Cash flow statement start date cannot be after the end date.")
+        st.stop()
+
+    report = ReportGenerator.comparative_cash_flow_statement(
+        client_id, cf_start, cf_end
+    )
+    apply_default_on_change(
+        "cf_compare_py",
+        (client_id, cf_start, cf_end, report['prior_available']),
+        report['prior_available'],
+    )
+    compare_py = st.toggle(
+        "Compare to prior year",
+        disabled=not report['prior_available'],
+        key="cf_compare_py",
+    )
+    if not report['prior_available']:
+        st.caption("No prior-year book history is available for this period.")
+
+    st.markdown(f"**{long_date(cf_start)} to {long_date(cf_end)}**")
+
+    def _cf_amounts(item):
+        if not compare_py:
+            return [item['current']]
+        return [
+            item['current'], item['prior'], item['change'],
+            item['change_percent'],
+        ]
+
+    def _cf_section(title, section, total_label):
+        rows = [("section", title, [])]
+        lines = (
+            section['lines'] if compare_py else
+            [line for line in section['lines'] if line['current'] != 0]
+        )
+        if lines:
+            rows.extend(
+                ("item", line['name'], _cf_amounts(line)) for line in lines
+            )
+        else:
+            rows.append(("note", f"No {title.lower()} recorded", []))
+        rows.append(("subtotal", total_label, _cf_amounts(section['total'])))
+        return rows
+
+    statement_rows = (
+        _cf_section(
+            "Operating Activities", report['operating'],
+            "Net Cash Provided by Operating Activities",
+        )
+        + _cf_section(
+            "Investing Activities", report['investing'],
+            "Net Cash Provided by Investing Activities",
+        )
+        + _cf_section(
+            "Financing Activities", report['financing'],
+            "Net Cash Provided by Financing Activities",
+        )
+    )
+    show_unclassified = bool(
+        report['unclassified']['lines']
+        or report['unclassified']['current_entries']
+        or (compare_py and report['unclassified']['prior_entries'])
+    )
+    if show_unclassified:
+        statement_rows += _cf_section(
+            "Unclassified Cash Activity", report['unclassified'],
+            "Net Unclassified Cash Activity",
+        )
+    statement_rows += [
+        ("total", "Net Change in Cash", _cf_amounts(report['computed_cash_change'])),
+    ]
+    reconciliation = report['reconciliation_difference']
+    if reconciliation['current'] or (compare_py and reconciliation['prior']):
+        statement_rows.append((
+            "item", "Cash Flow Reconciliation Difference",
+            _cf_amounts(reconciliation),
+        ))
+    statement_rows.extend([
+        ("item", "Cash at Beginning of Period", _cf_amounts(report['cash_beginning'])),
+        ("total", "Cash at End of Period", _cf_amounts(report['cash_ending'])),
+    ])
+    financial_statement(
+        statement_rows,
+        headers=["Current", "Prior Year", "$ Change", "% Change"]
+        if compare_py else None,
+        formats=["money", "money", "money", "percent"]
+        if compare_py else None,
+    )
+
+    if report['current_ready']:
+        st.success(
+            "Cash flow is tied, the operating reconciliation agrees, and all "
+            "cash activity is classified."
+        )
+    elif report['current_ties']:
+        st.warning(
+            "Cash movement ties, but the statement still has classification "
+            "or operating-reconciliation items to review."
+        )
+    else:
+        st.error("Cash flow does not tie to the Cash-subtype account balances.")
+    for warning in report['current_warnings']:
+        st.caption(f"• {warning}")
+
+    if report['unclassified']['current_entries']:
+        with st.expander(
+            "Unclassified cash activity details "
+            f"({len(report['unclassified']['current_entries'])})"
+        ):
+            for item in report['unclassified']['current_entries']:
+                accounts_text = ", ".join(item['account_numbers']) or "none"
+                st.write(
+                    f"{item['entry_date']} · Entry #{item['entry_id']} · "
+                    f"{item['reason']} · "
+                    f"{item['description'] or 'No description'} · "
+                    f"Accounts {accounts_text} · ${item['amount']:,.2f}"
+                )
+
+    if compare_py and report['unclassified']['prior_entries']:
+        with st.expander(
+            "Prior-year unclassified cash activity details "
+            f"({len(report['unclassified']['prior_entries'])})"
+        ):
+            for item in report['unclassified']['prior_entries']:
+                accounts_text = ", ".join(item['account_numbers']) or "none"
+                st.write(
+                    f"{item['entry_date']} · Entry #{item['entry_id']} · "
+                    f"{item['reason']} · "
+                    f"{item['description'] or 'No description'} · "
+                    f"Accounts {accounts_text} · ${item['amount']:,.2f}"
+                )
+
+    if report['current_noncash_items']:
+        with st.expander(
+            f"Noncash investing and financing activity "
+            f"({len(report['current_noncash_items'])})"
+        ):
+            for item in report['current_noncash_items']:
+                accounts_text = ", ".join(item['accounts'])
+                st.write(
+                    f"{item['entry_date']} · Entry #{item['entry_id']} · "
+                    f"{item['description'] or 'No description'} · "
+                    f"Accounts {accounts_text} · ${item['amount']:,.2f}"
+                )
+
+    accounts = Account.get_all(client_id, active_only=False)
+    account_by_id = {account.id: account for account in accounts}
+    drill_options = {}
+    for section_name in ('operating', 'investing', 'financing', 'unclassified'):
+        for line in report[section_name]['lines']:
+            account_id = line.get('account_id')
+            account_ids = line.get('account_ids') or []
+            if not account_id and len(account_ids) == 1:
+                account_id = account_ids[0]
+            if account_id in account_by_id:
+                drill_options[account_id] = account_by_id[account_id].display_name()
+    gl_drill_down(
+        drill_options, key="cf", start_date=cf_start, end_date=cf_end
+    )
+
+    st.divider()
+    if compare_py:
+        df = ReportGenerator.comparative_cash_flow_statement_to_dataframe(report)
+    else:
+        current_report = ReportGenerator.cash_flow_statement(
+            client_id, cf_start, cf_end
+        )
+        df = ReportGenerator.cash_flow_statement_to_dataframe(current_report)
+
+    buffer = BytesIO()
+    sanitize_df(df).to_excel(buffer, index=False, sheet_name="Cash Flow")
+    buffer.seek(0)
+    st.download_button(
+        label="Download Excel",
+        data=buffer,
+        file_name=f"cash_flow_{client.name}_{cf_start}_to_{cf_end}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        on_click=AuditLog.log_event,
+        args=(client_id, "EXPORT", "cash_flow_export", {
+            "format": "xlsx", "start_date": cf_start, "end_date": cf_end,
+            "row_count": len(df),
         }),
     )
 

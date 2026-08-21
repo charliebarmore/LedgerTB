@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+from constants import AccountSubtype
 from streamlit.testing.v1 import AppTest
 import streamlit as st
 
@@ -68,6 +69,59 @@ def test_chart_of_accounts_uses_correct_plural_labels(
     assert "Equities" in labels
     assert "Liabilitys" not in labels
     assert "Equitys" not in labels
+    assert any(
+        "Review statement subtypes" in expander.label
+        for expander in page.expander
+    )
+
+
+def test_changing_account_type_clears_incompatible_subtype(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    expense = Account.get_by_id(accounts["expense"], client_id=client_id)
+    expense.subtype = AccountSubtype.OPERATING_EXPENSE
+    expense.save()
+
+    page = AppTest.from_file(
+        page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30
+    )
+    page.session_state["editing_account"] = expense.id
+    page.run()
+    assert not page.exception
+
+    page.selectbox(key=f"edit_account_type_{expense.id}").set_value("Asset").run()
+    assert not page.exception
+    subtype = page.selectbox(key=f"edit_account_subtype_{expense.id}")
+    assert subtype.value is None
+    assert AccountSubtype.OPERATING_EXPENSE not in subtype.options
+
+    next(button for button in page.button if button.label == "Save Changes").click().run()
+    assert not page.exception
+    saved = Account.get_by_id(expense.id, client_id=client_id)
+    assert saved.type == "Asset"
+    assert saved.subtype is None
+
+
+def test_add_account_subtypes_follow_type_without_form_submission(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    page = AppTest.from_file(
+        page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30
+    ).run()
+    page.selectbox(key="add_account_subtype").set_value(
+        AccountSubtype.CASH
+    ).run()
+    page.selectbox(key="add_account_type").set_value("Liability").run()
+    assert not page.exception
+    subtype = next(
+        box for box in page.selectbox
+        if box.label == "Statement Subtype (optional)"
+    )
+    assert subtype.options == ["Review later"] + AccountSubtype.for_type("Liability")
+    assert subtype.value is None
+    assert AccountSubtype.OPERATING_EXPENSE not in subtype.options
 
 
 def test_report_statements_render_with_balance_checks(client_id, accounts, monkeypatch):
@@ -95,6 +149,92 @@ def test_report_statements_render_with_balance_checks(client_id, accounts, monke
             assert any(expected in str(s.value) for s in page.success), view
         # the GL drill-down selectbox replaced the per-account buttons
         assert any("gl_pick" in (box.key or "") for box in page.selectbox), view
+
+
+def test_cash_flow_report_renders_quality_check_and_export(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    post_entry(
+        client_id, date(2026, 1, 15),
+        [(accounts["cash"], 500, 0), (accounts["revenue"], 0, 500)],
+    )
+
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.session_state["active_report"] = "Cash Flow"
+    page.run()
+
+    assert not page.exception
+    assert any("Cash flow is tied" in str(item.value) for item in page.success)
+    assert any(
+        button.label == "Download Excel"
+        for button in page.get("download_button")
+    )
+
+
+def test_legacy_income_statement_defaults_to_classic_layout(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    legacy_revenue = Account(
+        client_id=client_id, account_number="4199", name="Legacy Revenue",
+        type="Revenue", subtype=None,
+    )
+    legacy_revenue.save()
+    post_entry(client_id, date(2026, 1, 15), [
+        (accounts["cash"], 500, 0), (legacy_revenue.id, 0, 500),
+    ])
+
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.session_state["active_report"] = "Income Statement"
+    page.run()
+
+    assert not page.exception
+    assert page.toggle(key="is_group_subtypes").value is False
+    assert any("classic layout" in str(item.value) for item in page.info)
+
+    page.toggle(key="is_group_subtypes").set_value(True).run()
+    assert not page.exception
+    assert page.toggle(key="is_group_subtypes").value is True
+
+
+def test_cash_flow_report_prints_reconciliation_difference(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    post_entry(client_id, date(2026, 1, 15), [
+        (accounts["cash"], 500, 0), (accounts["revenue"], 0, 500),
+    ])
+
+    from models.reports import ReportGenerator
+
+    original = ReportGenerator.comparative_cash_flow_statement
+
+    def untied(*args, **kwargs):
+        report = original(*args, **kwargs)
+        report["reconciliation_difference"]["current"] = 25
+        report["current_ties"] = False
+        report["current_ready"] = False
+        return report
+
+    monkeypatch.setattr(
+        ReportGenerator, "comparative_cash_flow_statement", staticmethod(untied)
+    )
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.session_state["active_report"] = "Cash Flow"
+    page.run()
+
+    assert not page.exception
+    html = "\n".join(
+        str(item.body) for item in page.get("html") if hasattr(item, "body")
+    )
+    assert "Cash Flow Reconciliation Difference" in html
 
 
 def test_period_picker_drives_the_worksheet_dates(client_id, accounts, monkeypatch):
