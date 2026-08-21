@@ -81,14 +81,25 @@ def test_quickbooks_type_names_map_with_implied_subtypes():
     assert len(accounts) == 8
     by_no = {a["number"]: a for a in accounts}
     assert by_no["1000"]["type"] == "Asset" and by_no["1000"]["subtype"] == "Cash"
-    assert by_no["1100"]["subtype"] == "Receivable"
+    assert by_no["1100"]["subtype"] == "Accounts Receivable"
     assert by_no["2100"]["type"] == "Liability" and by_no["2100"]["subtype"] == "Credit Card"
     assert by_no["5000"]["subtype"] == "Cost of Goods Sold"
     # An explicit subtype in the file beats the implied one.
-    assert by_no["6100"]["subtype"] == "Occupancy"
+    assert by_no["6100"]["subtype"] == "Operating Expense"
     # The unmappable row is loudly reported, never silently dropped.
     assert len(errors) == 1
     assert "will NOT be imported" in errors[0] and "Suspense Widget" in errors[0]
+
+
+def test_explicit_legacy_subtype_is_canonicalized_but_unknown_text_is_preserved():
+    accounts, errors = parse_coa_csv(
+        "Number,Name,Type,Subtype\n"
+        "6100,Rent,Expense,Occupancy\n"
+        "6200,Special Cost,Expense,CPA Custom Group\n"
+    )
+    assert not errors
+    assert accounts[0]["subtype"] == "Operating Expense"
+    assert accounts[1]["subtype"] == "CPA Custom Group"
 
 
 def test_numberless_chart_gets_numbers_assigned_by_type():

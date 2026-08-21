@@ -15,7 +15,7 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from constants import EntryType
+from constants import AccountSubtype, EntryType
 from models.account import Account
 from models.client import Client
 from models.journal_entry import JournalEntry
@@ -355,11 +355,31 @@ def income_statement(
              "amount": round(i["balance"], 2)}
             for i in items
         ]
+    def _groups(groups):
+        return [
+            {
+                "key": group["key"],
+                "group": group["group"],
+                "accounts": [
+                    {
+                        "number": item["account_number"],
+                        "name": item["name"],
+                        "statement_subtype": item["statement_subtype"],
+                        "amount": round(item["balance"], 2),
+                    }
+                    for item in group["accounts"]
+                ],
+                "subtotal": round(group["subtotal"], 2),
+            }
+            for group in groups
+        ]
     result = {
         "start": start,
         "end": end,
         "revenues": _lines(report["revenues"]),
+        "revenue_groups": _groups(report["revenue_groups"]),
         "expenses": _lines(report["expenses"]),
+        "expense_groups": _groups(report["expense_groups"]),
         "total_revenue": round(report["total_revenue"], 2),
         "total_expenses": round(report["total_expenses"], 2),
         "net_income": round(report["net_income"], 2),
@@ -393,11 +413,32 @@ def balance_sheet(
              "amount": round(i["balance"], 2)}
             for i in items
         ]
+    def _groups(groups):
+        return [
+            {
+                "key": group["key"],
+                "group": group["group"],
+                "accounts": [
+                    {
+                        "number": item["account_number"],
+                        "name": item["name"],
+                        "statement_subtype": item["statement_subtype"],
+                        "amount": round(item["balance"], 2),
+                    }
+                    for item in group["accounts"]
+                ],
+                "subtotal": round(group["subtotal"], 2),
+            }
+            for group in groups
+        ]
     result = {
         "as_of": as_of,
         "assets": _lines(report["assets"]),
+        "asset_groups": _groups(report["asset_groups"]),
         "liabilities": _lines(report["liabilities"]),
+        "liability_groups": _groups(report["liability_groups"]),
         "equity": _lines(report["equity"]),  # includes RE + current-year earnings
+        "equity_groups": _groups(report["equity_groups"]),
         "total_assets": round(report["total_assets"], 2),
         "total_liabilities": round(report["total_liabilities"], 2),
         "total_equity": round(report["total_equity"], 2),
@@ -413,6 +454,40 @@ def balance_sheet(
             **comparison,
             "current_as_of": comparison["current_as_of"].isoformat(),
             "prior_as_of": comparison["prior_as_of"].isoformat(),
+        }
+    return result
+
+
+def cash_flow_statement(
+    client_id: int, start: str, end: str,
+    compare_to_prior_year: bool = False,
+) -> dict:
+    """Derived indirect-method cash flow with explicit quality diagnostics."""
+    _require_client(client_id)
+    start_date = _parse_date(start, "start")
+    end_date = _parse_date(end, "end")
+    report = ReportGenerator.cash_flow_statement(
+        client_id, start_date, end_date
+    )
+    result = {
+        **report,
+        "start_date": report["start_date"].isoformat(),
+        "end_date": report["end_date"].isoformat(),
+    }
+    if compare_to_prior_year:
+        comparison = ReportGenerator.comparative_cash_flow_statement(
+            client_id, start_date, end_date
+        )
+        result["comparison"] = {
+            **comparison,
+            "current_period": {
+                "start": comparison["current_period"]["start"].isoformat(),
+                "end": comparison["current_period"]["end"].isoformat(),
+            },
+            "prior_period": {
+                "start": comparison["prior_period"]["start"].isoformat(),
+                "end": comparison["prior_period"]["end"].isoformat(),
+            },
         }
     return result
 
@@ -986,12 +1061,17 @@ def import_accounts(client_id: int, rows: list) -> dict:
             number = pending["number"]
             seen.add(number)
             assigned_numbers.append((number, name))
+        supplied_subtype = (
+            str(r.get("subtype", "") or "").strip() or implied_subtype
+        )
         account = Account(
             client_id=client_id,
             account_number=number,
             name=name,
             type=acct_type,
-            subtype=str(r.get("subtype", "") or "").strip() or implied_subtype,
+            subtype=AccountSubtype.normalize_for_storage(
+                acct_type, supplied_subtype, account_name=name
+            ),
             description=str(r.get("description", "") or "").strip() or None,
         )
         account.save()

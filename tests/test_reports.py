@@ -3,6 +3,7 @@ from datetime import date
 from conftest import post_entry
 from models.account import Account
 from models.reports import ReportGenerator
+from constants import AccountSubtype
 
 
 def test_balance_sheet_balances_with_no_activity(client_id, accounts):
@@ -74,6 +75,123 @@ def test_income_statement_respects_date_range(client_id, accounts):
     assert full_year["total_revenue"] == 350
 
 
+def test_grouped_statements_and_multistep_income_are_additive(
+    client_id, accounts
+):
+    operating_revenue = Account(
+        client_id=client_id, account_number="4100", name="Product Sales",
+        type="Revenue", subtype=AccountSubtype.OPERATING_REVENUE,
+    )
+    cogs = Account(
+        client_id=client_id, account_number="5000", name="Cost of Goods Sold",
+        type="Expense", subtype=AccountSubtype.COST_OF_GOODS_SOLD,
+    )
+    depreciation = Account(
+        client_id=client_id, account_number="7000", name="Depreciation Expense",
+        type="Expense", subtype=AccountSubtype.DEPRECIATION_AMORTIZATION,
+    )
+    equipment = Account(
+        client_id=client_id, account_number="1500", name="Equipment",
+        type="Asset", subtype=AccountSubtype.FIXED_ASSET,
+    )
+    accumulated = Account(
+        client_id=client_id, account_number="1510",
+        name="Accumulated Depreciation", type="Asset",
+        subtype=AccountSubtype.ACCUMULATED_DEPRECIATION,
+    )
+    for account in (
+        operating_revenue, cogs, depreciation, equipment, accumulated
+    ):
+        account.save()
+
+    post_entry(client_id, date(2026, 1, 1), [
+        (accounts["cash"], 1000, 0), (accounts["equity"], 0, 1000),
+    ])
+    post_entry(client_id, date(2026, 2, 1), [
+        (accounts["cash"], 200, 0), (operating_revenue.id, 0, 200),
+    ])
+    post_entry(client_id, date(2026, 2, 2), [
+        (cogs.id, 80, 0), (accounts["cash"], 0, 80),
+    ])
+    post_entry(client_id, date(2026, 3, 1), [
+        (equipment.id, 500, 0), (accounts["cash"], 0, 500),
+    ])
+    post_entry(client_id, date(2026, 3, 31), [
+        (depreciation.id, 100, 0), (accumulated.id, 0, 100),
+    ])
+
+    income = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    assert income["total_revenue"] == 200
+    assert income["total_expenses"] == 180
+    assert income["net_income"] == 20
+    assert income["cost_of_goods_sold"] == 80
+    assert income["gross_profit"] == 120
+    assert income["depreciation_amortization"] == 100
+    assert income["operating_income"] == 20
+    assert [group["key"] for group in income["revenue_groups"]] == [
+        "operating_revenue"
+    ]
+    assert [group["key"] for group in income["expense_groups"]] == [
+        "cost_of_goods_sold", "depreciation_amortization"
+    ]
+
+    balance = ReportGenerator.balance_sheet(client_id, date(2026, 12, 31))
+    by_group = {group["key"]: group for group in balance["asset_groups"]}
+    assert by_group["current_assets"]["subtotal"] == 620
+    assert by_group["property_equipment_net"]["subtotal"] == 400
+    assert balance["total_assets"] == balance["total_liabilities_equity"] == 1020
+    retained = next(
+        group for group in balance["equity_groups"]
+        if group["key"] == "retained_earnings"
+    )
+    assert any(
+        item["name"] == "Current Year Earnings"
+        for item in retained["accounts"]
+    )
+
+    income_df = ReportGenerator.income_statement_to_dataframe(income)
+    balance_df = ReportGenerator.balance_sheet_to_dataframe(balance)
+    assert "  Operating Revenue" in set(income_df["Item"])
+    assert income_df.set_index("Item").loc["GROSS PROFIT", "Amount"] == 120
+    assert income_df.set_index("Item").loc["OPERATING INCOME", "Amount"] == 20
+    assert "  Property and Equipment, Net" in set(balance_df["Item"])
+
+    comparative_income = ReportGenerator.comparative_income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    comparative_income_df = (
+        ReportGenerator.comparative_income_statement_to_dataframe(
+            comparative_income
+        )
+    )
+    comparative_rows = comparative_income_df.set_index("Item")
+    assert comparative_rows.loc["GROSS PROFIT", "Current"] == 120
+    assert comparative_rows.loc["OPERATING INCOME", "Current"] == 20
+
+
+def test_unknown_subtypes_land_in_explicit_unclassified_groups(
+    client_id, accounts
+):
+    custom = Account(
+        client_id=client_id, account_number="6190", name="Custom Expense",
+        type="Expense", subtype="Legacy CPA Group",
+    )
+    custom.save()
+    post_entry(client_id, date(2026, 4, 1), [
+        (custom.id, 25, 0), (accounts["cash"], 0, 25),
+    ])
+
+    report = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    group = next(g for g in report["expense_groups"] if g["key"] == "unclassified")
+    assert group["group"] == "Unclassified Expenses"
+    assert group["subtotal"] == 25
+    assert group["accounts"][0]["statement_subtype"] is None
+
+
 def test_income_statement_comparison_merges_lines_and_calculates_changes(
     client_id, accounts
 ):
@@ -112,6 +230,11 @@ def test_income_statement_comparison_merges_lines_and_calculates_changes(
     expenses = {line["account_number"]: line for line in report["expenses"]}
     assert expenses["6000"]["prior"] == 0
     assert expenses["6100"]["current"] == 0
+
+    export = ReportGenerator.comparative_income_statement_to_dataframe(report)
+    # No COGS in this book, so a synthetic gross-profit row must not appear.
+    assert "GROSS PROFIT" not in set(export["Item"])
+    assert "OPERATING INCOME" not in set(export["Item"])
 
 
 def test_comparisons_distinguish_missing_history_from_a_real_zero(

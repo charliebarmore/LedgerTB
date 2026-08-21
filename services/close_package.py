@@ -23,6 +23,7 @@ from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     Image,
+    KeepTogether,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -32,6 +33,7 @@ from reportlab.platypus import (
 )
 
 from database import connection as dbconn
+from constants import AccountSubtype
 from database.connection import get_connection, get_cursor
 from models.reports import ReportGenerator, TrialBalanceWorksheetRow
 from money import to_dollars
@@ -91,6 +93,8 @@ class ClosePackageSnapshot:
     balance_sheet: Dict
     comparative_income_statement: Dict
     comparative_balance_sheet: Dict
+    cash_flow: Dict
+    comparative_cash_flow: Dict
     comparative_trial_balance: Dict
     close_map: Optional[Dict]
     client_branding: ClientBranding
@@ -159,7 +163,8 @@ def get_cash_activity(client_id: int, period_start: date, period_end: date) -> L
             FROM accounts a
             LEFT JOIN journal_entry_lines jel ON jel.account_id = a.id
             LEFT JOIN journal_entries je ON je.id = jel.journal_entry_id
-            WHERE a.client_id = ? AND a.type = 'Asset' AND a.subtype = 'Cash'
+            WHERE a.client_id = ? AND a.type = 'Asset'
+              AND LOWER(TRIM(a.subtype)) = LOWER(?)
             GROUP BY a.id
             ORDER BY a.account_number
             """,
@@ -167,7 +172,7 @@ def get_cash_activity(client_id: int, period_start: date, period_end: date) -> L
                 period_start.isoformat(),
                 period_start.isoformat(), period_end.isoformat(),
                 period_start.isoformat(), period_end.isoformat(),
-                client_id,
+                client_id, AccountSubtype.CASH,
             ),
         )
         rows = cursor.fetchall()
@@ -209,6 +214,12 @@ def load_close_package_snapshot(
         ),
         comparative_balance_sheet=ReportGenerator.comparative_balance_sheet(
             client_id, period_end
+        ),
+        cash_flow=ReportGenerator.cash_flow_statement(
+            client_id, period_start, period_end
+        ),
+        comparative_cash_flow=ReportGenerator.comparative_cash_flow_statement(
+            client_id, period_start, period_end
         ),
         comparative_trial_balance=ReportGenerator.comparative_trial_balance(
             client_id, period_end
@@ -353,6 +364,127 @@ def _append_comparative_statement_section(
     _append_comparative_statement_total(ws, total_label, total)
 
 
+def _append_comparative_statement_groups(
+    ws, title: str, groups: List[Dict], total_label: str, total: Dict
+):
+    """Render statement groups without changing the established total rows."""
+    section_cells = _append_literal_row(ws, [title.upper(), "", "", "", ""])
+    for cell in section_cells:
+        cell.font = _HEADER_FONT
+
+    if not groups:
+        _append_literal_row(ws, [f"No {title.lower()} recorded", "", "", "", ""])
+
+    for group in groups:
+        group_cells = _append_literal_row(
+            ws, [f"  {group['group']}", "", "", "", ""]
+        )
+        for cell in group_cells:
+            cell.font = _HEADER_FONT
+        for item in group['accounts']:
+            cells = _append_literal_row(
+                ws, [f"    {_statement_label(item)}"] + _comparison_values(item)
+            )
+            for cell in cells[1:4]:
+                cell.number_format = _MONEY_FMT
+            cells[4].number_format = '0.0"%"'
+        subtotal_cells = _append_literal_row(
+            ws,
+            [f"  Total {group['group']}"] + _comparison_values(group['subtotal']),
+        )
+        for cell in subtotal_cells:
+            cell.font = _HEADER_FONT
+            cell.border = _TOTAL_BORDER
+        for cell in subtotal_cells[1:4]:
+            cell.number_format = _MONEY_FMT
+        subtotal_cells[4].number_format = '0.0"%"'
+
+    _append_comparative_statement_total(ws, total_label, total)
+
+
+def _income_statement_rows(report: Dict) -> List[tuple]:
+    """Shared grouped, multi-step IS rows for Excel and PDF close packages."""
+    revenue_by_key = {group['key']: group for group in report['revenue_groups']}
+    expense_by_key = {group['key']: group for group in report['expense_groups']}
+    rows = []
+
+    def append_group(group: Dict):
+        rows.append(('group', group['group'], None))
+        rows.extend(
+            ('item', _statement_label(item), item)
+            for item in group['accounts']
+        )
+        rows.append(('group_total', f"Total {group['group']}", group['subtotal']))
+
+    rows.append(('section', 'Revenue', None))
+    operating_revenue = revenue_by_key.get('operating_revenue')
+    if operating_revenue:
+        append_group(operating_revenue)
+    elif not report['revenues']:
+        rows.append(('note', 'No revenue recorded', None))
+
+    cogs = expense_by_key.get('cost_of_goods_sold')
+    if cogs:
+        append_group(cogs)
+        rows.append(('total', 'Gross Profit', report['gross_profit']))
+
+    operating_groups = [
+        expense_by_key[key]
+        for key in ('operating_expenses', 'depreciation_amortization')
+        if key in expense_by_key
+    ]
+    if operating_groups:
+        rows.append(('section', 'Operating Expenses', None))
+        for group in operating_groups:
+            append_group(group)
+        if operating_revenue or cogs:
+            rows.append(('total', 'Operating Income', report['operating_income']))
+
+    other_groups = []
+    for key in ('other_income', 'unclassified'):
+        if key in revenue_by_key:
+            other_groups.append(revenue_by_key[key])
+    for key in ('other_expenses', 'unclassified'):
+        if key in expense_by_key:
+            other_groups.append(expense_by_key[key])
+    if other_groups:
+        rows.append(('section', 'Other and Unclassified', None))
+        for group in other_groups:
+            append_group(group)
+
+    rows.extend([
+        ('subtotal', 'Total Revenue', report['total_revenue']),
+        ('subtotal', 'Total Expenses', report['total_expenses']),
+        ('total', 'NET INCOME', report['net_income']),
+    ])
+    return rows
+
+
+def _append_comparative_income_statement(ws, report: Dict) -> None:
+    for kind, label, values in _income_statement_rows(report):
+        prefix = (
+            '    ' if kind == 'item'
+            else '  ' if kind in {'group', 'group_total'}
+            else ''
+        )
+        cells = _append_literal_row(
+            ws,
+            [f"{prefix}{label}"] + (
+                _comparison_values(values) if values is not None else ["", "", "", ""]
+            ),
+        )
+        if kind in {'section', 'group', 'group_total', 'subtotal', 'total'}:
+            for cell in cells:
+                cell.font = _HEADER_FONT
+        if kind in {'group_total', 'subtotal', 'total'}:
+            for cell in cells:
+                cell.border = _TOTAL_BORDER
+        if values is not None:
+            for cell in cells[1:4]:
+                cell.number_format = _MONEY_FMT
+            cells[4].number_format = '0.0"%"'
+
+
 def _append_comparative_statement_total(ws, label: str, total: Dict):
     cells = _append_literal_row(ws, [label] + _comparison_values(total))
     for cell in cells:
@@ -382,6 +514,8 @@ def build_close_package(
     balance_sheet = snapshot.balance_sheet
     comparative_income = snapshot.comparative_income_statement
     comparative_balance = snapshot.comparative_balance_sheet
+    cash_flow = snapshot.cash_flow
+    comparative_cash_flow = snapshot.comparative_cash_flow
     comparative_tb = snapshot.comparative_trial_balance
     close_map = snapshot.close_map
     client_branding = snapshot.client_branding
@@ -409,23 +543,26 @@ def build_close_package(
         lines.append(("Preparer details", firm_branding.tagline))
     lines += [
         ("", ""),
-        ("Final trial balance — total debits", total_dr),
-        ("Final trial balance — total credits", total_cr),
+        ("Final trial balance - total debits", total_dr),
+        ("Final trial balance - total credits", total_cr),
         ("In balance", "YES" if abs(total_dr - total_cr) < 0.01 else "OUT OF BALANCE"),
         ("Net income for period", income_statement["net_income"]),
         ("Prior-year net income",
          comparative_income["net_income"]["prior"]
          if comparative_income["prior_available"] else "No prior-year data"),
-        ("Balance sheet — total assets", balance_sheet["total_assets"]),
+        ("Balance sheet - total assets", balance_sheet["total_assets"]),
         ("Prior-year total assets",
          comparative_balance["total_assets"]["prior"]
          if comparative_balance["prior_available"] else "No prior-year data"),
-        ("Balance sheet — liabilities & equity",
+        ("Balance sheet - liabilities & equity",
          balance_sheet["total_liabilities_equity"]),
         ("Balance sheet in balance",
          "YES" if abs(balance_sheet["total_assets"] -
                       balance_sheet["total_liabilities_equity"]) < 0.01
          else "OUT OF BALANCE"),
+        ("Cash flow status",
+         "READY" if cash_flow["ready"] else "REVIEW WARNINGS"),
+        ("Cash flow - net change in cash", cash_flow["computed_cash_change"]),
         ("Journal lines in period", len(transactions)),
         ("Adjusting entry lines", len(ajes)),
         ("Close Map",
@@ -466,19 +603,7 @@ def build_close_package(
     )
     if not comparative_income['prior_available']:
         _append_literal_row(ws, ["No prior-year data", "", "", "", ""])
-    _append_comparative_statement_section(
-        ws, "Revenue", comparative_income["revenues"],
-        "Total Revenue", comparative_income["total_revenue"],
-    )
-    _append_literal_row(ws, ["", "", "", "", ""])
-    _append_comparative_statement_section(
-        ws, "Expenses", comparative_income["expenses"],
-        "Total Expenses", comparative_income["total_expenses"],
-    )
-    _append_literal_row(ws, ["", "", "", "", ""])
-    _append_comparative_statement_total(
-        ws, "NET INCOME", comparative_income["net_income"]
-    )
+    _append_comparative_income_statement(ws, comparative_income)
 
     # ---- Balance Sheet
     ws = _start_statement_sheet(
@@ -492,18 +617,18 @@ def build_close_package(
     )
     if not comparative_balance['prior_available']:
         _append_literal_row(ws, ["No prior-year data", "", "", "", ""])
-    _append_comparative_statement_section(
-        ws, "Assets", comparative_balance["assets"],
+    _append_comparative_statement_groups(
+        ws, "Assets", comparative_balance["asset_groups"],
         "Total Assets", comparative_balance["total_assets"],
     )
     _append_literal_row(ws, ["", "", "", "", ""])
-    _append_comparative_statement_section(
-        ws, "Liabilities", comparative_balance["liabilities"],
+    _append_comparative_statement_groups(
+        ws, "Liabilities", comparative_balance["liability_groups"],
         "Total Liabilities", comparative_balance["total_liabilities"],
     )
     _append_literal_row(ws, ["", "", "", "", ""])
-    _append_comparative_statement_section(
-        ws, "Equity", comparative_balance["equity"],
+    _append_comparative_statement_groups(
+        ws, "Equity", comparative_balance["equity_groups"],
         "Total Equity", comparative_balance["total_equity"],
     )
     _append_literal_row(ws, ["", "", "", "", ""])
@@ -670,6 +795,81 @@ def build_close_package(
             cell.font = _HEADER_FONT
             cell.number_format = _MONEY_FMT
 
+    # ---- Cash Flow (appended so all established sheet positions stay stable)
+    ws = _start_statement_sheet(
+        wb, "Cash Flow", display_name,
+        f"{period_start.isoformat()} to {period_end.isoformat()}",
+        accent_hex,
+    )
+    _prepare_comparative_statement_sheet(
+        ws,
+        f"{period_start.isoformat()} to {period_end.isoformat()}",
+        (f"{comparative_cash_flow['prior_period']['start'].isoformat()} to "
+         f"{comparative_cash_flow['prior_period']['end'].isoformat()}"),
+    )
+    if not comparative_cash_flow['prior_available']:
+        _append_literal_row(ws, ["No prior-year data", "", "", "", ""])
+    for title, key, total_label in [
+        ("Operating Activities", "operating",
+         "Net Cash Provided by Operating Activities"),
+        ("Investing Activities", "investing",
+         "Net Cash Provided by Investing Activities"),
+        ("Financing Activities", "financing",
+         "Net Cash Provided by Financing Activities"),
+        ("Unclassified Cash Activity", "unclassified",
+         "Net Unclassified Cash Activity"),
+    ]:
+        section = comparative_cash_flow[key]
+        if (
+            key == "unclassified"
+            and not section["lines"]
+            and not section["current_entries"]
+            and not section["prior_entries"]
+        ):
+            continue
+        _append_comparative_statement_section(
+            ws, title, section["lines"], total_label, section["total"]
+        )
+        _append_literal_row(ws, ["", "", "", "", ""])
+    _append_comparative_statement_total(
+        ws, "NET CHANGE IN CASH", comparative_cash_flow["computed_cash_change"]
+    )
+    _append_comparative_statement_total(
+        ws, "CASH AT BEGINNING OF PERIOD", comparative_cash_flow["cash_beginning"]
+    )
+    _append_comparative_statement_total(
+        ws, "CASH AT END OF PERIOD", comparative_cash_flow["cash_ending"]
+    )
+    _append_literal_row(ws, [
+        "STATUS",
+        ("READY" if cash_flow["ready"] else "REVIEW WARNINGS"),
+        "", "", "",
+    ])
+    for warning in cash_flow["warnings"]:
+        _append_literal_row(ws, [f"Warning: {warning}", "", "", "", ""])
+    for period_name, entries, amount_column in [
+        ("CURRENT UNCLASSIFIED ENTRY DETAILS",
+         comparative_cash_flow["unclassified"]["current_entries"], 2),
+        ("PRIOR-YEAR UNCLASSIFIED ENTRY DETAILS",
+         comparative_cash_flow["unclassified"]["prior_entries"], 3),
+    ]:
+        if not entries:
+            continue
+        _append_literal_row(ws, ["", "", "", "", ""])
+        heading_cells = _append_literal_row(ws, [period_name, "", "", "", ""])
+        for cell in heading_cells:
+            cell.font = _HEADER_FONT
+        for entry in entries:
+            accounts = ", ".join(entry["account_numbers"]) or "none"
+            cells = _append_literal_row(ws, [
+                (f"{entry['entry_date']} | Entry #{entry['entry_id']} | "
+                 f"{entry['reason']} | {entry['description'] or 'No description'} | "
+                 f"Accounts {accounts}"),
+                "", "", "", "",
+            ])
+            cells[amount_column - 1].value = entry["amount"]
+            cells[amount_column - 1].number_format = _MONEY_FMT
+
     for sheet in wb.worksheets:
         sheet.oddFooter.left.text = display_name
         sheet.oddFooter.center.text = (
@@ -728,7 +928,8 @@ def _safe_paragraph(text: str, style: ParagraphStyle) -> Paragraph:
 
 
 def _pdf_table(headers, data_rows, col_widths, money_from: Optional[int],
-               totals_row=None) -> Table:
+               totals_row=None, bold_data_rows=None,
+               ruled_data_rows=None, no_split_data_ranges=None) -> Table:
     """A report table: bold repeating header, right-aligned money columns."""
     rows = [headers] + data_rows
     if totals_row is not None:
@@ -752,8 +953,93 @@ def _pdf_table(headers, data_rows, col_widths, money_from: Optional[int],
             ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
             ("LINEABOVE", (0, -1), (-1, -1), 0.75, colors.black),
         ]
+    for data_index in bold_data_rows or ():
+        table_row = data_index + 1
+        style.append((
+            "FONTNAME", (0, table_row), (-1, table_row), "Helvetica-Bold"
+        ))
+    for data_index in ruled_data_rows or ():
+        table_row = data_index + 1
+        style.append((
+            "LINEABOVE", (0, table_row), (-1, table_row),
+            0.5, colors.HexColor("#777777"),
+        ))
+    for start_index, end_index in no_split_data_ranges or ():
+        style.append((
+            "NOSPLIT", (0, start_index + 1), (-1, end_index + 1)
+        ))
     table.setStyle(TableStyle(style))
     return table
+
+
+def _pdf_income_statement_table(report: Dict) -> Table:
+    data_rows = []
+    bold_rows = []
+    ruled_rows = []
+    for kind, label, values in _income_statement_rows(report):
+        prefix = (
+            '    ' if kind == 'item'
+            else '  ' if kind in {'group', 'group_total'}
+            else ''
+        )
+        row = [f"{prefix}{label}"]
+        row += (
+            _pdf_comparison_values(
+                values, totals=kind in {'group_total', 'subtotal', 'total'}
+            )
+            if values is not None else ["", "", "", ""]
+        )
+        data_rows.append(row)
+        row_index = len(data_rows) - 1
+        if kind in {'section', 'group', 'group_total', 'subtotal', 'total'}:
+            bold_rows.append(row_index)
+        if kind in {'group_total', 'subtotal', 'total'}:
+            ruled_rows.append(row_index)
+    return _pdf_table(
+        ["Account", "Current", "Prior Year", "$ Change", "% Change"],
+        data_rows,
+        [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
+        money_from=1,
+        bold_data_rows=bold_rows,
+        ruled_data_rows=ruled_rows,
+    )
+
+
+def _pdf_grouped_comparison_table(groups: List[Dict], empty_label: str,
+                                  total_label: str, total: Dict) -> Table:
+    data_rows = []
+    bold_rows = []
+    ruled_rows = []
+    no_split_ranges = []
+    if not groups:
+        data_rows.append([empty_label, "", "", "", ""])
+    for group in groups:
+        group_start = len(data_rows)
+        data_rows.append([f"  {group['group']}", "", "", "", ""])
+        bold_rows.append(len(data_rows) - 1)
+        for item in group['accounts']:
+            data_rows.append([
+                f"    {_statement_label(item)}",
+                *_pdf_comparison_values(item),
+            ])
+        if group['accounts']:
+            no_split_ranges.append((group_start, group_start + 1))
+        data_rows.append([
+            f"  Total {group['group']}",
+            *_pdf_comparison_values(group['subtotal'], totals=True),
+        ])
+        bold_rows.append(len(data_rows) - 1)
+        ruled_rows.append(len(data_rows) - 1)
+    return _pdf_table(
+        ["Account", "Current", "Prior Year", "$ Change", "% Change"],
+        data_rows,
+        [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
+        money_from=1,
+        totals_row=[total_label] + _pdf_comparison_values(total, totals=True),
+        bold_data_rows=bold_rows,
+        ruled_data_rows=ruled_rows,
+        no_split_data_ranges=no_split_ranges,
+    )
 
 
 def _logo_flowable(identity, max_height: float):
@@ -789,6 +1075,8 @@ def build_close_package_pdf(
     balance_sheet = snapshot.balance_sheet
     comparative_income = snapshot.comparative_income_statement
     comparative_balance = snapshot.comparative_balance_sheet
+    cash_flow = snapshot.cash_flow
+    comparative_cash_flow = snapshot.comparative_cash_flow
     comparative_tb = snapshot.comparative_trial_balance
     close_map = snapshot.close_map
     period_label = f"{long_date(period_start)} to {long_date(period_end)}"
@@ -799,18 +1087,20 @@ def build_close_package_pdf(
     accent_hex = client_branding.accent_hex or firm_branding.accent_hex
     accent = colors.HexColor(accent_hex) if accent_hex else colors.black
     heading_1 = ParagraphStyle("bh1", parent=_PDF_H1, textColor=accent)
-    heading_2 = ParagraphStyle("bh2", parent=_PDF_H2, textColor=accent)
+    heading_2 = ParagraphStyle(
+        "bh2", parent=_PDF_H2, textColor=accent, keepWithNext=True
+    )
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=landscape(letter),
         leftMargin=0.5 * inch, rightMargin=0.5 * inch,
         topMargin=0.6 * inch, bottomMargin=0.55 * inch,
-        title=f"Close Package — {display_name}",
+        title=f"Close Package - {display_name}",
         author=firm_branding.firm_name or "LedgerTB",
     )
 
-    footer_left = f"{display_name} — {period_label}"
+    footer_left = f"{display_name} - {period_label}"
     if firm_branding.firm_name:
         footer_left = f"{footer_left} · Prepared by {firm_branding.firm_name}"
 
@@ -858,8 +1148,8 @@ def build_close_package_pdf(
         _pdf_table(
             ["", ""],
             [
-                ["Final trial balance — total debits", _money(total_dr)],
-                ["Final trial balance — total credits", _money(total_cr)],
+                ["Final trial balance - total debits", _money(total_dr)],
+                ["Final trial balance - total credits", _money(total_cr)],
                 ["In balance", "Yes" if balanced else "OUT OF BALANCE"],
                 ["Journal lines in period", str(len(transactions))],
                 ["Adjusting entry lines", str(len(ajes))],
@@ -902,40 +1192,7 @@ def build_close_package_pdf(
             _PDF_META,
         ),
         Spacer(1, 12),
-        Paragraph("Revenue", heading_2),
-        _pdf_table(
-            ["Account", "Current", "Prior Year", "$ Change", "% Change"],
-            [[_wrap(_statement_label(r))] + _pdf_comparison_values(r)
-             for r in comparative_income["revenues"]]
-            or [["No revenue recorded", "", "", "", ""]],
-            [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
-            money_from=1,
-            totals_row=["Total Revenue"] + _pdf_comparison_values(
-                comparative_income["total_revenue"], totals=True
-            ),
-        ),
-        Spacer(1, 12),
-        Paragraph("Expenses", heading_2),
-        _pdf_table(
-            ["Account", "Current", "Prior Year", "$ Change", "% Change"],
-            [[_wrap(_statement_label(e))] + _pdf_comparison_values(e)
-             for e in comparative_income["expenses"]]
-            or [["No expenses recorded", "", "", "", ""]],
-            [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
-            money_from=1,
-            totals_row=["Total Expenses"] + _pdf_comparison_values(
-                comparative_income["total_expenses"], totals=True
-            ),
-        ),
-        Spacer(1, 12),
-        _pdf_table(
-            ["", "Current", "Prior Year", "$ Change", "% Change"], [],
-            [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
-            money_from=1,
-            totals_row=["NET INCOME"] + _pdf_comparison_values(
-                comparative_income["net_income"], totals=True
-            ),
-        ),
+        _pdf_income_statement_table(comparative_income),
         PageBreak(),
     ]
 
@@ -951,28 +1208,30 @@ def build_close_package_pdf(
         Spacer(1, 12),
     ]
     for section_title, items, total_label, total_value in [
-        ("Assets", comparative_balance["assets"],
+        ("Assets", comparative_balance["asset_groups"],
          "Total Assets", comparative_balance["total_assets"]),
-        ("Liabilities", comparative_balance["liabilities"],
+        ("Liabilities", comparative_balance["liability_groups"],
          "Total Liabilities", comparative_balance["total_liabilities"]),
-        ("Equity", comparative_balance["equity"],
+        ("Equity", comparative_balance["equity_groups"],
          "Total Equity", comparative_balance["total_equity"]),
     ]:
-        story += [
+        section_block = [
             Paragraph(section_title, heading_2),
-            _pdf_table(
-                ["Account", "Current", "Prior Year", "$ Change", "% Change"],
-                [[_wrap(_statement_label(item))] + _pdf_comparison_values(item)
-                 for item in items]
-                or [[f"No {section_title.lower()} recorded", "", "", "", ""]],
-                [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
-                money_from=1,
-                totals_row=[total_label] + _pdf_comparison_values(
-                    total_value, totals=True
-                ),
+            _pdf_grouped_comparison_table(
+                items,
+                f"No {section_title.lower()} recorded",
+                total_label,
+                total_value,
             ),
             Spacer(1, 10),
         ]
+        section_row_count = 1 + sum(
+            2 + len(group['accounts']) for group in items
+        )
+        if section_row_count <= 12:
+            story.append(KeepTogether(section_block))
+        else:
+            story.extend(section_block)
     balance_difference = round(
         balance_sheet["total_assets"] -
         balance_sheet["total_liabilities_equity"], 2
@@ -995,6 +1254,112 @@ def build_close_package_pdf(
         ),
         PageBreak(),
     ]
+
+    # ---- Cash Flow
+    story += [
+        Paragraph("Statement of Cash Flows", heading_2),
+        Paragraph(period_label, _PDF_META),
+        Paragraph(
+            ("Ready - cash ties, Operating reconciles, and all cash activity "
+             "is classified.")
+            if cash_flow["ready"] else
+            "Review required - see the warnings below before relying on this statement.",
+            _PDF_META,
+        ),
+        Spacer(1, 10),
+    ]
+    for title, key, total_label in [
+        ("Operating Activities", "operating",
+         "Net Cash Provided by Operating Activities"),
+        ("Investing Activities", "investing",
+         "Net Cash Provided by Investing Activities"),
+        ("Financing Activities", "financing",
+         "Net Cash Provided by Financing Activities"),
+        ("Unclassified Cash Activity", "unclassified",
+         "Net Unclassified Cash Activity"),
+    ]:
+        section = comparative_cash_flow[key]
+        if (
+            key == "unclassified"
+            and not section["lines"]
+            and not section["current_entries"]
+            and not section["prior_entries"]
+        ):
+            continue
+        story += [
+            Paragraph(title, heading_2),
+            _pdf_table(
+                ["Line", "Current", "Prior Year", "$ Change", "% Change"],
+                [[_wrap(item["name"])] + _pdf_comparison_values(item)
+                 for item in section["lines"]]
+                or [[f"No {title.lower()} recorded", "", "", "", ""]],
+                [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
+                money_from=1,
+                totals_row=[total_label] + _pdf_comparison_values(
+                    section["total"], totals=True
+                ),
+            ),
+            Spacer(1, 8),
+        ]
+    cash_rollforward = _pdf_table(
+        ["", "Current", "Prior Year", "$ Change", "% Change"],
+        [
+            ["NET CHANGE IN CASH"] + _pdf_comparison_values(
+                comparative_cash_flow["computed_cash_change"], totals=True
+            ),
+            ["CASH AT BEGINNING OF PERIOD"] + _pdf_comparison_values(
+                comparative_cash_flow["cash_beginning"], totals=True
+            ),
+            ["CASH AT END OF PERIOD"] + _pdf_comparison_values(
+                comparative_cash_flow["cash_ending"], totals=True
+            ),
+        ],
+        [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
+        money_from=1,
+        bold_data_rows=[0, 1, 2],
+        ruled_data_rows=[0, 2],
+    )
+    cash_quality_block = [cash_rollforward]
+    if cash_flow["warnings"]:
+        cash_quality_block += [Spacer(1, 8)] + [
+            _safe_paragraph(f"Warning: {warning}", _PDF_META)
+            for warning in cash_flow["warnings"]
+        ]
+    story.append(KeepTogether(cash_quality_block))
+    if cash_flow["unclassified"]["entries"]:
+        story += [
+            Spacer(1, 10),
+            Paragraph("Unclassified Cash Activity Details", heading_2),
+            _pdf_table(
+                ["Date", "Entry #", "Reason", "Description", "Accounts", "Amount"],
+                [[
+                    str(item["entry_date"]),
+                    str(item["entry_id"]),
+                    _wrap(item["reason"]),
+                    _wrap(item["description"] or "No description"),
+                    ", ".join(item["account_numbers"]) or "none",
+                    _money(item["amount"]),
+                ] for item in cash_flow["unclassified"]["entries"]],
+                [0.8 * inch, 0.65 * inch, 2.55 * inch, 2.75 * inch,
+                 1.5 * inch, 1.0 * inch],
+                money_from=5,
+            ),
+        ]
+    if cash_flow["noncash_items"]:
+        story += [
+            Spacer(1, 10),
+            Paragraph("Noncash Investing and Financing Activity", heading_2),
+            _pdf_table(
+                ["Date", "Entry #", "Description", "Accounts"],
+                [[item["entry_date"], str(item["entry_id"]),
+                  _wrap(item["description"] or "No description"),
+                  ", ".join(item["accounts"])]
+                 for item in cash_flow["noncash_items"]],
+                [1.0 * inch, 0.75 * inch, 5.5 * inch, 2.0 * inch],
+                money_from=None,
+            ),
+        ]
+    story.append(PageBreak())
 
     # ---- Final Trial Balance
     story.append(Paragraph("Final Trial Balance", heading_2))

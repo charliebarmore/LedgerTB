@@ -126,6 +126,9 @@ table.pb-statement tr.head td {
 table.pb-statement tr.section td {
     font-weight: 700; font-size: 1.02em; padding-top: 0.9rem;
 }
+table.pb-statement tr.group td {
+    font-weight: 600; padding-top: 0.45rem; color: #374151;
+}
 table.pb-statement tr.item td.lbl { padding-left: 1.3rem; }
 table.pb-statement tr.subtotal td {
     font-weight: 700; border-top: 1px solid #565d68; padding-bottom: 0.5rem;
@@ -154,7 +157,8 @@ def financial_statement(rows, headers=None, formats=None):
     """Render rows as an actual financial statement, not a widget pile.
 
     rows: iterables of (kind, label, amounts, note) — note optional.
-      kind: 'section' (bold heading, no amounts), 'item' (indented line),
+      kind: 'section' (major heading), 'group' (subgroup heading),
+            'item' (indented line),
             'subtotal' (bold, top rule), 'total' (bold, double-ruled amount),
             'note' (muted caption line).
       amounts: list of floats/None, one per amount column (usually one;

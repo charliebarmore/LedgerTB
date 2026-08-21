@@ -8,7 +8,7 @@ file upload and the actual inserts.
 import csv
 import io
 
-from constants import AccountType
+from constants import AccountSubtype, AccountType
 
 # Recognized spellings for each column we care about.
 _HEADER_ALIASES = {
@@ -39,30 +39,32 @@ _TYPE_ALIASES = {
     "expense": (AccountType.EXPENSE, None),
     "expenses": (AccountType.EXPENSE, None),
     # QuickBooks account types
-    "bank": (AccountType.ASSET, "Cash"),
-    "accounts receivable": (AccountType.ASSET, "Receivable"),
-    "accounts receivable (a/r)": (AccountType.ASSET, "Receivable"),
-    "a/r": (AccountType.ASSET, "Receivable"),
-    "other current asset": (AccountType.ASSET, "Other Current Asset"),
-    "other current assets": (AccountType.ASSET, "Other Current Asset"),
-    "fixed asset": (AccountType.ASSET, "Fixed Asset"),
-    "fixed assets": (AccountType.ASSET, "Fixed Asset"),
-    "other asset": (AccountType.ASSET, "Other Asset"),
-    "other assets": (AccountType.ASSET, "Other Asset"),
-    "accounts payable": (AccountType.LIABILITY, "Payable"),
-    "accounts payable (a/p)": (AccountType.LIABILITY, "Payable"),
-    "a/p": (AccountType.LIABILITY, "Payable"),
-    "credit card": (AccountType.LIABILITY, "Credit Card"),
-    "other current liability": (AccountType.LIABILITY, "Other Current Liability"),
-    "other current liabilities": (AccountType.LIABILITY, "Other Current Liability"),
-    "long term liability": (AccountType.LIABILITY, "Long Term Liability"),
-    "long-term liability": (AccountType.LIABILITY, "Long Term Liability"),
-    "long term liabilities": (AccountType.LIABILITY, "Long Term Liability"),
-    "other income": (AccountType.REVENUE, "Other Income"),
-    "cost of goods sold": (AccountType.EXPENSE, "Cost of Goods Sold"),
-    "cogs": (AccountType.EXPENSE, "Cost of Goods Sold"),
-    "other expense": (AccountType.EXPENSE, "Other Expense"),
-    "other expenses": (AccountType.EXPENSE, "Other Expense"),
+    "bank": (AccountType.ASSET, AccountSubtype.CASH),
+    "accounts receivable": (AccountType.ASSET, AccountSubtype.ACCOUNTS_RECEIVABLE),
+    "accounts receivable (a/r)": (AccountType.ASSET, AccountSubtype.ACCOUNTS_RECEIVABLE),
+    "a/r": (AccountType.ASSET, AccountSubtype.ACCOUNTS_RECEIVABLE),
+    "other current asset": (AccountType.ASSET, AccountSubtype.OTHER_CURRENT_ASSET),
+    "other current assets": (AccountType.ASSET, AccountSubtype.OTHER_CURRENT_ASSET),
+    "fixed asset": (AccountType.ASSET, AccountSubtype.FIXED_ASSET),
+    "fixed assets": (AccountType.ASSET, AccountSubtype.FIXED_ASSET),
+    "other asset": (AccountType.ASSET, AccountSubtype.OTHER_ASSET),
+    "other assets": (AccountType.ASSET, AccountSubtype.OTHER_ASSET),
+    "accounts payable": (AccountType.LIABILITY, AccountSubtype.ACCOUNTS_PAYABLE),
+    "accounts payable (a/p)": (AccountType.LIABILITY, AccountSubtype.ACCOUNTS_PAYABLE),
+    "a/p": (AccountType.LIABILITY, AccountSubtype.ACCOUNTS_PAYABLE),
+    "credit card": (AccountType.LIABILITY, AccountSubtype.CREDIT_CARD),
+    "other current liability": (AccountType.LIABILITY, AccountSubtype.OTHER_CURRENT_LIABILITY),
+    "other current liabilities": (AccountType.LIABILITY, AccountSubtype.OTHER_CURRENT_LIABILITY),
+    "short term liability": (AccountType.LIABILITY, AccountSubtype.SHORT_TERM_DEBT),
+    "short-term liability": (AccountType.LIABILITY, AccountSubtype.SHORT_TERM_DEBT),
+    "long term liability": (AccountType.LIABILITY, AccountSubtype.LONG_TERM_LIABILITY),
+    "long-term liability": (AccountType.LIABILITY, AccountSubtype.LONG_TERM_LIABILITY),
+    "long term liabilities": (AccountType.LIABILITY, AccountSubtype.LONG_TERM_LIABILITY),
+    "other income": (AccountType.REVENUE, AccountSubtype.OTHER_INCOME),
+    "cost of goods sold": (AccountType.EXPENSE, AccountSubtype.COST_OF_GOODS_SOLD),
+    "cogs": (AccountType.EXPENSE, AccountSubtype.COST_OF_GOODS_SOLD),
+    "other expense": (AccountType.EXPENSE, AccountSubtype.OTHER_EXPENSE),
+    "other expenses": (AccountType.EXPENSE, AccountSubtype.OTHER_EXPENSE),
 }
 
 
@@ -147,12 +149,17 @@ def parse_coa_csv(content: str):
         if number:
             seen.add(number)
 
+        raw_subtype = (
+            (row.get(headers.get("subtype", "")) or "").strip()
+            or implied_subtype
+        )
         accounts.append({
             "number": number,
             "name": name,
             "type": acct_type,
-            "subtype": (row.get(headers.get("subtype", "")) or "").strip()
-            or implied_subtype,
+            "subtype": AccountSubtype.normalize_for_storage(
+                acct_type, raw_subtype, account_name=name
+            ),
             "description": (row.get(headers.get("description", "")) or "").strip() or None,
         })
 

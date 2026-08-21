@@ -2,7 +2,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional, List
 from database.connection import get_connection, get_cursor
-from constants import AccountType
+from constants import AccountSubtype, AccountType
 from money import to_dollars
 
 
@@ -94,6 +94,66 @@ class Account:
             rows = cursor.fetchall()
         return [Account._from_row(row) for row in rows]
 
+    @staticmethod
+    def bulk_assign_subtype(
+        client_id: int, account_ids: List[int], subtype: str
+    ) -> int:
+        """Assign one curated subtype to same-type accounts atomically.
+
+        The Chart of Accounts review panel uses this instead of calling
+        ``save`` in a loop, so either every selected account and its audit row
+        commits or none of them do.
+        """
+        from models.audit_log import AuditLog
+
+        selected_ids = list(dict.fromkeys(int(value) for value in account_ids))
+        if not selected_ids:
+            return 0
+
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            placeholders = ",".join("?" for _ in selected_ids)
+            cursor.execute(
+                f"SELECT id, type, subtype FROM accounts "
+                f"WHERE client_id = ? AND id IN ({placeholders}) "
+                "ORDER BY id",
+                [client_id, *selected_ids],
+            )
+            rows = cursor.fetchall()
+            if len(rows) != len(selected_ids):
+                raise ValueError(
+                    "One or more selected accounts no longer belong to this client."
+                )
+
+            account_types = {row["type"] for row in rows}
+            if len(account_types) != 1:
+                raise ValueError("Bulk subtype assignment requires one account type.")
+            account_type = next(iter(account_types))
+            if not AccountSubtype.is_canonical(account_type, subtype):
+                raise ValueError(
+                    f"{subtype!r} is not a valid subtype for {account_type}."
+                )
+
+            for row in rows:
+                cursor.execute(
+                    "UPDATE accounts SET subtype = ? "
+                    "WHERE id = ? AND client_id = ?",
+                    (subtype, row["id"], client_id),
+                )
+                AuditLog.write(
+                    cursor, client_id, "accounts", row["id"], "UPDATE",
+                    old_values={"subtype": row["subtype"]},
+                    new_values={"subtype": subtype},
+                )
+            conn.commit()
+            return len(rows)
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def save(self) -> int:
         """Save or update the account."""
         from models.audit_log import AuditLog
@@ -102,6 +162,9 @@ class Account:
         old_values = None
         with get_cursor(commit=True) as cursor:
             if is_new:
+                self.subtype = AccountSubtype.normalize_for_storage(
+                    self.type, self.subtype, account_name=self.name
+                )
                 cursor.execute(
                     """
                     INSERT INTO accounts (client_id, account_number, name, type, subtype, description, is_active)
