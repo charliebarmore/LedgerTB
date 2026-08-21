@@ -1,10 +1,10 @@
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Optional, Dict
 from datetime import date
 from database.connection import get_cursor
 from constants import AccountType
-from money import to_dollars
+from money import to_cents, to_dollars
 from utils.fiscal_dates import (
     fiscal_year_bounds,
     prior_year_date,
@@ -38,6 +38,28 @@ class GeneralLedgerEntry:
     credit: float
     balance: float
     memo: str
+    import_correction_role: str = ""
+    replacement_for_entry_id: Optional[int] = None
+    reversed_by_entry_id: Optional[int] = None
+    reversal_of_entry_id: Optional[int] = None
+
+    @property
+    def import_correction_label(self) -> str:
+        """Plain-language lineage for a corrected imported transaction."""
+        if self.reversal_of_entry_id:
+            return f"Import reversal of JE #{self.reversal_of_entry_id}"
+        if self.replacement_for_entry_id:
+            label = f"Replacement import for JE #{self.replacement_for_entry_id}"
+            if self.reversed_by_entry_id:
+                label += f" — later reversed by JE #{self.reversed_by_entry_id}"
+            return label
+        if self.reversed_by_entry_id:
+            return f"Original import — reversed by JE #{self.reversed_by_entry_id}"
+        return ""
+
+    @property
+    def is_reversed_import_detail(self) -> bool:
+        return bool(self.reversed_by_entry_id or self.reversal_of_entry_id)
 
 
 @dataclass
@@ -789,9 +811,35 @@ class ReportGenerator:
                     je.source_reference,
                     jel.debit,
                     jel.credit,
-                    jel.memo
+                    jel.memo,
+                    CASE
+                        WHEN linked_it.replaces_transaction_id IS NOT NULL THEN 'replacement'
+                        WHEN linked_it.superseded_by_batch IS NOT NULL THEN 'original'
+                        WHEN reversal_it.id IS NOT NULL THEN 'reversal'
+                        ELSE ''
+                    END AS import_correction_role,
+                    original_it.journal_entry_id AS replacement_for_entry_id,
+                    linked_it.reversal_journal_entry_id AS reversed_by_entry_id,
+                    reversal_it.journal_entry_id AS reversal_of_entry_id
                 FROM journal_entry_lines jel
                 JOIN journal_entries je ON jel.journal_entry_id = je.id
+                LEFT JOIN imported_transactions linked_it
+                  ON linked_it.id = (
+                      SELECT MIN(candidate.id)
+                      FROM imported_transactions candidate
+                      WHERE candidate.client_id = je.client_id
+                        AND candidate.journal_entry_id = je.id
+                  )
+                LEFT JOIN imported_transactions reversal_it
+                  ON reversal_it.id = (
+                      SELECT MIN(candidate.id)
+                      FROM imported_transactions candidate
+                      WHERE candidate.client_id = je.client_id
+                        AND candidate.reversal_journal_entry_id = je.id
+                  )
+                LEFT JOIN imported_transactions original_it
+                  ON original_it.id = linked_it.replaces_transaction_id
+                 AND original_it.client_id = je.client_id
                 WHERE jel.account_id = ?
             """
             params = [account_id]
@@ -825,10 +873,51 @@ class ReportGenerator:
                     debit=to_dollars(debit),
                     credit=to_dollars(credit),
                     balance=to_dollars(running_balance),
-                    memo=row['memo'] or ''
+                    memo=row['memo'] or '',
+                    import_correction_role=row['import_correction_role'] or '',
+                    replacement_for_entry_id=row['replacement_for_entry_id'],
+                    reversed_by_entry_id=row['reversed_by_entry_id'],
+                    reversal_of_entry_id=row['reversal_of_entry_id'],
                 ))
 
         return entries
+
+    @staticmethod
+    def compact_reversed_import_entries(
+        entries: List[GeneralLedgerEntry], account_type: str
+    ) -> tuple[List[GeneralLedgerEntry], int]:
+        """Hide only complete import reversal pairs and rebuild visible balances.
+
+        A pair that crosses the selected date range stays visible. Hiding just
+        one side would make the report's period activity misleading.
+        """
+        entry_ids = {entry.entry_id for entry in entries if entry.entry_id}
+        hidden_entry_ids = set()
+        for entry in entries:
+            if entry.reversed_by_entry_id in entry_ids:
+                hidden_entry_ids.update(
+                    {entry.entry_id, entry.reversed_by_entry_id}
+                )
+        visible = [
+            entry for entry in entries
+            if entry.entry_id not in hidden_entry_ids
+        ]
+        hidden_count = len(entries) - len(visible)
+        if not hidden_count:
+            return visible, 0
+
+        is_debit_normal = AccountType.is_debit_normal(account_type)
+        running_balance = 0
+        rebuilt = []
+        for entry in visible:
+            if entry.entry_id == 0:
+                running_balance = to_cents(entry.balance)
+            elif is_debit_normal:
+                running_balance += to_cents(entry.debit) - to_cents(entry.credit)
+            else:
+                running_balance += to_cents(entry.credit) - to_cents(entry.debit)
+            rebuilt.append(replace(entry, balance=to_dollars(running_balance)))
+        return rebuilt, hidden_count
 
     @staticmethod
     def trial_balance_to_dataframe(rows: List[TrialBalanceRow]) -> pd.DataFrame:
@@ -1009,6 +1098,7 @@ class ReportGenerator:
                 'Description': e.description,
                 'Reference': e.source_reference,
                 'Memo': e.memo,
+                'Import Correction': e.import_correction_label,
                 'Debit': e.debit if e.debit > 0 else '',
                 'Credit': e.credit if e.credit > 0 else '',
                 'Balance': e.balance

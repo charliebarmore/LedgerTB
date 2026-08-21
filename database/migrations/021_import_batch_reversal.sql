@@ -15,6 +15,12 @@ ON imported_transactions(client_id, superseded_by_batch);
 CREATE INDEX idx_imported_transactions_replaces
 ON imported_transactions(client_id, replaces_transaction_id);
 
+CREATE INDEX idx_imported_transactions_journal_link
+ON imported_transactions(client_id, journal_entry_id);
+
+CREATE INDEX idx_imported_transactions_reversal_link
+ON imported_transactions(client_id, reversal_journal_entry_id);
+
 CREATE TABLE import_batch_reversals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id INTEGER NOT NULL,

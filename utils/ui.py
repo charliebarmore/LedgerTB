@@ -224,11 +224,12 @@ table.pb-ledger tr:nth-child(even) td { background: rgba(151, 166, 195, 0.08); }
 table.pb-ledger tr.total td {
     font-weight: 700; border-top: 1px solid #565d68; background: none;
 }
+table.pb-ledger tr.muted td { color: #7b8493; }
 </style>
 """
 
 
-def ledger_table(headers, rows, align, total_row=None):
+def ledger_table(headers, rows, align, total_row=None, row_classes=None):
     """A clean listing table for ledger-style reports.
 
     headers: column headings; rows: lists of display strings;
@@ -243,7 +244,11 @@ def ledger_table(headers, rows, align, total_row=None):
         )
 
     body = [f"<tr>{cells(headers, 'th')}</tr>"]
-    body += [f"<tr>{cells(row, 'td')}</tr>" for row in rows]
+    classes = row_classes or [""] * len(rows)
+    body += [
+        f"<tr class='{_html.escape(css_class)}'>{cells(row, 'td')}</tr>"
+        for row, css_class in zip(rows, classes)
+    ]
     if total_row is not None:
         body.append(f"<tr class='total'>{cells(total_row, 'td')}</tr>")
     st.html(_LEDGER_CSS + f"<table class='pb-ledger'>{''.join(body)}</table>")

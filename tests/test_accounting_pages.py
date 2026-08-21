@@ -142,6 +142,8 @@ def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatc
     assert not page.exception
     filter_box = next(b for b in page.selectbox if b.label == "Account filter")
     assert filter_box.value is None  # nothing selected = all accounts
+    assert page.checkbox(key="gl_hide_reversed_imports").value is True
+    assert any("Excel downloads always include" in c.value for c in page.caption)
     body = " ".join(str(m.value) for m in page.markdown)
     for name in ("Cash", "Revenue", "Expense"):
         assert name in body, f"{name} section missing from the all-accounts GL"
@@ -505,3 +507,24 @@ def test_import_history_reverses_batch_into_review_queue(
     assert pending[0].replaces_transaction_id == imported.id
     assert len(page.session_state["transactions_to_review"]) == 1
     assert page.session_state["transactions_to_review"][0]["staged_id"] == pending[0].id
+
+    transactions = AppTest.from_file(
+        page_path("pages/6_Transactions.py"), default_timeout=30
+    ).run()
+    assert not transactions.exception
+    transaction_captions = " ".join(str(item.value) for item in transactions.caption)
+    assert f"Replacement for transaction #{imported.id}" in transaction_captions
+    assert "Reversal JE #" in transaction_captions
+
+    reports = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    reports.session_state["active_report"] = "General Ledger"
+    reports.run()
+    assert not reports.exception
+    assert reports.checkbox(key="gl_hide_reversed_imports").value is True
+    assert any(
+        "fully reversed imports" in str(item.value) for item in reports.info
+    )
+    reports.checkbox(key="gl_hide_reversed_imports").uncheck().run()
+    assert not reports.exception

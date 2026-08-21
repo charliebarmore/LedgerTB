@@ -8,6 +8,7 @@ from models.audit_log import AuditLog
 from models.fiscal_period import FiscalPeriod
 from models.journal_entry import JournalEntry
 from models.reconciliation import BankReconciliation
+from models.reports import ReportGenerator
 from models.transaction import ImportedTransaction
 from services.import_batch_reversal import (
     preview_import_batch_reversal,
@@ -158,6 +159,46 @@ def test_replacement_can_be_reposted_without_duplicate_override(client_id, accou
     assert entry.id is not None
     assert Account.get_balance(accounts["cash"], client_id=client_id) == -40
 
+    ledger = ReportGenerator.general_ledger(
+        accounts["cash"], date(2026, 1, 1), date(2026, 2, 28), client_id
+    )
+    assert [row.import_correction_role for row in ledger] == [
+        "original", "replacement", "reversal"
+    ]
+    assert ledger[0].import_correction_label == (
+        f"Original import — reversed by JE #{ledger[2].entry_id}"
+    )
+    assert ledger[1].import_correction_label == (
+        f"Replacement import for JE #{ledger[0].entry_id}"
+    )
+    assert ledger[2].import_correction_label == (
+        f"Import reversal of JE #{ledger[0].entry_id}"
+    )
+
+    compact, hidden_count = ReportGenerator.compact_reversed_import_entries(
+        ledger, "Asset"
+    )
+    assert hidden_count == 2
+    assert [row.import_correction_role for row in compact] == ["replacement"]
+    assert compact[-1].balance == ledger[-1].balance == -40
+
+    exported = ReportGenerator.general_ledger_to_dataframe(ledger)
+    assert len(exported) == 3
+    assert list(exported["Import Correction"]) == [
+        row.import_correction_label for row in ledger
+    ]
+
+    # If the selected period contains only one side, it must remain visible so
+    # period activity and the running balance cannot be misread.
+    february = ReportGenerator.general_ledger(
+        accounts["cash"], date(2026, 2, 1), date(2026, 2, 28), client_id
+    )
+    february_compact, hidden_count = (
+        ReportGenerator.compact_reversed_import_entries(february, "Asset")
+    )
+    assert hidden_count == 0
+    assert february_compact == february
+
 
 def test_a_replacement_batch_can_itself_be_reversed_and_reposted(client_id, accounts):
     _post(client_id, accounts, "JAN", 2, "Office supplies", -40, 5)
@@ -197,6 +238,21 @@ def test_a_replacement_batch_can_itself_be_reversed_and_reposted(client_id, acco
     assert classify_import_duplicates(
         [row], client_id, exclude_ids={staged_again.id}
     ) == 0
+
+    ledger = ReportGenerator.general_ledger(
+        accounts["cash"], date(2026, 1, 1), date(2026, 3, 31), client_id
+    )
+    replaced_twice = next(
+        item for item in ledger
+        if item.replacement_for_entry_id and item.reversed_by_entry_id
+    )
+    assert "Replacement import" in replaced_twice.import_correction_label
+    assert "later reversed" in replaced_twice.import_correction_label
+    compact, hidden_count = ReportGenerator.compact_reversed_import_entries(
+        ledger, "Asset"
+    )
+    assert hidden_count == 4
+    assert compact == []
 
 
 def test_mixed_posted_and_pending_batch_is_rebuilt_in_full(client_id, accounts):
