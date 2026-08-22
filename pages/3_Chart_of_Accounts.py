@@ -10,6 +10,8 @@ import pandas as pd
 from models.account import Account
 from models.client import Client
 from database import init_database
+from database import connection as dbconn
+from utils.client_context import scope_page_to_client
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
@@ -33,6 +35,14 @@ if not client_id:
     st.warning("Please create a client first in the Clients page.")
     st.page_link("pages/0_Clients.py", label="Go to Clients →")
     st.stop()
+
+coa_scope = scope_page_to_client(
+    st.session_state, "chart_of_accounts", client_id, dbconn.DATABASE_PATH
+)
+if coa_scope.changed:
+    st.session_state.pop("editing_account", None)
+
+coa_key = coa_scope.key
 
 # Get client info
 client = Client.get_by_id(client_id)
@@ -87,23 +97,27 @@ with tab1:
                         f"(current: {current}{suggested}{inactive})"
                     )
 
-                generation_key = f"review_subtype_generation_{review_type}"
+                generation_key = coa_key(
+                    f"review_subtype_generation_{review_type}"
+                )
                 generation = st.session_state.get(generation_key, 0)
-                with st.form(f"review_subtypes_{review_type}"):
+                with st.form(coa_key(f"review_subtypes_{review_type}")):
                     st.markdown(f"**{AccountType.plural_label(review_type)}**")
                     selected_ids = st.multiselect(
                         "Accounts to update",
                         options=list(by_id),
                         format_func=_review_label,
                         key=(
-                            f"review_subtype_accounts_{review_type}_"
-                            f"{generation}"
+                            coa_key(
+                                f"review_subtype_accounts_{review_type}_"
+                                f"{generation}"
+                            )
                         ),
                     )
                     assigned_subtype = st.selectbox(
                         "Assign subtype",
                         options=AccountSubtype.for_type(review_type),
-                        key=f"review_subtype_value_{review_type}",
+                        key=coa_key(f"review_subtype_value_{review_type}"),
                     )
                     if st.form_submit_button(
                         "Apply to selected accounts", type="primary"
@@ -164,7 +178,7 @@ with tab1:
 
                         with col4:
                             # Edit button
-                            if st.button("Edit", key=f"edit_{account.id}"):
+                            if st.button("Edit", key=coa_key(f"edit_{account.id}")):
                                 st.session_state['editing_account'] = account.id
 
         # Edit account modal
@@ -179,8 +193,8 @@ with tab1:
                 st.subheader(f"Edit Account: {account.display_name()}")
 
                 original_type = account.type
-                type_key = f"edit_account_type_{account.id}"
-                subtype_key = f"edit_account_subtype_{account.id}"
+                type_key = coa_key(f"edit_account_type_{account.id}")
+                subtype_key = coa_key(f"edit_account_subtype_{account.id}")
                 subtype_scope_key = f"{subtype_key}_scope"
                 new_type = st.selectbox(
                     "Account Type",
@@ -199,9 +213,15 @@ with tab1:
                     st.session_state[subtype_scope_key] = subtype_scope
                     st.session_state[subtype_key] = current_subtype
 
-                with st.form("edit_account_form"):
-                    new_number = st.text_input("Account Number", value=account.account_number)
-                    new_name = st.text_input("Account Name", value=account.name)
+                with st.form(coa_key("edit_account_form")):
+                    new_number = st.text_input(
+                        "Account Number", value=account.account_number,
+                        key=coa_key(f"edit_account_number_{account.id}"),
+                    )
+                    new_name = st.text_input(
+                        "Account Name", value=account.name,
+                        key=coa_key(f"edit_account_name_{account.id}"),
+                    )
                     new_subtype = st.selectbox(
                         "Statement Subtype",
                         options=subtype_options,
@@ -228,9 +248,13 @@ with tab1:
                         "Description/Memo",
                         value=account.description or "",
                         placeholder="e.g., Chase Business Checking ****1234",
-                        help="Optional notes to help identify this account"
+                        help="Optional notes to help identify this account",
+                        key=coa_key(f"edit_account_description_{account.id}"),
                     )
-                    new_active = st.checkbox("Active", value=account.is_active)
+                    new_active = st.checkbox(
+                        "Active", value=account.is_active,
+                        key=coa_key(f"edit_account_active_{account.id}"),
+                    )
 
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -285,17 +309,23 @@ with tab2:
     account_type = st.selectbox(
         "Account Type",
         options=AccountType.ALL,
-        key="add_account_type",
+        key=coa_key("add_account_type"),
     )
-    add_subtype_key = "add_account_subtype"
+    add_subtype_key = coa_key("add_account_subtype")
     add_subtype_scope_key = f"{add_subtype_key}_scope"
     if st.session_state.get(add_subtype_scope_key) != account_type:
         st.session_state[add_subtype_scope_key] = account_type
         st.session_state[add_subtype_key] = None
 
-    with st.form("add_account_form", clear_on_submit=True):
-        account_number = st.text_input("Account Number", placeholder="e.g., 1000")
-        account_name = st.text_input("Account Name", placeholder="e.g., Cash - Operating")
+    with st.form(coa_key("add_account_form"), clear_on_submit=True):
+        account_number = st.text_input(
+            "Account Number", placeholder="e.g., 1000",
+            key=coa_key("add_account_number"),
+        )
+        account_name = st.text_input(
+            "Account Name", placeholder="e.g., Cash - Operating",
+            key=coa_key("add_account_name"),
+        )
         subtype = st.selectbox(
             "Statement Subtype (optional)",
             options=[None] + AccountSubtype.for_type(account_type),
@@ -305,7 +335,8 @@ with tab2:
         description = st.text_area(
             "Description/Memo (optional)",
             placeholder="e.g., Chase Business Checking ****1234",
-            help="Optional notes to help identify this account"
+            help="Optional notes to help identify this account",
+            key=coa_key("add_account_description"),
         )
 
         if st.form_submit_button("Add Account", type="primary"):
@@ -349,7 +380,9 @@ with tab3:
     st.download_button("Download template CSV", data=_template,
                        file_name="chart_of_accounts_template.csv", mime="text/csv")
 
-    uploaded = st.file_uploader("Chart of accounts CSV", type=["csv"], key="coa_upload")
+    uploaded = st.file_uploader(
+        "Chart of accounts CSV", type=["csv"], key=coa_key("coa_upload")
+    )
     if uploaded is not None:
         content = uploaded.getvalue().decode("utf-8-sig", "ignore")
         try:
@@ -394,7 +427,7 @@ with tab3:
             st.caption(f"{new_count} new account(s); {skip_count} already exist (will be skipped).")
 
             if st.button(f"Import {new_count} account(s)", type="primary",
-                         disabled=(new_count == 0), key="coa_import_btn"):
+                         disabled=(new_count == 0), key=coa_key("coa_import_btn")):
                 created = 0
                 failed = []
                 for a in parsed:
