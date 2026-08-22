@@ -6,6 +6,7 @@ from streamlit.testing.v1 import AppTest
 import streamlit as st
 
 from models.account import Account
+from models.client import Client
 from models.draft_entry import DraftEntry
 from models.journal_entry import JournalEntry
 from models.transaction import ImportedTransaction
@@ -55,6 +56,73 @@ def test_paginated_accounting_pages_render(client_id, accounts, monkeypatch):
     assert not audit.exception
     assert any(metric.label == "Total Changes" for metric in audit.metric)
     assert any(button.label == "Next" and not button.disabled for button in audit.button)
+
+
+def test_transactions_page_rebuilds_for_a_new_selected_client(
+    client_id, accounts, monkeypatch
+):
+    second_client_id = Client(name="Switch Target").save(seed_accounts=False)
+    second_bank = Account(
+        client_id=second_client_id,
+        account_number="1010",
+        name="Second Client Checking",
+        type="Asset",
+    )
+    second_bank.save()
+    ImportedTransaction.bulk_insert([
+        ImportedTransaction(
+            client_id=client_id,
+            import_batch="first-client",
+            transaction_date=date(2026, 1, 1),
+            description="FIRST CLIENT ROW",
+            amount=-10,
+            bank_account_id=accounts["cash"],
+            status="Pending",
+        ),
+        ImportedTransaction(
+            client_id=second_client_id,
+            import_batch="second-client",
+            transaction_date=date(2026, 1, 2),
+            description="SECOND CLIENT ROW",
+            amount=-20,
+            bank_account_id=second_bank.id,
+            status="Pending",
+        ),
+    ])
+
+    selected = {"client_id": client_id}
+    import utils.client_selector as selector
+
+    monkeypatch.setattr(
+        selector, "render_client_selector", lambda: selected["client_id"]
+    )
+    monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
+
+    page = AppTest.from_file(
+        page_path("pages/6_Transactions.py"), default_timeout=30
+    ).run()
+    assert not page.exception
+    assert next(
+        metric for metric in page.metric if metric.label == "Filtered Transactions"
+    ).value == "1"
+    first_text = " ".join(str(item.value) for item in page.text)
+    assert "FIRST CLIENT ROW" in first_text
+    assert "SECOND CLIENT ROW" not in first_text
+
+    selected["client_id"] = second_client_id
+    page.run()
+
+    assert not page.exception
+    assert next(
+        metric for metric in page.metric if metric.label == "Filtered Transactions"
+    ).value == "1"
+    second_text = " ".join(str(item.value) for item in page.text)
+    assert "SECOND CLIENT ROW" in second_text
+    assert "FIRST CLIENT ROW" not in second_text
+    bank_filter = next(
+        box for box in page.selectbox if box.label == "Bank/Credit Card"
+    )
+    assert bank_filter.value == 0
 
 
 def test_statement_editor_reserves_space_for_its_scrollbar():

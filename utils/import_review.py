@@ -62,3 +62,111 @@ def row_key(prefix, transaction):
     widget's persisted state onto a different transaction.
     """
     return f"{prefix}_{transaction['uid']}"
+
+
+_CLIENT_IMPORT_STATE_KEYS = {
+    "imported_data",
+    "column_mapping",
+    "transactions_to_review",
+    "document_extraction",
+    "document_transactions",
+    "document_skipped",
+    "document_amounts_normalized",
+    "document_identity",
+    "document_name",
+    "document_bytes",
+    "document_text_editor",
+    "csv_content",
+    "csv_raw_content",
+    "csv_filename",
+    "csv_source_id",
+    "csv_editor_widget",
+    "csv_coa_override",
+    "csv_multi_account_mode",
+    "csv_bank_account",
+    "csv_import_profile_id",
+    "csv_sign_convention",
+    "csv_date_column",
+    "csv_description_column",
+    "csv_source_account_column",
+    "csv_amount_format",
+    "csv_amount_column",
+    "csv_debit_column",
+    "csv_credit_column",
+    "csv_import_profile_name",
+    "csv_confirm",
+    "_csv_profile_choice_context",
+    "_csv_mapping_context",
+    "_csv_profile_name_context",
+    "account_mapping",
+    "source_account_col",
+    "document_bank_account",
+    "document_sign_convention",
+    "statement_document_upload",
+    "statement_ai_consent",
+    "document_transaction_editor",
+    "document_validation_confirmed",
+    "post_result",
+    "import_complete",
+    "import_complete_msg",
+    "confirm_dismiss_staged",
+    "ai_categorization_result",
+    "bulk_result",
+    "bulk_account_select",
+    "sort_by",
+    "sort_order",
+    "history_batch",
+    "confirm_profile_delete_id",
+    "quick_add_account_msg",
+    "quick_add_account_error",
+}
+
+_CLIENT_IMPORT_STATE_PREFIXES = (
+    "cat_",
+    "include_",
+    "xfer_",
+    "duplicate_override_",
+    "duplicate_reason_",
+    "newacct_",
+    "map_",
+    "batch_reversal_",
+    "reverse_import_batch_",
+    "verify_",
+)
+
+
+def scope_import_state_to_client(session_state, client_id):
+    """Discard volatile import work when the selected client changes.
+
+    Uploaded files and review rows live only in Streamlit session state until
+    they are staged or posted.  Keeping that state under a different selected
+    client can make the review screen appear not to switch clients and, more
+    importantly, risks presenting one client's rows beside another client's
+    accounts.  Durable pending rows are not affected; the review page reloads
+    those from the database for the newly selected client.
+
+    Returns ``True`` when a client change was handled.
+    """
+    marker = "_import_state_client_id"
+    previous_client_id = session_state.get(marker)
+    if previous_client_id is None:
+        session_state[marker] = client_id
+        return False
+    if previous_client_id == client_id:
+        return False
+
+    uploader_nonce = int(session_state.get("csv_uploader_nonce", 0) or 0)
+    session_state.pop(f"csv_uploader_{uploader_nonce}", None)
+    for key in list(session_state.keys()):
+        if (
+            key in _CLIENT_IMPORT_STATE_KEYS
+            or key.startswith(_CLIENT_IMPORT_STATE_PREFIXES)
+        ):
+            session_state.pop(key, None)
+
+    # Rotate the uploader identity so Streamlit cannot hand the prior client's
+    # uploaded file back to the new client on the next render.
+    session_state["csv_uploader_nonce"] = uploader_nonce + 1
+    session_state["import_active_tab"] = "Upload CSV"
+    session_state[marker] = client_id
+    return True

@@ -6,7 +6,12 @@ fix keys every per-row widget by a stable per-transaction id instead. These
 tests lock the identity helper and demonstrate the sort-stability invariant.
 """
 
-from utils.import_review import ensure_row_ids, row_key, classify_review_rows
+from utils.import_review import (
+    classify_review_rows,
+    ensure_row_ids,
+    row_key,
+    scope_import_state_to_client,
+)
 
 
 def test_ensure_row_ids_assigns_unique_ids():
@@ -38,6 +43,43 @@ def test_row_key_is_prefixed_and_stable():
     assert row_key("include", t) == "include_abc123"
     # Same transaction -> same key regardless of anything else in the list.
     assert row_key("cat", t) == row_key("cat", {"uid": "abc123"})
+
+
+def test_client_switch_discards_only_volatile_import_state():
+    state = {
+        "_import_state_client_id": 1,
+        "transactions_to_review": [{"uid": "row-a", "client_id": 1}],
+        "cat_row-a": 6000,
+        "include_row-a": True,
+        "csv_content": "Date,Description,Amount",
+        "document_bytes": b"old-client-statement",
+        "csv_uploader_nonce": 4,
+        "unrelated_setting": "keep",
+    }
+
+    assert scope_import_state_to_client(state, 2) is True
+
+    assert state["_import_state_client_id"] == 2
+    assert state["import_active_tab"] == "Upload CSV"
+    assert state["csv_uploader_nonce"] == 5
+    assert state["unrelated_setting"] == "keep"
+    assert "transactions_to_review" not in state
+    assert "cat_row-a" not in state
+    assert "include_row-a" not in state
+    assert "csv_content" not in state
+    assert "document_bytes" not in state
+
+
+def test_same_client_keeps_in_progress_import_state():
+    state = {
+        "_import_state_client_id": 7,
+        "transactions_to_review": [{"uid": "row-a", "client_id": 7}],
+        "csv_content": "still working",
+    }
+
+    assert scope_import_state_to_client(state, 7) is False
+    assert state["transactions_to_review"][0]["client_id"] == 7
+    assert state["csv_content"] == "still working"
 
 
 def test_widget_state_follows_transaction_across_sort():

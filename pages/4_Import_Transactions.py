@@ -38,7 +38,12 @@ from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils.ui import apply_default_on_change, is_parking_account, view_switcher
 from utils import icons
-from utils.import_review import ensure_row_ids, row_key, classify_review_rows
+from utils.import_review import (
+    classify_review_rows,
+    ensure_row_ids,
+    row_key,
+    scope_import_state_to_client,
+)
 
 # Initialize database
 
@@ -57,6 +62,10 @@ if not client_id:
     st.warning("Please create a client first in the Clients page.")
     st.page_link("pages/0_Clients.py", label="Go to Clients →")
     st.stop()
+
+# Volatile upload/review state belongs to the client that created it. Reset it
+# before rendering accounts or review rows after a sidebar client switch.
+scope_import_state_to_client(st.session_state, client_id)
 
 # Get client info
 client = Client.get_by_id(client_id)
