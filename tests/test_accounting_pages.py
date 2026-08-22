@@ -352,12 +352,12 @@ def test_legacy_income_statement_defaults_to_classic_layout(
     page.run()
 
     assert not page.exception
-    assert page.toggle(key="is_group_subtypes").value is False
+    assert page.toggle(key="is_group_subtypes__reports_g0").value is False
     assert any("classic layout" in str(item.value) for item in page.info)
 
-    page.toggle(key="is_group_subtypes").set_value(True).run()
+    page.toggle(key="is_group_subtypes__reports_g0").set_value(True).run()
     assert not page.exception
-    assert page.toggle(key="is_group_subtypes").value is True
+    assert page.toggle(key="is_group_subtypes__reports_g0").value is True
 
 
 def test_cash_flow_report_prints_reconciliation_difference(
@@ -433,7 +433,7 @@ def test_cash_flow_report_surfaces_prior_year_quality_warnings(
     page.run()
 
     assert not page.exception
-    assert page.toggle(key="cf_compare_py").value is True
+    assert page.toggle(key="cf_compare_py__reports_g0").value is True
     assert any(
         "Prior-year cash flow has items to review" in str(item.value)
         for item in page.warning
@@ -459,20 +459,132 @@ def test_period_picker_drives_the_worksheet_dates(client_id, accounts, monkeypat
     periods = FiscalPeriod.get_all(client_id)
     year = next(p for p in periods if p.period_type == "Year")
     may = next(p for p in periods if "May" in p.period_name)
-    assert page.session_state["period_start"] == year.start_date
+    start_key = "period_start__trial_balance_worksheet_g0"
+    end_key = "period_end__trial_balance_worksheet_g0"
+    period_key = "period_selector__trial_balance_worksheet_g0"
+    assert page.session_state[start_key] == year.start_date
 
-    page.selectbox(key="period_selector").set_value(may.id).run()
+    page.selectbox(key=period_key).set_value(may.id).run()
     assert not page.exception
-    assert page.session_state["period_start"] == may.start_date
-    assert page.session_state["period_end"] == may.end_date
+    assert page.session_state[start_key] == may.start_date
+    assert page.session_state[end_key] == may.end_date
 
     # A hand-edited date survives unrelated reruns…
-    page.date_input(key="period_start").set_value(may.start_date.replace(day=15)).run()
-    assert page.session_state["period_start"] == may.start_date.replace(day=15)
+    page.date_input(key=start_key).set_value(may.start_date.replace(day=15)).run()
+    assert page.session_state[start_key] == may.start_date.replace(day=15)
     # …but picking another period resets the range again.
     q3 = next(p for p in periods if "Q3" in p.period_name)
-    page.selectbox(key="period_selector").set_value(q3.id).run()
-    assert page.session_state["period_start"] == q3.start_date
+    page.selectbox(key=period_key).set_value(q3.id).run()
+    assert page.session_state[start_key] == q3.start_date
+
+
+def test_worksheet_discards_unsaved_aje_after_client_switch(
+    client_id, accounts, monkeypatch
+):
+    second_client_id = Client(name="Second Worksheet Client").save(
+        seed_accounts=False
+    )
+    second_cash = Account(
+        client_id=second_client_id,
+        account_number="1100",
+        name="Second Client Cash",
+        type="Asset",
+    )
+    second_cash.save()
+    Account(
+        client_id=second_client_id,
+        account_number="6100",
+        name="Second Client Expense",
+        type="Expense",
+    ).save()
+    selected = {"client_id": client_id}
+    _select_client(monkeypatch, lambda: selected["client_id"])
+
+    page = AppTest.from_file(
+        page_path("pages/1_Trial_Balance_Worksheet.py"), default_timeout=30
+    ).run()
+    assert not page.exception
+    next(button for button in page.button if button.label == "+ Add AJE").click().run()
+    assert not page.exception
+    page.text_input(
+        key="aje_description__trial_balance_worksheet_g0"
+    ).set_value("FIRST CLIENT UNSAVED AJE").run()
+    page.selectbox(
+        key="line1_acct__trial_balance_worksheet_g0"
+    ).set_value(accounts["expense"]).run()
+    page.number_input(
+        key="line1_dr__trial_balance_worksheet_g0"
+    ).set_value(475.0).run()
+
+    selected["client_id"] = second_client_id
+    page.run()
+
+    assert not page.exception
+    assert "show_aje_form" not in page.session_state
+    assert not any(
+        heading.value == "Add Adjusting Journal Entry"
+        for heading in page.subheader
+    )
+
+    next(button for button in page.button if button.label == "+ Add AJE").click().run()
+    assert not page.exception
+    assert page.text_input(
+        key="aje_description__trial_balance_worksheet_g1"
+    ).value == ""
+    assert page.number_input(
+        key="line1_dr__trial_balance_worksheet_g1"
+    ).value == 0.0
+    assert page.selectbox(
+        key="line1_acct__trial_balance_worksheet_g1"
+    ).value == second_cash.id
+
+
+def test_reports_reset_view_but_honor_current_client_drilldown(
+    client_id, accounts, monkeypatch
+):
+    from database import connection as dbconn
+    from utils.client_context import set_client_intent
+
+    second_client_id = Client(name="Second Reports Client").save(
+        seed_accounts=False
+    )
+    second_cash = Account(
+        client_id=second_client_id,
+        account_number="1100",
+        name="Second Reports Cash",
+        type="Asset",
+    )
+    second_cash.save()
+    selected = {"client_id": client_id}
+    _select_client(monkeypatch, lambda: selected["client_id"])
+
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.session_state["active_report"] = "Cash Flow"
+    page.run()
+    assert not page.exception
+    assert page.session_state["active_report"] == "Cash Flow"
+
+    selected["client_id"] = second_client_id
+    page.run()
+    assert not page.exception
+    assert page.session_state["active_report"] == "Trial Balance"
+    assert page.date_input(key="tb_date__reports_g1").value == date.today()
+
+    set_client_intent(
+        page.session_state,
+        "report",
+        {"report": "General Ledger", "account_id": second_cash.id},
+        second_client_id,
+        dbconn.DATABASE_PATH,
+    )
+    page.run()
+    assert not page.exception
+    assert page.session_state["active_report"] == "General Ledger"
+    assert next(
+        box for box in page.selectbox if box.label == "Account filter"
+    ).value == second_cash.id
 
 
 def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatch):
@@ -493,7 +605,9 @@ def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatc
     assert not page.exception
     filter_box = next(b for b in page.selectbox if b.label == "Account filter")
     assert filter_box.value is None  # nothing selected = all accounts
-    assert page.checkbox(key="gl_hide_reversed_imports").value is True
+    assert page.checkbox(
+        key="gl_hide_reversed_imports__reports_g0"
+    ).value is True
     assert any("Excel downloads always include" in c.value for c in page.caption)
     body = " ".join(str(m.value) for m in page.markdown)
     for name in ("Cash", "Revenue", "Expense"):
@@ -605,6 +719,61 @@ def test_journal_discards_unsaved_state_for_same_client_id_in_another_book(
     assert journal.selectbox(key="account_0_g1").value is None
     assert journal.number_input(key="debit_0_g1").value == 0.0
     assert journal.text_input(key="je_hdr_desc_g1").value == ""
+
+
+def test_current_client_journal_intent_survives_destination_context_reset(
+    client_id, accounts, monkeypatch
+):
+    """A deliberate B drill-down must survive clearing Journal page state for A."""
+    from database import connection as dbconn
+    from utils.client_context import set_client_intent
+
+    second_client_id = Client(name="Journal Intent Target").save(
+        seed_accounts=False
+    )
+    second_cash = Account(
+        client_id=second_client_id,
+        account_number="1100",
+        name="Intent Cash",
+        type="Asset",
+    )
+    second_cash.save()
+    second_revenue = Account(
+        client_id=second_client_id,
+        account_number="4100",
+        name="Intent Revenue",
+        type="Revenue",
+    )
+    second_revenue.save()
+    target = post_entry(
+        second_client_id,
+        date(2026, 7, 31),
+        [(second_cash.id, 88, 0), (second_revenue.id, 0, 88)],
+    )
+    selected = {"client_id": client_id}
+    _select_client(monkeypatch, lambda: selected["client_id"])
+
+    journal = AppTest.from_file(
+        page_path("pages/2_Journal_Entries.py"), default_timeout=30
+    ).run()
+    assert not journal.exception
+
+    selected["client_id"] = second_client_id
+    set_client_intent(
+        journal.session_state,
+        "journal",
+        {"entry_id": target.id, "view": "New Entry"},
+        second_client_id,
+        dbconn.DATABASE_PATH,
+    )
+    journal.run()
+
+    assert not journal.exception
+    assert journal.session_state["journal_active_tab"] == "New Entry"
+    assert journal.session_state["editing_entry_id"] == target.id
+    assert journal.session_state["je_form_gen"] == 1
+    assert journal.text_input(key="je_hdr_desc_g1").value == "test entry"
+    assert journal.selectbox(key="account_0_g1").value == second_cash.id
 
 
 def test_journal_totals_reflect_committed_values_immediately(
@@ -939,9 +1108,11 @@ def test_import_history_reverses_batch_into_review_queue(
     reports.session_state["active_report"] = "General Ledger"
     reports.run()
     assert not reports.exception
-    assert reports.checkbox(key="gl_hide_reversed_imports").value is True
+    assert reports.checkbox(
+        key="gl_hide_reversed_imports__reports_g0"
+    ).value is True
     assert any(
         "fully reversed imports" in str(item.value) for item in reports.info
     )
-    reports.checkbox(key="gl_hide_reversed_imports").uncheck().run()
+    reports.checkbox(key="gl_hide_reversed_imports__reports_g0").uncheck().run()
     assert not reports.exception

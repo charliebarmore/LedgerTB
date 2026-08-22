@@ -9,7 +9,9 @@ from datetime import date, datetime
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
-from utils.client_selector import render_client_selector, get_selected_client
+from database import connection as dbconn
+from utils.client_context import scope_page_to_client, set_client_intent
+from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
 from models.client import Client
@@ -33,6 +35,15 @@ client_id = render_client_selector()
 if not client_id:
     st.warning("Please select or create a client first.")
     st.stop()
+
+audit_scope = scope_page_to_client(
+    st.session_state, "audit_trail", client_id, dbconn.DATABASE_PATH
+)
+if audit_scope.changed:
+    for key in ("audit_filter_signature", "audit_page"):
+        st.session_state.pop(key, None)
+
+audit_key = audit_scope.key
 
 client = Client.get_by_id(client_id)
 if not client:
@@ -63,14 +74,14 @@ with filter_cols[0]:
     start_date = st.date_input(
         "From Date",
         value=default_start_date,
-        key="audit_start_date"
+        key=audit_key("audit_start_date")
     )
 
 with filter_cols[1]:
     end_date = st.date_input(
         "To Date",
         value=today,
-        key="audit_end_date"
+        key=audit_key("audit_end_date")
     )
 
 with filter_cols[2]:
@@ -85,7 +96,7 @@ with filter_cols[2]:
             "database_backup", "database_restore",
         ],
         index=0,
-        key="table_filter"
+        key=audit_key("table_filter")
     )
 
 with filter_cols[3]:
@@ -96,14 +107,14 @@ with filter_cols[3]:
             "REOPEN", "EXPORT", "BACKUP", "RESTORE", "OVERRIDE",
         ],
         index=0,
-        key="action_filter"
+        key=audit_key("action_filter")
     )
 
 with filter_cols[4]:
     search_term = st.text_input(
         "Search",
         placeholder="Search in values...",
-        key="audit_search"
+        key=audit_key("audit_search")
     )
 
 if start_date > end_date:
@@ -150,7 +161,10 @@ st.markdown("---")
 
 nav_left, nav_status, nav_right = st.columns([1, 2, 1])
 with nav_left:
-    if st.button("Previous", disabled=current_page <= 1, key="audit_previous"):
+    if st.button(
+        "Previous", disabled=current_page <= 1,
+        key=audit_key("audit_previous"),
+    ):
         st.session_state.audit_page = current_page - 1
         st.rerun()
 with nav_status:
@@ -161,7 +175,10 @@ with nav_status:
         f"of {summary['total']}"
     )
 with nav_right:
-    if st.button("Next", disabled=current_page >= page_count, key="audit_next"):
+    if st.button(
+        "Next", disabled=current_page >= page_count,
+        key=audit_key("audit_next"),
+    ):
         st.session_state.audit_page = current_page + 1
         st.rerun()
 
@@ -253,8 +270,17 @@ else:
             # Link to view the entry if it still exists (for INSERT and UPDATE)
             if log.action != "DELETE" and log.table_name == "journal_entries":
                 st.markdown("---")
-                if st.button(f"View Entry #{log.record_id}", key=f"view_{log.id}"):
-                    st.session_state.view_entry_id = log.record_id
+                if st.button(
+                    f"Open Entry #{log.record_id}",
+                    key=audit_key(f"view_{log.id}"),
+                ):
+                    set_client_intent(
+                        st.session_state,
+                        "journal",
+                        {"entry_id": log.record_id, "view": "New Entry"},
+                        client_id,
+                        dbconn.DATABASE_PATH,
+                    )
                     st.switch_page("pages/2_Journal_Entries.py")
 
     # Summary statistics

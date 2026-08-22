@@ -10,11 +10,12 @@ alone does not prevent the frontend from restoring an old widget value.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import MutableMapping
+from typing import Any, MutableMapping
 
 
 _ACTIVE_IDENTITY_KEY = "_active_client_context"
 _ACTIVE_GENERATION_KEY = "_active_client_context_generation"
+_INTENT_PREFIX = "_client_navigation_intent_"
 
 
 def _book_identity(book_path) -> str:
@@ -95,3 +96,40 @@ def scope_page_to_client(
         generation=session_state[generation_key],
         changed=changed,
     )
+
+
+def set_client_intent(
+    session_state: MutableMapping,
+    name: str,
+    value: Any,
+    client_id: int,
+    book_path,
+) -> None:
+    """Store a one-shot cross-page value owned by the current client context.
+
+    Plain Streamlit session keys survive page changes, but a bare account or
+    entry id is unsafe because ids restart in each book.  Intents carry their
+    owner so a destination can distinguish a legitimate drill-down after a
+    client switch from stale navigation left by another book or client.
+    """
+    session_state[f"{_INTENT_PREFIX}{name}"] = (
+        client_context_identity(book_path, client_id),
+        value,
+    )
+
+
+def pop_client_intent(
+    session_state: MutableMapping,
+    name: str,
+    client_id: int,
+    book_path,
+    default=None,
+):
+    """Consume an intent only when it belongs to the selected book/client."""
+    payload = session_state.pop(f"{_INTENT_PREFIX}{name}", None)
+    if not isinstance(payload, tuple) or len(payload) != 2:
+        return default
+    owner, value = payload
+    if owner != client_context_identity(book_path, client_id):
+        return default
+    return value

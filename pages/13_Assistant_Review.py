@@ -12,10 +12,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
+from database import connection as dbconn
 from models import assistant_review
 from models.draft_entry import DraftEntry
 from models.transaction import ImportedTransaction
 from services.branding import pending_client_branding_count
+from utils.client_context import set_client_intent
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
@@ -49,7 +51,10 @@ na1, na2, na3, na4 = st.columns([1, 1, 1, 1])
 with na1:
     st.metric("Draft entries", pending_drafts)
     if pending_drafts and st.button("Review drafts →", key="ar_goto_drafts"):
-        st.session_state.journal_active_tab = "Drafts"
+        set_client_intent(
+            st.session_state, "journal", {"view": "Drafts"},
+            client_id, dbconn.DATABASE_PATH,
+        )
         st.switch_page("pages/2_Journal_Entries.py")
 with na2:
     st.metric("Staged imports", pending_staged)
@@ -107,8 +112,13 @@ else:
         with row2:
             if a.table_name == "journal_entries" and a.action == "INSERT":
                 if st.button("Open entry", key=f"ar_open_{a.audit_id}"):
-                    st.session_state.edit_entry_id = a.record_id
-                    st.session_state.journal_active_tab = "New Entry"
+                    set_client_intent(
+                        st.session_state,
+                        "journal",
+                        {"entry_id": a.record_id, "view": "New Entry"},
+                        client_id,
+                        dbconn.DATABASE_PATH,
+                    )
                     st.switch_page("pages/2_Journal_Entries.py")
 
     st.divider()

@@ -19,7 +19,9 @@ from io import BytesIO
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
-from utils.client_selector import render_client_selector, get_selected_client
+from database import connection as dbconn
+from utils.client_context import scope_page_to_client, set_client_intent
+from utils.client_selector import render_client_selector
 from utils.ui import apply_default_on_change
 from utils.unlock import require_unlock
 from utils import icons
@@ -54,6 +56,24 @@ client_id = render_client_selector()
 if not client_id:
     st.warning("Please select or create a client first.")
     st.stop()
+
+worksheet_scope = scope_page_to_client(
+    st.session_state, "trial_balance_worksheet", client_id,
+    dbconn.DATABASE_PATH,
+)
+if worksheet_scope.changed:
+    # Period ids and every unsaved AJE value belong to the prior client.
+    # Mutation widgets use the generation-scoped keys below so the browser
+    # cannot restore their old values after these Python values are cleared.
+    for key in (
+        "selected_period_id",
+        "last_year",
+        "show_aje_form",
+        "aje_prefill_account",
+    ):
+        st.session_state.pop(key, None)
+
+worksheet_key = worksheet_scope.key
 
 client = Client.get_by_id(client_id)
 if not client:
@@ -104,7 +124,7 @@ with col1:
             "Fiscal Year",
             options=years_list,
             index=0,
-            key="worksheet_year"
+            key=worksheet_key("worksheet_year")
         )
 
     with year_col2:
@@ -113,8 +133,13 @@ with col1:
             # Show years that aren't already available
             potential_years = [y for y in range(current_year, current_year - 10, -1) if y not in available_years]
             if potential_years:
-                new_year = st.selectbox("Select year to add", options=potential_years, key="add_year_select")
-                if st.button("Add Fiscal Year", key="add_year_btn"):
+                new_year = st.selectbox(
+                    "Select year to add", options=potential_years,
+                    key=worksheet_key("add_year_select"),
+                )
+                if st.button(
+                    "Add Fiscal Year", key=worksheet_key("add_year_btn")
+                ):
                     FiscalPeriod.generate_periods(client_id, new_year, fiscal_year_end)
                     st.success(f"Added FY {new_year}")
                     st.rerun()
@@ -151,7 +176,7 @@ with col2:
         options=list(period_options.keys()),
         format_func=lambda x: period_options[x],
         index=list(period_options.keys()).index(st.session_state.selected_period_id) if st.session_state.selected_period_id in period_options else 0,
-        key="period_selector"
+        key=worksheet_key("period_selector")
     )
     st.session_state.selected_period_id = selected_period_id
 
@@ -161,21 +186,23 @@ selected_period = FiscalPeriod.get_by_id(selected_period_id)
 # Period would silently leave the old dates (and numbers) in place. Re-apply
 # the period's dates only when the period actually changes — a hand-edited
 # range survives everything else.
-apply_default_on_change("period_start", depends_on=selected_period_id,
+period_start_key = worksheet_key("period_start")
+period_end_key = worksheet_key("period_end")
+apply_default_on_change(period_start_key, depends_on=selected_period_id,
                         default_value=selected_period.start_date)
-apply_default_on_change("period_end", depends_on=selected_period_id,
+apply_default_on_change(period_end_key, depends_on=selected_period_id,
                         default_value=selected_period.end_date)
 
 with col3:
     period_start = st.date_input(
         "From",
-        key="period_start"
+        key=period_start_key
     )
 
 with col4:
     period_end = st.date_input(
         "To",
-        key="period_end"
+        key=period_end_key
     )
 
 if period_start > period_end:
@@ -183,7 +210,10 @@ if period_start > period_end:
     st.stop()
 
 # Show all accounts toggle
-show_all = st.checkbox("Show all accounts (default: only accounts with activity)", value=False, key="show_all_accounts")
+show_all = st.checkbox(
+    "Show all accounts (default: only accounts with activity)",
+    value=False, key=worksheet_key("show_all_accounts"),
+)
 
 # Year close / reopen — locks all journal entries dated within the fiscal year
 year_period = next((p for p in year_periods if p.period_type == "Year"), None)
@@ -238,7 +268,10 @@ if year_period:
         with lock_cols[0]:
             st.warning(f"FY {selected_year} is closed. Entries in this year are locked.")
         with lock_cols[1]:
-            if st.button("Reopen year", key="reopen_year", width="stretch"):
+            if st.button(
+                "Reopen year", key=worksheet_key("reopen_year"),
+                width="stretch",
+            ):
                 FiscalPeriod.set_closed(year_period.id, False, client_id)
                 st.rerun()
     else:
@@ -248,18 +281,18 @@ if year_period:
             confirmation_phrase = f"CLOSE FY {selected_year}"
             close_confirmation = st.text_input(
                 f"Type {confirmation_phrase} to confirm",
-                key="close_year_confirmation",
+                key=worksheet_key("close_year_confirmation"),
                 placeholder=confirmation_phrase,
             )
             warnings_acknowledged = not checklist["warning_count"] or st.checkbox(
                 "I reviewed the outstanding items and accept closing with these warnings.",
-                key="close_warning_acknowledgement",
+                key=worksheet_key("close_warning_acknowledgement"),
             )
             close_map_exception_reason = ""
             if checklist["close_map_incomplete"]:
                 close_map_exception_reason = st.text_area(
                     "Reason for closing with incomplete Close Map reviews",
-                    key="close_map_exception_reason",
+                    key=worksheet_key("close_map_exception_reason"),
                     placeholder="Explain why these balances are intentionally being closed before review is complete.",
                 )
             exception_reason_complete = (
@@ -268,7 +301,8 @@ if year_period:
             )
             explicitly_confirmed = close_confirmation.strip().upper() == confirmation_phrase
             if st.button(
-                "Close fiscal year", key="close_year", type="primary",
+                "Close fiscal year", key=worksheet_key("close_year"),
+                type="primary",
                 disabled=(not explicitly_confirmed or not warnings_acknowledged or
                           not exception_reason_complete),
             ):
@@ -305,7 +339,10 @@ if not rows:
     # Still show action buttons
     col1, col2, col3 = st.columns([1, 1, 4])
     with col1:
-        if st.button("+ Add AJE", type="primary", key="add_aje_empty"):
+        if st.button(
+            "+ Add AJE", type="primary",
+            key=worksheet_key("add_aje_empty"),
+        ):
             st.session_state.show_aje_form = True
             st.session_state.aje_prefill_account = None
 else:
@@ -401,12 +438,25 @@ else:
             "Drill into general ledger",
             options=list(acct_label.keys()),
             format_func=lambda aid: acct_label.get(aid, ""),
-            key="gl_drill_select",
+            key=worksheet_key("gl_drill_select"),
         )
     with dd2:
         st.write("")
-        if st.button("Open GL →", width="stretch", key="open_gl_btn"):
-            st.session_state.gl_account_id = gl_pick
+        if st.button(
+            "Open GL →", width="stretch", key=worksheet_key("open_gl_btn")
+        ):
+            set_client_intent(
+                st.session_state,
+                "report",
+                {
+                    "report": "General Ledger",
+                    "account_id": gl_pick,
+                    "start_date": period_start,
+                    "end_date": period_end,
+                },
+                client_id,
+                dbconn.DATABASE_PATH,
+            )
             st.switch_page("pages/5_Reports.py")
 
     # AJE detail (previously shown inline in the AJE cells)
@@ -457,7 +507,9 @@ st.markdown("---")
 btn_cols = st.columns([1, 1, 1, 1, 3])
 
 with btn_cols[0]:
-    if st.button("+ Add AJE", type="primary", key="add_aje_btn"):
+    if st.button(
+        "+ Add AJE", type="primary", key=worksheet_key("add_aje_btn")
+    ):
         st.session_state.show_aje_form = True
         st.session_state.aje_prefill_account = None
 
@@ -636,7 +688,7 @@ with btn_cols[2]:
         )
 
 with btn_cols[3]:
-    if st.button("Refresh", key="refresh_btn"):
+    if st.button("Refresh", key=worksheet_key("refresh_btn")):
         st.rerun()
 
 # AJE Entry Form (modal-like experience)
@@ -651,18 +703,29 @@ if st.session_state.get('show_aje_form', False):
     accounts = Account.get_all(client_id)
     account_options = {a.id: f"{a.account_number} - {a.name}" for a in accounts}
 
-    with st.form("aje_form"):
+    with st.form(worksheet_key("aje_form")):
         form_cols = st.columns([1, 2, 1])
 
         with form_cols[0]:
-            aje_ref = st.text_input("AJE Reference", value=next_aje_ref, disabled=True)
-            aje_date = st.date_input("Date", value=period_end)
+            aje_ref = st.text_input(
+                "AJE Reference", value=next_aje_ref, disabled=True,
+                key=worksheet_key("aje_reference"),
+            )
+            aje_date = st.date_input(
+                "Date", value=period_end, key=worksheet_key("aje_date")
+            )
 
         with form_cols[1]:
-            aje_desc = st.text_input("Description", placeholder="Describe the adjusting entry...")
+            aje_desc = st.text_input(
+                "Description", placeholder="Describe the adjusting entry...",
+                key=worksheet_key("aje_description"),
+            )
 
         with form_cols[2]:
-            aje_source = st.text_input("Source Reference", placeholder="W/P Reference...")
+            aje_source = st.text_input(
+                "Source Reference", placeholder="W/P Reference...",
+                key=worksheet_key("aje_source"),
+            )
 
         st.markdown("**Entry Lines**")
 
@@ -685,52 +748,52 @@ if st.session_state.get('show_aje_form', False):
             default_idx = list(account_options.keys()).index(prefill_account) if prefill_account and prefill_account in account_options else 0
             line1_account = st.selectbox("Account 1", options=list(account_options.keys()),
                                           format_func=lambda x: account_options[x],
-                                          index=default_idx, key="line1_acct", label_visibility="collapsed")
+                                          index=default_idx, key=worksheet_key("line1_acct"), label_visibility="collapsed")
         with line1_cols[1]:
-            line1_debit = st.number_input("Debit 1", min_value=0.0, step=0.01, key="line1_dr", label_visibility="collapsed")
+            line1_debit = st.number_input("Debit 1", min_value=0.0, step=0.01, key=worksheet_key("line1_dr"), label_visibility="collapsed")
         with line1_cols[2]:
-            line1_credit = st.number_input("Credit 1", min_value=0.0, step=0.01, key="line1_cr", label_visibility="collapsed")
+            line1_credit = st.number_input("Credit 1", min_value=0.0, step=0.01, key=worksheet_key("line1_cr"), label_visibility="collapsed")
         with line1_cols[3]:
-            line1_memo = st.text_input("Memo 1", key="line1_memo", label_visibility="collapsed")
+            line1_memo = st.text_input("Memo 1", key=worksheet_key("line1_memo"), label_visibility="collapsed")
 
         # Line 2
         line2_cols = st.columns([3, 2, 2, 2])
         with line2_cols[0]:
             line2_account = st.selectbox("Account 2", options=list(account_options.keys()),
                                           format_func=lambda x: account_options[x],
-                                          index=0, key="line2_acct", label_visibility="collapsed")
+                                          index=0, key=worksheet_key("line2_acct"), label_visibility="collapsed")
         with line2_cols[1]:
-            line2_debit = st.number_input("Debit 2", min_value=0.0, step=0.01, key="line2_dr", label_visibility="collapsed")
+            line2_debit = st.number_input("Debit 2", min_value=0.0, step=0.01, key=worksheet_key("line2_dr"), label_visibility="collapsed")
         with line2_cols[2]:
-            line2_credit = st.number_input("Credit 2", min_value=0.0, step=0.01, key="line2_cr", label_visibility="collapsed")
+            line2_credit = st.number_input("Credit 2", min_value=0.0, step=0.01, key=worksheet_key("line2_cr"), label_visibility="collapsed")
         with line2_cols[3]:
-            line2_memo = st.text_input("Memo 2", key="line2_memo", label_visibility="collapsed")
+            line2_memo = st.text_input("Memo 2", key=worksheet_key("line2_memo"), label_visibility="collapsed")
 
         # Line 3 (optional)
         line3_cols = st.columns([3, 2, 2, 2])
         with line3_cols[0]:
             line3_account = st.selectbox("Account 3", options=[None] + list(account_options.keys()),
                                           format_func=lambda x: account_options[x] if x else "(Optional)",
-                                          index=0, key="line3_acct", label_visibility="collapsed")
+                                          index=0, key=worksheet_key("line3_acct"), label_visibility="collapsed")
         with line3_cols[1]:
-            line3_debit = st.number_input("Debit 3", min_value=0.0, step=0.01, key="line3_dr", label_visibility="collapsed")
+            line3_debit = st.number_input("Debit 3", min_value=0.0, step=0.01, key=worksheet_key("line3_dr"), label_visibility="collapsed")
         with line3_cols[2]:
-            line3_credit = st.number_input("Credit 3", min_value=0.0, step=0.01, key="line3_cr", label_visibility="collapsed")
+            line3_credit = st.number_input("Credit 3", min_value=0.0, step=0.01, key=worksheet_key("line3_cr"), label_visibility="collapsed")
         with line3_cols[3]:
-            line3_memo = st.text_input("Memo 3", key="line3_memo", label_visibility="collapsed")
+            line3_memo = st.text_input("Memo 3", key=worksheet_key("line3_memo"), label_visibility="collapsed")
 
         # Line 4 (optional)
         line4_cols = st.columns([3, 2, 2, 2])
         with line4_cols[0]:
             line4_account = st.selectbox("Account 4", options=[None] + list(account_options.keys()),
                                           format_func=lambda x: account_options[x] if x else "(Optional)",
-                                          index=0, key="line4_acct", label_visibility="collapsed")
+                                          index=0, key=worksheet_key("line4_acct"), label_visibility="collapsed")
         with line4_cols[1]:
-            line4_debit = st.number_input("Debit 4", min_value=0.0, step=0.01, key="line4_dr", label_visibility="collapsed")
+            line4_debit = st.number_input("Debit 4", min_value=0.0, step=0.01, key=worksheet_key("line4_dr"), label_visibility="collapsed")
         with line4_cols[2]:
-            line4_credit = st.number_input("Credit 4", min_value=0.0, step=0.01, key="line4_cr", label_visibility="collapsed")
+            line4_credit = st.number_input("Credit 4", min_value=0.0, step=0.01, key=worksheet_key("line4_cr"), label_visibility="collapsed")
         with line4_cols[3]:
-            line4_memo = st.text_input("Memo 4", key="line4_memo", label_visibility="collapsed")
+            line4_memo = st.text_input("Memo 4", key=worksheet_key("line4_memo"), label_visibility="collapsed")
 
         submit_cols = st.columns([1, 1, 4])
 
