@@ -14,7 +14,7 @@ from models.transaction import ImportedTransaction
 from services.import_corrections import correct_imported_category
 from database import init_database
 from database import connection as dbconn
-from utils.client_context import scope_page_to_client
+from utils.client_context import pop_client_intent, scope_page_to_client
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
@@ -124,6 +124,18 @@ if journal_scope.changed:
         )):
             del st.session_state[key]
 
+journal_intent = pop_client_intent(
+    st.session_state, "journal", client_id, dbconn.DATABASE_PATH
+)
+if isinstance(journal_intent, dict):
+    requested_view = journal_intent.get("view")
+    if requested_view in {"New Entry", "View Entries", "Reverse Entry", "Drafts"}:
+        st.session_state.journal_active_tab = requested_view
+        st.session_state.pop("_journal_active_tab_rendered", None)
+    requested_entry_id = journal_intent.get("entry_id")
+    if isinstance(requested_entry_id, int) and requested_entry_id > 0:
+        st.session_state.edit_entry_id = requested_entry_id
+
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
@@ -148,7 +160,11 @@ if 'editing_entry_id' not in st.session_state:
 
 # Check if we're coming from General Ledger drill-down
 if 'edit_entry_id' in st.session_state:
-    start_new_form_generation()
+    # A context change already rotated the form before the valid, tagged
+    # navigation intent was applied. Same-context drill-downs still need a new
+    # generation so an unsaved form cannot overwrite the loaded entry.
+    if not journal_scope.changed:
+        start_new_form_generation()
     entry_to_edit = JournalEntry.get_by_id(st.session_state.edit_entry_id, client_id=client_id)
     if entry_to_edit:
         import_link = ImportedTransaction.get_links_for_journal_entries(

@@ -1,6 +1,8 @@
 from utils.client_context import (
     client_context_identity,
+    pop_client_intent,
     scope_page_to_client,
+    set_client_intent,
     sync_active_client_context,
 )
 
@@ -42,3 +44,26 @@ def test_page_scope_rotates_every_time_ownership_changes(tmp_path):
     assert (other_book.generation, other_book.changed) == (1, True)
     assert (returned.generation, returned.changed) == (2, True)
     assert returned.key("save") == "save__journal_entries_g2"
+
+
+def test_client_intent_is_one_shot_for_its_owner(tmp_path):
+    state = {}
+    book = tmp_path / "book.db"
+    value = {"entry_id": 42, "view": "New Entry"}
+
+    set_client_intent(state, "journal", value, 7, book)
+
+    assert pop_client_intent(state, "journal", 7, book) == value
+    assert pop_client_intent(state, "journal", 7, book) is None
+
+
+def test_client_intent_rejects_other_clients_and_same_id_in_other_book(tmp_path):
+    state = {}
+    first_book = tmp_path / "first.db"
+    second_book = tmp_path / "second.db"
+
+    set_client_intent(state, "journal", {"entry_id": 11}, 1, first_book)
+    assert pop_client_intent(state, "journal", 2, first_book) is None
+
+    set_client_intent(state, "journal", {"entry_id": 11}, 1, first_book)
+    assert pop_client_intent(state, "journal", 1, second_book) is None

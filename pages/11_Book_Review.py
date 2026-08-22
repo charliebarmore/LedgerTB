@@ -17,6 +17,7 @@ from services.book_review import (
     run_integrity_sweep,
     set_review_policy,
 )
+from utils.client_context import set_client_intent
 from utils.client_selector import render_client_selector
 from utils.fiscal_dates import fiscal_year_bounds
 from utils.unlock import require_unlock
@@ -109,7 +110,13 @@ def render_findings(findings, allow_jump=False):
                 if st.button("Review entry", key=f"review_jump_{finding.skill}_{i}"):
                     # The Journal Entries page routes import-linked entries to
                     # the guided category correction automatically.
-                    st.session_state.edit_entry_id = finding.entry_id
+                    set_client_intent(
+                        st.session_state,
+                        "journal",
+                        {"entry_id": finding.entry_id, "view": "New Entry"},
+                        client_id,
+                        dbconn.DATABASE_PATH,
+                    )
                     st.switch_page("pages/2_Journal_Entries.py")
 
 
