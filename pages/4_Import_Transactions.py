@@ -34,11 +34,17 @@ from services.document_import import (
 from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 from constants import AccountSubtype
 from database import init_database
+from database import connection as dbconn
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils.ui import apply_default_on_change, is_parking_account, view_switcher
 from utils import icons
-from utils.import_review import ensure_row_ids, row_key, classify_review_rows
+from utils.import_review import (
+    classify_review_rows,
+    ensure_row_ids,
+    row_key,
+    scope_import_state_to_client,
+)
 
 # Initialize database
 
@@ -57,6 +63,12 @@ if not client_id:
     st.warning("Please create a client first in the Clients page.")
     st.page_link("pages/0_Clients.py", label="Go to Clients →")
     st.stop()
+
+# Volatile upload/review state belongs to the client that created it. Reset it
+# before rendering accounts or review rows after a sidebar client switch.
+scope_import_state_to_client(
+    st.session_state, client_id, book=dbconn.DATABASE_PATH
+)
 
 # Get client info
 client = Client.get_by_id(client_id)
@@ -1137,9 +1149,13 @@ elif selected_tab == "Upload Statement":
                 help="Used when statement rows show month/day without a year.",
             )
 
+        # Keyed by a nonce, like the CSV uploader: a file uploader only
+        # forgets its file when it gets a new key, so "Clear statement" and a
+        # client switch both rotate it.
+        statement_uploader_nonce = st.session_state.get("statement_uploader_nonce", 0)
         uploaded_document = st.file_uploader(
             "Statement file", type=["pdf", "png", "jpg", "jpeg"],
-            key="statement_document_upload",
+            key=f"statement_document_upload_{statement_uploader_nonce}",
         )
         if uploaded_document is not None:
             document_bytes = uploaded_document.getvalue()
@@ -1174,6 +1190,7 @@ elif selected_tab == "Upload Statement":
                         "document_extraction", "document_text_editor", "document_transactions",
                     ):
                         st.session_state.pop(key, None)
+                    st.session_state.statement_uploader_nonce = statement_uploader_nonce + 1
                     st.rerun()
 
         extraction = st.session_state.get("document_extraction")

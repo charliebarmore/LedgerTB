@@ -6,7 +6,12 @@ fix keys every per-row widget by a stable per-transaction id instead. These
 tests lock the identity helper and demonstrate the sort-stability invariant.
 """
 
-from utils.import_review import ensure_row_ids, row_key, classify_review_rows
+from utils.import_review import (
+    classify_review_rows,
+    ensure_row_ids,
+    row_key,
+    scope_import_state_to_client,
+)
 
 
 def test_ensure_row_ids_assigns_unique_ids():
@@ -38,6 +43,78 @@ def test_row_key_is_prefixed_and_stable():
     assert row_key("include", t) == "include_abc123"
     # Same transaction -> same key regardless of anything else in the list.
     assert row_key("cat", t) == row_key("cat", {"uid": "abc123"})
+
+
+def test_client_switch_discards_only_volatile_import_state():
+    state = {
+        "_import_state_client_id": ("firm.db", 1),
+        "transactions_to_review": [{"uid": "row-a", "client_id": 1}],
+        "cat_row-a": 6000,
+        "include_row-a": True,
+        "_include_row-a_depends_on": True,
+        "_csv_sign_convention_depends_on": (3, None, 0),
+        "csv_multi_account_mode": True,
+        "multi_assign_sign_convention": "credit",
+        "csv_content": "Date,Description,Amount",
+        "document_bytes": b"old-client-statement",
+        "statement_document_upload_2": object(),
+        "csv_uploader_nonce": 4,
+        "statement_uploader_nonce": 2,
+        "unrelated_setting": "keep",
+    }
+
+    assert scope_import_state_to_client(state, 2, book="firm.db") is True
+
+    assert state["_import_state_client_id"] == ("firm.db", 2)
+    assert state["import_active_tab"] == "Upload CSV"
+    # Uploaders get a new key: the only reset a browser honors for a file.
+    assert state["csv_uploader_nonce"] == 5
+    assert state["statement_uploader_nonce"] == 3
+    # Still-mounted widgets are reset by assignment, not by pop: a popped
+    # widget value never reaches the browser, an assigned one does.
+    assert state["csv_multi_account_mode"] is False
+    assert state["unrelated_setting"] == "keep"
+    for gone in (
+        "transactions_to_review", "cat_row-a", "include_row-a",
+        "_include_row-a_depends_on", "_csv_sign_convention_depends_on",
+        "multi_assign_sign_convention", "csv_content", "document_bytes",
+        "statement_document_upload_2",
+    ):
+        assert gone not in state, gone
+
+
+def test_same_client_keeps_in_progress_import_state():
+    state = {
+        "_import_state_client_id": ("firm.db", 7),
+        "transactions_to_review": [{"uid": "row-a", "client_id": 7}],
+        "csv_content": "still working",
+    }
+
+    assert scope_import_state_to_client(state, 7, book="firm.db") is False
+    assert state["transactions_to_review"][0]["client_id"] == 7
+    assert state["csv_content"] == "still working"
+
+
+def test_book_switch_with_same_client_id_is_a_client_change():
+    """Client ids restart at 1 in every book, so the same id in another book
+    is a different client and its review work must not carry over."""
+    state = {
+        "_import_state_client_id": ("training.db", 1),
+        "transactions_to_review": [{"uid": "row-a", "client_id": 1}],
+        "csv_content": "training rows",
+    }
+
+    assert scope_import_state_to_client(state, 1, book="firm.db") is True
+    assert state["_import_state_client_id"] == ("firm.db", 1)
+    assert "transactions_to_review" not in state
+    assert "csv_content" not in state
+
+
+def test_first_visit_records_identity_without_clearing():
+    state = {"csv_content": "fresh"}
+    assert scope_import_state_to_client(state, 1, book="firm.db") is False
+    assert state["_import_state_client_id"] == ("firm.db", 1)
+    assert state["csv_content"] == "fresh"
 
 
 def test_widget_state_follows_transaction_across_sort():

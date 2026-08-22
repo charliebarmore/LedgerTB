@@ -62,3 +62,138 @@ def row_key(prefix, transaction):
     widget's persisted state onto a different transaction.
     """
     return f"{prefix}_{transaction['uid']}"
+
+
+_CLIENT_IMPORT_STATE_KEYS = {
+    "imported_data",
+    "column_mapping",
+    "transactions_to_review",
+    "document_extraction",
+    "document_transactions",
+    "document_skipped",
+    "document_amounts_normalized",
+    "document_identity",
+    "document_name",
+    "document_bytes",
+    "document_text_editor",
+    "csv_content",
+    "csv_raw_content",
+    "csv_filename",
+    "csv_source_id",
+    "csv_editor_widget",
+    "csv_coa_override",
+    "csv_multi_account_mode",
+    "csv_bank_account",
+    "csv_import_profile_id",
+    "csv_sign_convention",
+    "csv_date_column",
+    "csv_description_column",
+    "csv_source_account_column",
+    "csv_amount_format",
+    "csv_amount_column",
+    "csv_debit_column",
+    "csv_credit_column",
+    "csv_import_profile_name",
+    "csv_confirm",
+    "_csv_profile_choice_context",
+    "_csv_mapping_context",
+    "_csv_profile_name_context",
+    "account_mapping",
+    "source_account_col",
+    "document_bank_account",
+    "document_sign_convention",
+    "statement_ai_consent",
+    "document_transaction_editor",
+    "document_validation_confirmed",
+    "post_result",
+    "import_complete",
+    "import_complete_msg",
+    "confirm_dismiss_staged",
+    "ai_categorization_result",
+    "bulk_result",
+    "bulk_account_select",
+    "sort_by",
+    "sort_order",
+    "history_batch",
+    "confirm_profile_delete_id",
+    "quick_add_account_msg",
+    "quick_add_account_error",
+    "multi_assign_sign_convention",
+    "quick_add_bank_account_type",
+    # Dependency trackers written by utils.ui.apply_default_on_change. Left
+    # behind, they stop the new client's derived default from being applied.
+    "_csv_sign_convention_depends_on",
+    "_multi_assign_sign_convention_depends_on",
+    "_document_sign_convention_depends_on",
+}
+
+_CLIENT_IMPORT_STATE_PREFIXES = (
+    "cat_",
+    "include_",
+    "xfer_",
+    "duplicate_override_",
+    "duplicate_reason_",
+    "newacct_",
+    "map_",
+    "batch_reversal_",
+    "reverse_import_batch_",
+    "verify_",
+    "statement_document_upload_",
+    "_include_",
+)
+
+# Widgets that stay mounted on the Upload CSV view across a client switch.
+# Popping a keyed widget's value does not reach the browser, which re-sends the
+# old value on the next run; assigning a value before the widget renders does.
+# Everything else on the page is either rotated by nonce or unmounted by the
+# tab reset below, so Streamlit drops its state.
+_CLIENT_IMPORT_WIDGET_RESETS = {
+    "csv_multi_account_mode": False,
+}
+
+
+def scope_import_state_to_client(session_state, client_id, book=None):
+    """Discard volatile import work when the selected client changes.
+
+    Uploaded files and review rows live only in Streamlit session state until
+    they are staged or posted.  Keeping that state under a different selected
+    client can make the review screen appear not to switch clients and, more
+    importantly, risks presenting one client's rows beside another client's
+    accounts.  Durable pending rows are not affected; the review page reloads
+    those from the database for the newly selected client.
+
+    ``book`` is the open database.  Client ids restart at 1 in every book, so
+    switching books can land on the same client id; the book is part of the
+    identity so that switch is treated as a change too.
+
+    Returns ``True`` when a client change was handled.
+    """
+    marker = "_import_state_client_id"
+    identity = (str(book) if book is not None else None, client_id)
+    previous = session_state.get(marker)
+    if previous is None:
+        session_state[marker] = identity
+        return False
+    if previous == identity:
+        return False
+
+    for key in list(session_state):
+        if (
+            key in _CLIENT_IMPORT_STATE_KEYS
+            or key.startswith(_CLIENT_IMPORT_STATE_PREFIXES)
+        ):
+            session_state.pop(key, None)
+
+    # Rotate the uploader identities so Streamlit cannot hand the prior
+    # client's uploaded file back to the new client on the next render. A new
+    # key is the only reset the browser honors for a file uploader.
+    session_state["csv_uploader_nonce"] = (
+        session_state.get("csv_uploader_nonce", 0) + 1
+    )
+    session_state["statement_uploader_nonce"] = (
+        session_state.get("statement_uploader_nonce", 0) + 1
+    )
+    session_state.update(_CLIENT_IMPORT_WIDGET_RESETS)
+    session_state["import_active_tab"] = "Upload CSV"
+    session_state[marker] = identity
+    return True
