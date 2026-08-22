@@ -1377,6 +1377,38 @@ class ReportGenerator:
             line['amount'] += amount
             line['entry_ids'].append(entry_id)
 
+        disposal_adjusters = frozenset({
+            AccountSubtype.GAIN_ON_ASSET_DISPOSAL,
+            AccountSubtype.LOSS_ON_ASSET_DISPOSAL,
+        })
+
+        def noncash_exchange_amount(lines):
+            """Dollar value exchanged between noncash counterparts in one entry.
+
+            The side given up (credits) is netted against the side acquired
+            (debits), and accumulated depreciation removed on a disposal
+            reduces the carrying amount given up rather than counting as
+            something acquired. Selling equipment at book value, or writing
+            off a fully depreciated asset, therefore exchanges nothing.
+            """
+            given = 0
+            acquired = 0
+            for line in lines:
+                signed = line['credit'] - line['debit']
+                subtype = resolved(line)
+                if subtype == AccountSubtype.ACCUMULATED_DEPRECIATION:
+                    given += signed
+                elif subtype in disposal_adjusters:
+                    # A recognized gain or loss explains the difference
+                    # between carrying amount and consideration. It is not
+                    # another asset given up or acquired in the exchange.
+                    continue
+                elif signed > 0:
+                    given += signed
+                else:
+                    acquired -= signed
+            return max(0, min(given, acquired))
+
         def record_noncash(entry_id, lines, amount):
             """Record one noncash component with its dollar-bearing context."""
             if amount <= 0:
@@ -1434,16 +1466,9 @@ class ReportGenerator:
                     and resolved(line) != AccountSubtype.ACCUMULATED_DEPRECIATION
                 ]
                 if meaningful_noncash:
-                    signed_amounts = [
-                        line['credit'] - line['debit'] for line in counterparts
-                    ]
                     record_noncash(
-                        entry_id,
-                        counterparts,
-                        min(
-                            sum(amount for amount in signed_amounts if amount > 0),
-                            -sum(amount for amount in signed_amounts if amount < 0),
-                        ),
+                        entry_id, counterparts,
+                        noncash_exchange_amount(counterparts),
                     )
                 unresolved = [
                     line for line in counterparts
@@ -1462,6 +1487,7 @@ class ReportGenerator:
                 continue
 
             reason = None
+            disposal_only_operating = False
             if lines[0]['entry_type'] == 'Closing':
                 section = 'unclassified'
                 reason = f"{lines[0]['entry_type']} entry affects cash"
@@ -1473,12 +1499,9 @@ class ReportGenerator:
                     resolved(line) for line in counterparts
                     if counterpart_section(line) == 'operating'
                 }
-                disposal_adjusters = {
-                    AccountSubtype.GAIN_ON_ASSET_DISPOSAL,
-                    AccountSubtype.LOSS_ON_ASSET_DISPOSAL,
-                }
                 if operating_subtypes <= disposal_adjusters:
                     section = 'investing'
+                    disposal_only_operating = True
                 else:
                     section = None
             elif len(counterpart_sections) > 1:
@@ -1526,23 +1549,21 @@ class ReportGenerator:
                 section = 'unclassified'
                 reason = 'mixed entry could not be allocated exactly'
 
-            # A transaction can contain a noncash exchange within the same
-            # investing or financing section as its cash component (for
-            # example, trade in an old asset and pay cash for a new one).
-            # Because every counterpart resolves to one section, that shape
-            # does not enter the mixed-section allocation branch above.
+            # A transaction can contain a noncash exchange alongside its cash
+            # component (for example, trading in an old asset and paying cash
+            # for a new one). A gain or loss on the disposal resolves to the
+            # operating section, but it is only an adjuster; the exchange is
+            # still investing activity and must be disclosed.
             if (
                 section in ('investing', 'financing')
-                and counterpart_sections == {section}
-            ):
-                signed_amounts = [
-                    line['credit'] - line['debit'] for line in counterparts
-                ]
-                noncash_amount = min(
-                    sum(amount for amount in signed_amounts if amount > 0),
-                    -sum(amount for amount in signed_amounts if amount < 0),
+                and (
+                    counterpart_sections == {section}
+                    or disposal_only_operating
                 )
-                record_noncash(entry_id, counterparts, noncash_amount)
+            ):
+                record_noncash(
+                    entry_id, counterparts, noncash_exchange_amount(counterparts),
+                )
 
             matching_targets = [
                 line for line in counterparts
