@@ -16,9 +16,12 @@ from tests.conftest import page_path, post_entry
 
 
 def _select_client(monkeypatch, client_id):
+    """Stub the sidebar selector. ``client_id`` may be a value or a zero-arg
+    callable, so a test can change the selected client between runs."""
     import utils.client_selector as selector
 
-    monkeypatch.setattr(selector, "render_client_selector", lambda: client_id)
+    pick = client_id if callable(client_id) else (lambda: client_id)
+    monkeypatch.setattr(selector, "render_client_selector", pick)
     monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
 
 
@@ -69,16 +72,20 @@ def test_transactions_page_rebuilds_for_a_new_selected_client(
         type="Asset",
     )
     second_bank.save()
+    # Enough rows for the first client to paginate, so the test can leave
+    # the view on page 2 with a narrowed filter before switching clients.
     ImportedTransaction.bulk_insert([
         ImportedTransaction(
             client_id=client_id,
             import_batch="first-client",
-            transaction_date=date(2026, 1, 1),
-            description="FIRST CLIENT ROW",
-            amount=-10,
+            transaction_date=date(2026, 1, 1) + timedelta(days=index),
+            description=f"FIRST CLIENT ROW {index}",
+            amount=-(index + 1),
             bank_account_id=accounts["cash"],
             status="Pending",
-        ),
+        )
+        for index in range(55)
+    ] + [
         ImportedTransaction(
             client_id=second_client_id,
             import_batch="second-client",
@@ -91,12 +98,7 @@ def test_transactions_page_rebuilds_for_a_new_selected_client(
     ])
 
     selected = {"client_id": client_id}
-    import utils.client_selector as selector
-
-    monkeypatch.setattr(
-        selector, "render_client_selector", lambda: selected["client_id"]
-    )
-    monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
+    _select_client(monkeypatch, lambda: selected["client_id"])
 
     page = AppTest.from_file(
         page_path("pages/6_Transactions.py"), default_timeout=30
@@ -104,11 +106,29 @@ def test_transactions_page_rebuilds_for_a_new_selected_client(
     assert not page.exception
     assert next(
         metric for metric in page.metric if metric.label == "Filtered Transactions"
-    ).value == "1"
+    ).value == "55"
     first_text = " ".join(str(item.value) for item in page.text)
     assert "FIRST CLIENT ROW" in first_text
     assert "SECOND CLIENT ROW" not in first_text
 
+    # Narrow the view and move to page 2 for the first client.
+    next(box for box in page.selectbox if box.label == "Status").select("Pending")
+    next(
+        box for box in page.selectbox if box.label == "Bank/Credit Card"
+    ).select(accounts["cash"])
+    page.run()
+    next(button for button in page.button if button.label == "Next").click()
+    page.run()
+    assert not page.exception
+    page_status = [
+        *(str(item.value) for item in page.caption),
+        *(str(item.value) for item in page.text),
+        *(str(item.value) for item in page.markdown),
+    ]
+    assert any("51" in value and "55" in value for value in page_status)
+
+    # Switch clients: the view must rebuild from page 1 with default filters,
+    # not carry the first client's paging and bank account over.
     selected["client_id"] = second_client_id
     page.run()
 
@@ -119,10 +139,14 @@ def test_transactions_page_rebuilds_for_a_new_selected_client(
     second_text = " ".join(str(item.value) for item in page.text)
     assert "SECOND CLIENT ROW" in second_text
     assert "FIRST CLIENT ROW" not in second_text
+    assert next(box for box in page.selectbox if box.label == "Status").value == "All"
     bank_filter = next(
         box for box in page.selectbox if box.label == "Bank/Credit Card"
     )
     assert bank_filter.value == 0
+    assert next(
+        button for button in page.button if button.label == "Previous"
+    ).disabled
 
 
 def test_statement_editor_reserves_space_for_its_scrollbar():

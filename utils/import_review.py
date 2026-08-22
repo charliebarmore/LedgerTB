@@ -102,7 +102,6 @@ _CLIENT_IMPORT_STATE_KEYS = {
     "source_account_col",
     "document_bank_account",
     "document_sign_convention",
-    "statement_document_upload",
     "statement_ai_consent",
     "document_transaction_editor",
     "document_validation_confirmed",
@@ -119,6 +118,13 @@ _CLIENT_IMPORT_STATE_KEYS = {
     "confirm_profile_delete_id",
     "quick_add_account_msg",
     "quick_add_account_error",
+    "multi_assign_sign_convention",
+    "quick_add_bank_account_type",
+    # Dependency trackers written by utils.ui.apply_default_on_change. Left
+    # behind, they stop the new client's derived default from being applied.
+    "_csv_sign_convention_depends_on",
+    "_multi_assign_sign_convention_depends_on",
+    "_document_sign_convention_depends_on",
 }
 
 _CLIENT_IMPORT_STATE_PREFIXES = (
@@ -132,10 +138,21 @@ _CLIENT_IMPORT_STATE_PREFIXES = (
     "batch_reversal_",
     "reverse_import_batch_",
     "verify_",
+    "statement_document_upload_",
+    "_include_",
 )
 
+# Widgets that stay mounted on the Upload CSV view across a client switch.
+# Popping a keyed widget's value does not reach the browser, which re-sends the
+# old value on the next run; assigning a value before the widget renders does.
+# Everything else on the page is either rotated by nonce or unmounted by the
+# tab reset below, so Streamlit drops its state.
+_CLIENT_IMPORT_WIDGET_RESETS = {
+    "csv_multi_account_mode": False,
+}
 
-def scope_import_state_to_client(session_state, client_id):
+
+def scope_import_state_to_client(session_state, client_id, book=None):
     """Discard volatile import work when the selected client changes.
 
     Uploaded files and review rows live only in Streamlit session state until
@@ -145,28 +162,38 @@ def scope_import_state_to_client(session_state, client_id):
     accounts.  Durable pending rows are not affected; the review page reloads
     those from the database for the newly selected client.
 
+    ``book`` is the open database.  Client ids restart at 1 in every book, so
+    switching books can land on the same client id; the book is part of the
+    identity so that switch is treated as a change too.
+
     Returns ``True`` when a client change was handled.
     """
     marker = "_import_state_client_id"
-    previous_client_id = session_state.get(marker)
-    if previous_client_id is None:
-        session_state[marker] = client_id
+    identity = (str(book) if book is not None else None, client_id)
+    previous = session_state.get(marker)
+    if previous is None:
+        session_state[marker] = identity
         return False
-    if previous_client_id == client_id:
+    if previous == identity:
         return False
 
-    uploader_nonce = int(session_state.get("csv_uploader_nonce", 0) or 0)
-    session_state.pop(f"csv_uploader_{uploader_nonce}", None)
-    for key in list(session_state.keys()):
+    for key in list(session_state):
         if (
             key in _CLIENT_IMPORT_STATE_KEYS
             or key.startswith(_CLIENT_IMPORT_STATE_PREFIXES)
         ):
             session_state.pop(key, None)
 
-    # Rotate the uploader identity so Streamlit cannot hand the prior client's
-    # uploaded file back to the new client on the next render.
-    session_state["csv_uploader_nonce"] = uploader_nonce + 1
+    # Rotate the uploader identities so Streamlit cannot hand the prior
+    # client's uploaded file back to the new client on the next render. A new
+    # key is the only reset the browser honors for a file uploader.
+    session_state["csv_uploader_nonce"] = (
+        session_state.get("csv_uploader_nonce", 0) + 1
+    )
+    session_state["statement_uploader_nonce"] = (
+        session_state.get("statement_uploader_nonce", 0) + 1
+    )
+    session_state.update(_CLIENT_IMPORT_WIDGET_RESETS)
     session_state["import_active_tab"] = "Upload CSV"
-    session_state[marker] = client_id
+    session_state[marker] = identity
     return True
