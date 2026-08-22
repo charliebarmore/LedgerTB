@@ -803,11 +803,17 @@ def build_close_package(
     )
     _append_literal_row(ws, [
         "STATUS",
-        ("READY" if cash_flow["ready"] else "REVIEW WARNINGS"),
-        "", "", "",
+        ("READY" if comparative_cash_flow["current_ready"] else "REVIEW WARNINGS"),
+        (
+            "" if not comparative_cash_flow["prior_available"] else
+            ("READY" if comparative_cash_flow["prior_ready"] else "REVIEW WARNINGS")
+        ),
+        "", "",
     ])
-    for warning in cash_flow["warnings"]:
-        _append_literal_row(ws, [f"Warning: {warning}", "", "", "", ""])
+    for warning in comparative_cash_flow["current_warnings"]:
+        _append_literal_row(ws, [f"Current warning: {warning}", "", "", "", ""])
+    for warning in comparative_cash_flow["prior_warnings"]:
+        _append_literal_row(ws, [f"Prior-year warning: {warning}", "", "", "", ""])
     for period_name, entries, amount_column in [
         ("CURRENT UNCLASSIFIED ENTRY DETAILS",
          comparative_cash_flow["unclassified"]["current_entries"], 2),
@@ -1246,10 +1252,19 @@ def build_close_package_pdf(
         Paragraph("Statement of Cash Flows", heading_2),
         Paragraph(period_label, _PDF_META),
         Paragraph(
-            ("Ready - cash ties, Operating reconciles, and all cash activity "
-             "is classified.")
-            if cash_flow["ready"] else
-            "Review required - see the warnings below before relying on this statement.",
+            "Current: " + (
+                "Ready - cash ties, operating reconciles, and all cash activity "
+                "is classified."
+                if comparative_cash_flow["current_ready"] else
+                "Review required - see the warnings below before relying on "
+                "this statement."
+            ) + (
+                " Prior year: " + (
+                    "Ready." if comparative_cash_flow["prior_ready"] else
+                    "Review required."
+                )
+                if comparative_cash_flow["prior_available"] else ""
+            ),
             _PDF_META,
         ),
         Spacer(1, 10),
@@ -1315,45 +1330,60 @@ def build_close_package_pdf(
         ruled_data_rows=[0, len(cash_rollforward_rows) - 1],
     )
     cash_quality_block = [cash_rollforward]
-    if cash_flow["warnings"]:
+    current_warnings = comparative_cash_flow["current_warnings"]
+    prior_warnings = comparative_cash_flow["prior_warnings"]
+    if current_warnings or prior_warnings:
         cash_quality_block += [Spacer(1, 8)] + [
-            _safe_paragraph(f"Warning: {warning}", _PDF_META)
-            for warning in cash_flow["warnings"]
+            _safe_paragraph(f"Current warning: {warning}", _PDF_META)
+            for warning in current_warnings
+        ] + [
+            _safe_paragraph(f"Prior-year warning: {warning}", _PDF_META)
+            for warning in prior_warnings
         ]
     story.append(KeepTogether(cash_quality_block))
-    if cash_flow["unclassified"]["entries"]:
-        story += [
-            Spacer(1, 10),
-            Paragraph("Unclassified Cash Activity Details", heading_2),
-            _pdf_table(
-                ["Date", "Entry #", "Reason", "Description", "Accounts", "Amount"],
-                [[
-                    str(item["entry_date"]),
-                    str(item["entry_id"]),
-                    _wrap(item["reason"]),
-                    _wrap(item["description"] or "No description"),
-                    ", ".join(item["account_numbers"]) or "none",
-                    _money(item["amount"]),
-                ] for item in cash_flow["unclassified"]["entries"]],
-                [0.8 * inch, 0.65 * inch, 2.55 * inch, 2.75 * inch,
-                 1.5 * inch, 1.0 * inch],
-                money_from=5,
-            ),
-        ]
-    if cash_flow["noncash_items"]:
-        story += [
-            Spacer(1, 10),
-            Paragraph("Noncash Investing and Financing Activity", heading_2),
-            _pdf_table(
-                ["Date", "Entry #", "Description", "Accounts", "Amount"],
-                [[item["entry_date"], str(item["entry_id"]),
-                  _wrap(item["description"] or "No description"),
-                  ", ".join(item["accounts"]), _money(item["amount"])]
-                 for item in cash_flow["noncash_items"]],
-                [0.9 * inch, 0.65 * inch, 4.5 * inch, 2.0 * inch, 1.0 * inch],
-                money_from=4,
-            ),
-        ]
+    for period_name, entries in [
+        ("Current", comparative_cash_flow["unclassified"]["current_entries"]),
+        ("Prior-Year", comparative_cash_flow["unclassified"]["prior_entries"]),
+    ]:
+        if entries:
+            story += [
+                Spacer(1, 10),
+                Paragraph(f"{period_name} Unclassified Cash Activity Details", heading_2),
+                _pdf_table(
+                    ["Date", "Entry #", "Reason", "Description", "Accounts", "Amount"],
+                    [[
+                        str(item["entry_date"]), str(item["entry_id"]),
+                        _wrap(item["reason"]),
+                        _wrap(item["description"] or "No description"),
+                        ", ".join(item["account_numbers"]) or "none",
+                        _money(item["amount"]),
+                    ] for item in entries],
+                    [0.8 * inch, 0.65 * inch, 2.55 * inch, 2.75 * inch,
+                     1.5 * inch, 1.0 * inch],
+                    money_from=5,
+                ),
+            ]
+    for period_name, entries in [
+        ("Current", comparative_cash_flow["current_noncash_items"]),
+        ("Prior-Year", comparative_cash_flow["prior_noncash_items"]),
+    ]:
+        if entries:
+            story += [
+                Spacer(1, 10),
+                Paragraph(
+                    f"{period_name} Noncash Investing and Financing Activity",
+                    heading_2,
+                ),
+                _pdf_table(
+                    ["Date", "Entry #", "Description", "Accounts", "Amount"],
+                    [[item["entry_date"], str(item["entry_id"]),
+                      _wrap(item["description"] or "No description"),
+                      ", ".join(item["accounts"]), _money(item["amount"])]
+                     for item in entries],
+                    [0.9 * inch, 0.65 * inch, 4.5 * inch, 2.0 * inch, 1.0 * inch],
+                    money_from=4,
+                ),
+            ]
     story.append(PageBreak())
 
     # ---- Final Trial Balance

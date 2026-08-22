@@ -237,6 +237,59 @@ def test_cash_flow_report_prints_reconciliation_difference(
     assert "Cash Flow Reconciliation Difference" in html
 
 
+def test_cash_flow_report_surfaces_prior_year_quality_warnings(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    post_entry(client_id, date(2026, 1, 15), [
+        (accounts["cash"], 500, 0), (accounts["revenue"], 0, 500),
+    ])
+
+    from models.reports import ReportGenerator
+
+    original = ReportGenerator.comparative_cash_flow_statement
+
+    def prior_warning(*args, **kwargs):
+        report = original(*args, **kwargs)
+        report["prior_available"] = True
+        report["prior_ready"] = False
+        report["prior_warnings"] = ["Prior-only classification warning."]
+        report["prior_noncash_items"] = [{
+            "entry_id": 99,
+            "entry_date": "2025-02-01",
+            "description": "Prior equipment note",
+            "accounts": ["1500", "2500"],
+            "amount": 300,
+        }]
+        return report
+
+    monkeypatch.setattr(
+        ReportGenerator,
+        "comparative_cash_flow_statement",
+        staticmethod(prior_warning),
+    )
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.session_state["active_report"] = "Cash Flow"
+    page.run()
+
+    assert not page.exception
+    assert page.toggle(key="cf_compare_py").value is True
+    assert any(
+        "Prior-year cash flow has items to review" in str(item.value)
+        for item in page.warning
+    )
+    assert any(
+        "Prior year: Prior-only classification warning." in str(item.value)
+        for item in page.caption
+    )
+    assert any(
+        "Prior-year noncash investing and financing activity" in item.label
+        for item in page.expander
+    )
+
+
 def test_period_picker_drives_the_worksheet_dates(client_id, accounts, monkeypatch):
     """Picking a Period must move From/To (keyed date inputs ignore value=)."""
     _select_client(monkeypatch, client_id)

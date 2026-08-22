@@ -73,6 +73,12 @@ def test_statements_and_ledger(client_id, accounts):
     assert inc["net_income"] == 380.0
     assert inc["revenue_groups"][0]["key"] == "unclassified"
     assert inc["revenue_groups"][0]["subtotal"] == 500.0
+    assert inc["operating_revenue"] == 0
+    assert inc["cost_of_goods_sold"] == 0
+    assert inc["gross_profit"] is None
+    assert inc["operating_income"] is None
+    assert inc["multistep_ready"] is False
+    assert inc["statement_warnings"]
 
     bs = mcp_tools.balance_sheet(client_id, "2026-12-31")
     assert bs["balanced"] is True
@@ -95,7 +101,7 @@ def test_statements_and_ledger(client_id, accounts):
 
 
 def test_statement_tools_optionally_return_prior_year_comparisons(
-    client_id, accounts
+    client_id, accounts, monkeypatch
 ):
     post_entry(client_id, date(2025, 1, 15),
                [(accounts["cash"], 200, 0),
@@ -129,6 +135,30 @@ def test_statement_tools_optionally_return_prior_year_comparisons(
         if row["account_number"] == "1000"
     )
     assert prior_cash["prior_debit"] == 200
+
+    from models.reports import ReportGenerator
+
+    original_cash_comparison = ReportGenerator.comparative_cash_flow_statement
+    received_current_report = []
+
+    def compare_cash(*args, **kwargs):
+        received_current_report.append(kwargs.get("current_report"))
+        return original_cash_comparison(*args, **kwargs)
+
+    monkeypatch.setattr(
+        ReportGenerator,
+        "comparative_cash_flow_statement",
+        staticmethod(compare_cash),
+    )
+    cash = mcp_tools.cash_flow_statement(
+        client_id, "2026-01-01", "2026-12-31",
+        compare_to_prior_year=True,
+    )
+    assert cash["comparison"]["prior_period"] == {
+        "start": "2025-01-01", "end": "2025-12-31"
+    }
+    assert received_current_report[0] is not None
+    assert received_current_report[0]["actual_cash_change"] == 380
 
     # Existing clients get the original compact response unless they opt in.
     assert "comparison" not in mcp_tools.income_statement(

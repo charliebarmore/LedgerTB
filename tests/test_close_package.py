@@ -426,6 +426,53 @@ def test_close_package_prints_cash_flow_reconciliation_difference(
         document.close()
 
 
+def test_close_package_surfaces_prior_year_cash_flow_warning(
+    booked_period, accounts
+):
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(booked_period, *Q1)
+    snapshot = load_close_package_snapshot(booked_period, *Q1)
+    comparative = deepcopy(snapshot.comparative_cash_flow)
+    comparative["prior_available"] = True
+    comparative["prior_ready"] = False
+    comparative["prior_warnings"] = ["Prior-year classification needs review."]
+    comparative["prior_noncash_items"] = [{
+        "entry_id": 99,
+        "entry_date": "2025-02-01",
+        "description": "Prior equipment note",
+        "accounts": ["1500", "2500"],
+        "amount": 300,
+    }]
+    snapshot = replace(snapshot, comparative_cash_flow=comparative)
+
+    workbook = openpyxl.load_workbook(BytesIO(build_close_package(
+        booked_period, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read()))
+    sheet = workbook["Cash Flow"]
+    status_row = next(
+        row for row in range(1, sheet.max_row + 1)
+        if sheet.cell(row, 1).value == "STATUS"
+    )
+    labels = [sheet.cell(row, 1).value for row in range(1, sheet.max_row + 1)]
+    assert sheet.cell(status_row, 3).value == "REVIEW WARNINGS"
+    assert "Prior-year warning: Prior-year classification needs review." in labels
+    assert "PRIOR-YEAR NONCASH INVESTING AND FINANCING ACTIVITY" in labels
+
+    document = pdfium.PdfDocument(build_close_package_pdf(
+        booked_period, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read())
+    try:
+        text = "\n".join(
+            document[index].get_textpage().get_text_range()
+            for index in range(len(document))
+        )
+        assert "Prior year: Review required." in text
+        assert "Prior-year classification needs review." in text
+        assert "Prior-Year Noncash Investing and Financing Activity" in text
+        assert "Prior equipment note" in text
+    finally:
+        document.close()
+
+
 def test_annual_close_package_includes_close_map(client_id, accounts):
     from models import close_map
     from models.fiscal_period import FiscalPeriod

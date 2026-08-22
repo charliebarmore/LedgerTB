@@ -276,6 +276,34 @@ def test_partially_financed_purchase_reports_only_cash_on_the_face(
     assert report["ready"] is True
 
 
+def test_asset_exchange_discloses_same_section_noncash_component(
+    client_id, accounts
+):
+    new_equipment = _account(
+        client_id, "1500", "New Equipment", "Asset", AccountSubtype.FIXED_ASSET,
+    )
+    traded_equipment = _account(
+        client_id, "1510", "Traded Equipment", "Asset", AccountSubtype.FIXED_ASSET,
+    )
+    entry = post_entry(client_id, date(2026, 8, 1), [
+        (new_equipment, 500, 0),
+        (traded_equipment, 0, 300),
+        (accounts["cash"], 0, 200),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    assert report["investing"]["total"] == -200
+    assert report["noncash_items"] == [{
+        "entry_id": entry.id,
+        "entry_date": "2026-08-01",
+        "description": "test entry",
+        "accounts": ["1500", "1510"],
+        "amount": 300,
+    }]
+    assert report["ties"] is True
+    assert report["ready"] is True
+
+
 def test_debt_proceeds_and_repayments_are_presented_gross(client_id, accounts):
     debt = _account(
         client_id, "2500", "Term Loan", "Liability",

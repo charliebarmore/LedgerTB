@@ -1526,6 +1526,24 @@ class ReportGenerator:
                 section = 'unclassified'
                 reason = 'mixed entry could not be allocated exactly'
 
+            # A transaction can contain a noncash exchange within the same
+            # investing or financing section as its cash component (for
+            # example, trade in an old asset and pay cash for a new one).
+            # Because every counterpart resolves to one section, that shape
+            # does not enter the mixed-section allocation branch above.
+            if (
+                section in ('investing', 'financing')
+                and counterpart_sections == {section}
+            ):
+                signed_amounts = [
+                    line['credit'] - line['debit'] for line in counterparts
+                ]
+                noncash_amount = min(
+                    sum(amount for amount in signed_amounts if amount > 0),
+                    -sum(amount for amount in signed_amounts if amount < 0),
+                )
+                record_noncash(entry_id, counterparts, noncash_amount)
+
             matching_targets = [
                 line for line in counterparts
                 if counterpart_section(line) == section

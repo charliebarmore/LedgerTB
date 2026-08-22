@@ -635,6 +635,18 @@ elif selected_report == "Cash Flow":
     for warning in report['current_warnings']:
         st.caption(f"• {warning}")
 
+    if compare_py:
+        if report['prior_ready']:
+            st.success(
+                "Prior-year cash flow is tied, reconciled, and fully classified."
+            )
+        else:
+            st.warning(
+                "Prior-year cash flow has items to review; see its warnings below."
+            )
+        for warning in report['prior_warnings']:
+            st.caption(f"• Prior year: {warning}")
+
     if report['unclassified']['current_entries']:
         with st.expander(
             "Unclassified cash activity details "
@@ -669,6 +681,19 @@ elif selected_report == "Cash Flow":
             f"({len(report['current_noncash_items'])})"
         ):
             for item in report['current_noncash_items']:
+                accounts_text = ", ".join(item['accounts'])
+                st.write(
+                    f"{item['entry_date']} · Entry #{item['entry_id']} · "
+                    f"{item['description'] or 'No description'} · "
+                    f"Accounts {accounts_text} · ${item['amount']:,.2f}"
+                )
+
+    if compare_py and report['prior_noncash_items']:
+        with st.expander(
+            f"Prior-year noncash investing and financing activity "
+            f"({len(report['prior_noncash_items'])})"
+        ):
+            for item in report['prior_noncash_items']:
                 accounts_text = ", ".join(item['accounts'])
                 st.write(
                     f"{item['entry_date']} · Entry #{item['entry_id']} · "

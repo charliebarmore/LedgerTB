@@ -382,7 +382,25 @@ def income_statement(
         "expense_groups": _groups(report["expense_groups"]),
         "total_revenue": round(report["total_revenue"], 2),
         "total_expenses": round(report["total_expenses"], 2),
+        "operating_revenue": round(report["operating_revenue"], 2),
+        "other_income": round(report["other_income"], 2),
+        "cost_of_goods_sold": round(report["cost_of_goods_sold"], 2),
+        "gross_profit": (
+            None if report["gross_profit"] is None
+            else round(report["gross_profit"], 2)
+        ),
+        "operating_expenses": round(report["operating_expenses"], 2),
+        "depreciation_amortization": round(
+            report["depreciation_amortization"], 2
+        ),
+        "operating_income": (
+            None if report["operating_income"] is None
+            else round(report["operating_income"], 2)
+        ),
+        "other_expenses": round(report["other_expenses"], 2),
         "net_income": round(report["net_income"], 2),
+        "multistep_ready": report["multistep_ready"],
+        "statement_warnings": report["statement_warnings"],
     }
     if compare_to_prior_year:
         comparison = ReportGenerator.comparative_income_statement(
@@ -476,7 +494,7 @@ def cash_flow_statement(
     }
     if compare_to_prior_year:
         comparison = ReportGenerator.comparative_cash_flow_statement(
-            client_id, start_date, end_date
+            client_id, start_date, end_date, current_report=report
         )
         result["comparison"] = {
             **comparison,
