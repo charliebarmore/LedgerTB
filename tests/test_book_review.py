@@ -202,3 +202,43 @@ def test_both_ai_callers_fence_untrusted_transaction_text():
         source = (Path(__file__).parents[1] / name).read_text()
         assert "flatten_untrusted" in source, name
         assert "untrusted_block" in source, name
+
+
+def test_book_review_state_follows_the_selected_client(client_id, accounts, monkeypatch):
+    """Policy notes and stored AI results are per client. A shared widget key
+    would show client A's notes under client B and let Save write them there."""
+    import utils.client_selector as selector
+    from models.client import Client
+    from services.book_review import get_review_policy, set_review_policy
+
+    second_client_id = Client(name="Second Review Client").save(seed_accounts=True)
+    set_review_policy(client_id, "FIRST CLIENT: ADP fees go to 7080.")
+    set_review_policy(second_client_id, "SECOND CLIENT: rewards are other income.")
+
+    selected = {"client_id": client_id}
+    monkeypatch.setattr(selector, "render_client_selector", lambda: selected["client_id"])
+    monkeypatch.setattr(selector, "apply_sidebar_style", lambda *a, **k: None)
+    monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
+
+    page = AppTest.from_file(page_path("pages/11_Book_Review.py"), default_timeout=30).run()
+    assert not page.exception
+    policy_box = next(box for box in page.text_area if box.label == "Policy notes")
+    assert policy_box.value.startswith("FIRST CLIENT")
+    # A memo produced for the first client must not render for the second.
+    page.session_state["analytics_memo"] = (client_id, "FIRST CLIENT MEMO", "2026")
+    page.session_state["category_review"] = (client_id, [], 3, "2026")
+
+    selected["client_id"] = second_client_id
+    page.run()
+    assert not page.exception
+    policy_box = next(box for box in page.text_area if box.label == "Policy notes")
+    assert policy_box.value.startswith("SECOND CLIENT")
+    rendered = " ".join(str(item.value) for item in page.markdown)
+    assert "FIRST CLIENT MEMO" not in rendered
+    assert not any("Reviewed 3 posted transactions" in str(c.value) for c in page.caption)
+
+    # Saving from the second client's page writes the second client's text.
+    next(button for button in page.button if button.label == "Save policy notes").click()
+    page.run()
+    assert get_review_policy(client_id) == "FIRST CLIENT: ADP fees go to 7080."
+    assert get_review_policy(second_client_id).startswith("SECOND CLIENT")

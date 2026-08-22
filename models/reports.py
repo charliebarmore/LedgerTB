@@ -1377,6 +1377,27 @@ class ReportGenerator:
             line['amount'] += amount
             line['entry_ids'].append(entry_id)
 
+        def noncash_exchange_amount(lines):
+            """Dollar value exchanged between noncash counterparts in one entry.
+
+            The side given up (credits) is netted against the side acquired
+            (debits), and accumulated depreciation removed on a disposal
+            reduces the carrying amount given up rather than counting as
+            something acquired. Selling equipment at book value, or writing
+            off a fully depreciated asset, therefore exchanges nothing.
+            """
+            given = 0
+            acquired = 0
+            for line in lines:
+                signed = line['credit'] - line['debit']
+                if resolved(line) == AccountSubtype.ACCUMULATED_DEPRECIATION:
+                    given += signed
+                elif signed > 0:
+                    given += signed
+                else:
+                    acquired -= signed
+            return max(0, min(given, acquired))
+
         def record_noncash(entry_id, lines, amount):
             """Record one noncash component with its dollar-bearing context."""
             if amount <= 0:
@@ -1434,16 +1455,9 @@ class ReportGenerator:
                     and resolved(line) != AccountSubtype.ACCUMULATED_DEPRECIATION
                 ]
                 if meaningful_noncash:
-                    signed_amounts = [
-                        line['credit'] - line['debit'] for line in counterparts
-                    ]
                     record_noncash(
-                        entry_id,
-                        counterparts,
-                        min(
-                            sum(amount for amount in signed_amounts if amount > 0),
-                            -sum(amount for amount in signed_amounts if amount < 0),
-                        ),
+                        entry_id, counterparts,
+                        noncash_exchange_amount(counterparts),
                     )
                 unresolved = [
                     line for line in counterparts
@@ -1535,14 +1549,9 @@ class ReportGenerator:
                 section in ('investing', 'financing')
                 and counterpart_sections == {section}
             ):
-                signed_amounts = [
-                    line['credit'] - line['debit'] for line in counterparts
-                ]
-                noncash_amount = min(
-                    sum(amount for amount in signed_amounts if amount > 0),
-                    -sum(amount for amount in signed_amounts if amount < 0),
+                record_noncash(
+                    entry_id, counterparts, noncash_exchange_amount(counterparts),
                 )
-                record_noncash(entry_id, counterparts, noncash_amount)
 
             matching_targets = [
                 line for line in counterparts

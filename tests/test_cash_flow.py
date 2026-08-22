@@ -452,3 +452,81 @@ def test_offsetting_unclassified_entries_remain_visible_in_exports(
     assert comparison_export.set_index("Item").loc["STATUS", "Current"] == (
         "REVIEW WARNINGS"
     )
+
+
+def _disposal_accounts(client_id):
+    retained = _account(
+        client_id, "3900", "Retained Earnings", "Equity",
+        AccountSubtype.RETAINED_EARNINGS,
+    )
+    equipment = _account(
+        client_id, "1500", "Equipment", "Asset", AccountSubtype.FIXED_ASSET,
+    )
+    accumulated = _account(
+        client_id, "1510", "Accumulated Depreciation", "Asset",
+        AccountSubtype.ACCUMULATED_DEPRECIATION,
+    )
+    return retained, equipment, accumulated
+
+
+def test_sale_at_book_value_is_not_a_noncash_exchange(client_id, accounts):
+    """Removing accumulated depreciation on a disposal is part of the carrying
+    amount given up, not a noncash investing activity to disclose."""
+    retained, equipment, accumulated = _disposal_accounts(client_id)
+    post_entry(client_id, START, [
+        (accounts["cash"], 1000, 0), (equipment, 500, 0),
+        (accumulated, 0, 400), (retained, 0, 1100),
+    ], entry_type="Beginning Balance")
+    post_entry(client_id, date(2026, 6, 1), [
+        (accounts["cash"], 100, 0), (accumulated, 400, 0), (equipment, 0, 500),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    assert report["investing"]["total"] == 100
+    assert report["noncash_items"] == []
+    assert report["ties"] is True
+    assert report["ready"] is True
+
+
+def test_fully_depreciated_write_off_is_not_a_noncash_exchange(
+    client_id, accounts
+):
+    retained, equipment, accumulated = _disposal_accounts(client_id)
+    post_entry(client_id, START, [
+        (accounts["cash"], 1000, 0), (equipment, 500, 0),
+        (accumulated, 0, 500), (retained, 0, 1000),
+    ], entry_type="Beginning Balance")
+    post_entry(client_id, date(2026, 6, 1), [
+        (accumulated, 500, 0), (equipment, 0, 500),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    assert report["noncash_items"] == []
+    assert report["ready"] is True
+
+
+def test_trade_in_with_accumulated_depreciation_discloses_carrying_amount(
+    client_id, accounts
+):
+    """Trade in old equipment (cost 40, accumulated depreciation 30) plus 40
+    cash for new equipment costing 50: the noncash consideration is the old
+    asset's 10 carrying amount, not its gross cost."""
+    retained, old_equipment, accumulated = _disposal_accounts(client_id)
+    new_equipment = _account(
+        client_id, "1520", "New Equipment", "Asset", AccountSubtype.FIXED_ASSET,
+    )
+    post_entry(client_id, START, [
+        (accounts["cash"], 1000, 0), (old_equipment, 40, 0),
+        (accumulated, 0, 30), (retained, 0, 1010),
+    ], entry_type="Beginning Balance")
+    entry = post_entry(client_id, date(2026, 8, 1), [
+        (new_equipment, 50, 0), (accumulated, 30, 0),
+        (old_equipment, 0, 40), (accounts["cash"], 0, 40),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    assert report["investing"]["total"] == -40
+    assert [(item["entry_id"], item["amount"]) for item in report["noncash_items"]] == [
+        (entry.id, 10),
+    ]
+    assert report["ready"] is True
