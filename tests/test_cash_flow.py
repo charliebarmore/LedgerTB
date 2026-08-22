@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from constants import AccountSubtype
 from models.account import Account
 from models.reports import ReportGenerator
@@ -529,4 +531,41 @@ def test_trade_in_with_accumulated_depreciation_discloses_carrying_amount(
     assert [(item["entry_id"], item["amount"]) for item in report["noncash_items"]] == [
         (entry.id, 10),
     ]
+    assert report["ready"] is True
+
+
+@pytest.mark.parametrize(
+    ("result_subtype", "result_type", "result_debit", "result_credit", "cash_paid"),
+    [
+        (AccountSubtype.GAIN_ON_ASSET_DISPOSAL, "Revenue", 0, 5, 35),
+        (AccountSubtype.LOSS_ON_ASSET_DISPOSAL, "Expense", 5, 0, 45),
+    ],
+)
+def test_trade_in_with_gain_or_loss_still_discloses_carrying_amount(
+    client_id, accounts, result_subtype, result_type,
+    result_debit, result_credit, cash_paid,
+):
+    """A disposal gain or loss is an operating adjuster, not a reason to lose
+    the noncash investing disclosure for the asset exchanged."""
+    retained, old_equipment, accumulated = _disposal_accounts(client_id)
+    new_equipment = _account(
+        client_id, "1520", "New Equipment", "Asset", AccountSubtype.FIXED_ASSET,
+    )
+    result_account = _account(
+        client_id, "4900", "Disposal Result", result_type, result_subtype,
+    )
+    post_entry(client_id, START, [
+        (accounts["cash"], 1000, 0), (old_equipment, 40, 0),
+        (accumulated, 0, 30), (retained, 0, 1010),
+    ], entry_type="Beginning Balance")
+    entry = post_entry(client_id, date(2026, 8, 1), [
+        (new_equipment, 50, 0), (accumulated, 30, 0),
+        (result_account, result_debit, result_credit),
+        (old_equipment, 0, 40), (accounts["cash"], 0, cash_paid),
+    ])
+
+    report = ReportGenerator.cash_flow_statement(client_id, START, END)
+    assert report["investing"]["total"] == -cash_paid
+    assert [(item["entry_id"], item["amount"])
+            for item in report["noncash_items"]] == [(entry.id, 10)]
     assert report["ready"] is True

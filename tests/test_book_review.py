@@ -208,6 +208,7 @@ def test_book_review_state_follows_the_selected_client(client_id, accounts, monk
     """Policy notes and stored AI results are per client. A shared widget key
     would show client A's notes under client B and let Save write them there."""
     import utils.client_selector as selector
+    from database import connection as dbconn
     from models.client import Client
     from services.book_review import get_review_policy, set_review_policy
 
@@ -225,8 +226,11 @@ def test_book_review_state_follows_the_selected_client(client_id, accounts, monk
     policy_box = next(box for box in page.text_area if box.label == "Policy notes")
     assert policy_box.value.startswith("FIRST CLIENT")
     # A memo produced for the first client must not render for the second.
-    page.session_state["analytics_memo"] = (client_id, "FIRST CLIENT MEMO", "2026")
-    page.session_state["category_review"] = (client_id, [], 3, "2026")
+    review_owner = (str(dbconn.DATABASE_PATH), client_id)
+    page.session_state["analytics_memo"] = (
+        review_owner, "FIRST CLIENT MEMO", "2026"
+    )
+    page.session_state["category_review"] = (review_owner, [], 3, "2026")
 
     selected["client_id"] = second_client_id
     page.run()
@@ -242,3 +246,56 @@ def test_book_review_state_follows_the_selected_client(client_id, accounts, monk
     page.run()
     assert get_review_policy(client_id) == "FIRST CLIENT: ADP fees go to 7080."
     assert get_review_policy(second_client_id).startswith("SECOND CLIENT")
+
+
+def test_book_review_state_follows_book_and_client_identity(
+    client_id, tmp_path, monkeypatch
+):
+    """Client ids restart in each book, so id 1 in Book A and id 1 in Book B
+    must not share policy widgets or stored review results."""
+    import utils.client_selector as selector
+    from database import connection as dbconn
+    from database.connection import init_database
+    from models.client import Client
+    from services.book_review import get_review_policy, set_review_policy
+
+    selected = {"client_id": client_id}
+    monkeypatch.setattr(
+        selector, "render_client_selector", lambda: selected["client_id"]
+    )
+    monkeypatch.setattr(selector, "apply_sidebar_style", lambda *a, **k: None)
+    monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
+
+    book_a = dbconn.DATABASE_PATH
+    set_review_policy(client_id, "BOOK A POLICY")
+    page = AppTest.from_file(
+        page_path("pages/11_Book_Review.py"), default_timeout=30
+    ).run()
+    assert not page.exception
+    policy_box = next(box for box in page.text_area if box.label == "Policy notes")
+    assert policy_box.value == "BOOK A POLICY"
+    page.session_state["analytics_memo"] = (
+        (str(book_a), client_id), "BOOK A MEMO", "2026"
+    )
+
+    book_b = tmp_path / "book-b.db"
+    monkeypatch.setattr(dbconn, "DATABASE_PATH", book_b)
+    init_database()
+    book_b_client = Client(name="Book B Client").save(seed_accounts=True)
+    assert book_b_client == client_id
+    set_review_policy(book_b_client, "BOOK B POLICY")
+
+    page.run()
+    assert not page.exception
+    policy_box = next(box for box in page.text_area if box.label == "Policy notes")
+    assert policy_box.value == "BOOK B POLICY"
+    rendered = " ".join(str(item.value) for item in page.markdown)
+    assert "BOOK A MEMO" not in rendered
+
+    policy_box.set_value("BOOK B UPDATED")
+    next(button for button in page.button if button.label == "Save policy notes").click()
+    page.run()
+    assert get_review_policy(book_b_client) == "BOOK B UPDATED"
+
+    monkeypatch.setattr(dbconn, "DATABASE_PATH", book_a)
+    assert get_review_policy(client_id) == "BOOK A POLICY"

@@ -1,11 +1,13 @@
 import streamlit as st
 import sys
+import hashlib
 from pathlib import Path
 from datetime import date
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
+from database import connection as dbconn
 from models.audit_log import AuditLog
 from models.client import Client
 from services.book_review import (
@@ -44,14 +46,24 @@ if not client_id:
 client = Client.get_by_id(client_id)
 fy_start, _ = fiscal_year_bounds(date.today(), client.fiscal_year_end_month)
 
+# Client ids restart at 1 in every book. Use the full book/client owner for
+# stored results, and a compact deterministic token for Streamlit widget keys,
+# so switching books cannot carry policy text or period inputs into a different
+# client that happens to have the same numeric id.
+review_owner = (str(dbconn.DATABASE_PATH), client_id)
+book_token = hashlib.sha256(
+    str(dbconn.DATABASE_PATH).encode("utf-8")
+).hexdigest()[:12]
+review_widget_scope = f"{book_token}_{client_id}"
+
 period_cols = st.columns([1, 1, 2])
 with period_cols[0]:
     period_start = st.date_input(
-        "From", value=fy_start, key=f"review_start_{client_id}"
+        "From", value=fy_start, key=f"review_start_{review_widget_scope}"
     )
 with period_cols[1]:
     period_end = st.date_input(
-        "To", value=date.today(), key=f"review_end_{client_id}"
+        "To", value=date.today(), key=f"review_end_{review_widget_scope}"
     )
 if period_start > period_end:
     st.error("The review period start cannot be after its end.")
@@ -65,12 +77,12 @@ with st.expander("Accounting policy notes (the reviewer honors these)"):
         "\"ADP and Gusto fees go to 7080, never Dues. GoDaddy is software. "
         "Cash rewards are 5002 Income - Other.\""
     )
-    # Keyed per client: a keyed widget ignores value= once it holds state, so
-    # a shared key would carry one client's notes into the next client's
+    # Keyed per book and client: a keyed widget ignores value= once it holds
+    # state, so a shared key would carry one client's notes into another
     # editor and the Save button would write them onto that client.
     policy_text = st.text_area(
         "Policy notes", value=get_review_policy(client_id),
-        key=f"review_policy_text_{client_id}", height=140,
+        key=f"review_policy_text_{review_widget_scope}", height=140,
         label_visibility="collapsed",
     )
     if st.button("Save policy notes"):
@@ -131,7 +143,7 @@ else:
             st.error(f"The review call failed: {book_review_service.last_error}")
         else:
             st.session_state.category_review = (
-                client_id, findings, reviewed, period_label
+                review_owner, findings, reviewed, period_label
             )
             AuditLog.log_event(client_id, "REVIEW", "category_consistency_review", {
                 "period_start": period_start, "period_end": period_end,
@@ -141,7 +153,7 @@ else:
     stored = st.session_state.get("category_review")
     # Results belong to the client they were run for; never show or export
     # one client's review under another client's name.
-    if stored and stored[0] == client_id:
+    if stored and stored[0] == review_owner:
         _, findings, reviewed, stored_label = stored
         st.caption(f"Reviewed {reviewed} posted transactions ({stored_label}).")
         if findings:
@@ -189,12 +201,14 @@ if book_review_service.is_available():
         if book_review_service.last_error:
             st.error(f"The memo call failed: {book_review_service.last_error}")
         elif memo:
-            st.session_state.analytics_memo = (client_id, memo, period_label)
+            st.session_state.analytics_memo = (
+                review_owner, memo, period_label
+            )
             AuditLog.log_event(client_id, "REVIEW", "analytical_review_memo", {
                 "period_start": period_start, "period_end": period_end,
             })
     stored_memo = st.session_state.get("analytics_memo")
-    if stored_memo and stored_memo[0] == client_id:
+    if stored_memo and stored_memo[0] == review_owner:
         _, memo, memo_label = stored_memo
         st.markdown(f"**Analytical review memo** · {memo_label}")
         st.markdown(defang_markdown(memo))

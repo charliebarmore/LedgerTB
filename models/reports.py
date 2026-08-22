@@ -1377,6 +1377,11 @@ class ReportGenerator:
             line['amount'] += amount
             line['entry_ids'].append(entry_id)
 
+        disposal_adjusters = frozenset({
+            AccountSubtype.GAIN_ON_ASSET_DISPOSAL,
+            AccountSubtype.LOSS_ON_ASSET_DISPOSAL,
+        })
+
         def noncash_exchange_amount(lines):
             """Dollar value exchanged between noncash counterparts in one entry.
 
@@ -1390,8 +1395,14 @@ class ReportGenerator:
             acquired = 0
             for line in lines:
                 signed = line['credit'] - line['debit']
-                if resolved(line) == AccountSubtype.ACCUMULATED_DEPRECIATION:
+                subtype = resolved(line)
+                if subtype == AccountSubtype.ACCUMULATED_DEPRECIATION:
                     given += signed
+                elif subtype in disposal_adjusters:
+                    # A recognized gain or loss explains the difference
+                    # between carrying amount and consideration. It is not
+                    # another asset given up or acquired in the exchange.
+                    continue
                 elif signed > 0:
                     given += signed
                 else:
@@ -1476,6 +1487,7 @@ class ReportGenerator:
                 continue
 
             reason = None
+            disposal_only_operating = False
             if lines[0]['entry_type'] == 'Closing':
                 section = 'unclassified'
                 reason = f"{lines[0]['entry_type']} entry affects cash"
@@ -1487,12 +1499,9 @@ class ReportGenerator:
                     resolved(line) for line in counterparts
                     if counterpart_section(line) == 'operating'
                 }
-                disposal_adjusters = {
-                    AccountSubtype.GAIN_ON_ASSET_DISPOSAL,
-                    AccountSubtype.LOSS_ON_ASSET_DISPOSAL,
-                }
                 if operating_subtypes <= disposal_adjusters:
                     section = 'investing'
+                    disposal_only_operating = True
                 else:
                     section = None
             elif len(counterpart_sections) > 1:
@@ -1540,14 +1549,17 @@ class ReportGenerator:
                 section = 'unclassified'
                 reason = 'mixed entry could not be allocated exactly'
 
-            # A transaction can contain a noncash exchange within the same
-            # investing or financing section as its cash component (for
-            # example, trade in an old asset and pay cash for a new one).
-            # Because every counterpart resolves to one section, that shape
-            # does not enter the mixed-section allocation branch above.
+            # A transaction can contain a noncash exchange alongside its cash
+            # component (for example, trading in an old asset and paying cash
+            # for a new one). A gain or loss on the disposal resolves to the
+            # operating section, but it is only an adjuster; the exchange is
+            # still investing activity and must be disclosed.
             if (
                 section in ('investing', 'financing')
-                and counterpart_sections == {section}
+                and (
+                    counterpart_sections == {section}
+                    or disposal_only_operating
+                )
             ):
                 record_noncash(
                     entry_id, counterparts, noncash_exchange_amount(counterparts),
