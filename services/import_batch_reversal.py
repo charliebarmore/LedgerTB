@@ -208,6 +208,26 @@ def reverse_import_batch(
         if blockers:
             raise ValueError(" ".join(blockers))
 
+        posted_entry_ids = sorted({
+            row["journal_entry_id"] for row in rows
+            if row["status"] == "Posted" and row["journal_entry_id"] is not None
+        })
+        if posted_entry_ids:
+            placeholders = ", ".join("?" for _ in posted_entry_ids)
+            cursor.execute(
+                f"""SELECT MAX(entry_date) latest_entry_date
+                    FROM journal_entries
+                    WHERE client_id = ? AND id IN ({placeholders})""",
+                [client_id, *posted_entry_ids],
+            )
+            latest_value = cursor.fetchone()["latest_entry_date"]
+            latest_entry_date = date.fromisoformat(latest_value)
+            if reversal_date < latest_entry_date:
+                raise ValueError(
+                    "The reversal date cannot be earlier than the latest posted "
+                    f"entry in the batch ({latest_entry_date.isoformat()})."
+                )
+
         if replacement_bank_account_id is not None:
             cursor.execute(
                 """SELECT id, type, is_active FROM accounts

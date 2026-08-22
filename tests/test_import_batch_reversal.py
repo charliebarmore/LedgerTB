@@ -90,6 +90,25 @@ def test_reversal_preserves_history_and_stages_a_linked_replacement(
     assert batch_events[0].new_values["reason"] == "Imported to the wrong bank account"
 
 
+def test_reversal_date_cannot_precede_the_latest_source_posting(client_id, accounts):
+    _post(client_id, accounts, "JAN", 2, "First", -10, 5)
+    _post(client_id, accounts, "JAN", 3, "Second", -20, 10)
+
+    with pytest.raises(ValueError, match=r"latest posted entry.*2026-01-10"):
+        reverse_import_batch(
+            client_id=client_id,
+            batch_id="JAN",
+            reversal_date=date(2026, 1, 9),
+            reason="Backdated by mistake",
+        )
+
+    assert JournalEntry.count(client_id) == 2
+    assert all(
+        row.status == "Posted"
+        for row in ImportedTransaction.get_by_batch(client_id, "JAN")
+    )
+
+
 def test_replacement_does_not_match_the_original_but_still_detects_other_duplicates(
     client_id, accounts
 ):
@@ -158,6 +177,19 @@ def test_replacement_can_be_reposted_without_duplicate_override(client_id, accou
     assert posted.duplicate_override is False
     assert entry.id is not None
     assert Account.get_balance(accounts["cash"], client_id=client_id) == -40
+
+    active = ImportedTransaction.get_all(client_id)
+    reversed_rows = ImportedTransaction.get_all(client_id, status="Reversed")
+    summary = ImportedTransaction.get_filtered_summary(client_id)
+    assert [row.id for row in active] == [posted.id]
+    assert len(reversed_rows) == 1
+    assert summary == {
+        "total_count": 1,
+        "total_deposits": 0,
+        "total_withdrawals": -40,
+        "posted_count": 1,
+        "pending_count": 0,
+    }
 
     ledger = ReportGenerator.general_ledger(
         accounts["cash"], date(2026, 1, 1), date(2026, 2, 28), client_id

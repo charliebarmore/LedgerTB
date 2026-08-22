@@ -42,6 +42,23 @@ def test_backup_is_verified_and_restore_replaces_live_database(db, tmp_path):
     assert {c.name for c in Client.get_all()} == {"Before Backup"}
 
 
+def test_restore_refuses_to_replace_a_book_with_a_live_connection(db, tmp_path):
+    from database.connection import get_connection
+    from utils import maintenance_lock
+
+    record = create_backup(tmp_path / "backups")
+    live_connection = get_connection()
+    try:
+        with pytest.raises(maintenance_lock.MaintenanceBusy, match="still in use"):
+            restore_backup(
+                record.database_path, tmp_path / "backups", audit=_restore_audit
+            )
+    finally:
+        live_connection.close()
+
+    restore_backup(record.database_path, tmp_path / "backups", audit=_restore_audit)
+
+
 def test_tampered_backup_is_rejected(db, tmp_path):
     Client(name="Original").save(seed_accounts=False)
     record = create_backup(tmp_path / "backups")

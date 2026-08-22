@@ -514,7 +514,15 @@ def test_import_history_reverses_batch_into_review_queue(
     assert not transactions.exception
     transaction_captions = " ".join(str(item.value) for item in transactions.caption)
     assert f"Replacement for transaction #{imported.id}" in transaction_captions
-    assert "Reversal JE #" in transaction_captions
+    assert "Reversal JE #" not in transaction_captions
+
+    next(box for box in transactions.selectbox if box.label == "Status").set_value(
+        "Reversed"
+    ).run()
+    reversed_captions = " ".join(
+        str(item.value) for item in transactions.caption
+    )
+    assert "Reversal JE #" in reversed_captions
 
     reports = AppTest.from_file(
         page_path("pages/5_Reports.py"), default_timeout=30

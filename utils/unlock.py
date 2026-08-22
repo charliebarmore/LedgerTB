@@ -275,8 +275,10 @@ def change_book_passphrase(new_passphrase: str) -> RotationResult:
             for name, reason in failed:
                 result.warnings.append(
                     f"The backup {name} could not be converted to the new "
-                    f"passphrase ({reason}). It was left as it was; check which "
-                    "passphrase opens it before relying on it."
+                    f"passphrase ({reason}). Its last verified state was "
+                    "preserved, and LedgerTB will repair a marked interruption "
+                    "when possible. Check which passphrase opens it before "
+                    "relying on it."
                 )
         except Exception as exc:
             result.warnings.append(
