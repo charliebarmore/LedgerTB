@@ -205,6 +205,14 @@ def _fingerprint_for(key=None) -> str:
     return key_fingerprint(chosen) if chosen else ""
 
 
+def _write_manifest_atomic(manifest_path: Path, payload: dict) -> None:
+    """Replace a backup manifest without exposing a partially written file."""
+    temp = manifest_path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(payload, indent=2) + "\n")
+    os.chmod(temp, 0o600)
+    os.replace(temp, manifest_path)
+
+
 def rekey_backups(current_key: str, new_key: str, days: Optional[int] = None,
                   backup_dir: Optional[Path] = None):
     """Re-encrypt this book's backups so they open with the new key.
@@ -215,17 +223,17 @@ def rekey_backups(current_key: str, new_key: str, days: Optional[int] = None,
     passphrase opens which recovery point depends on its age. ``days`` limits
     it for tests and for a caller that knowingly wants less.
 
-    Nothing is ever deleted here. A backup that cannot be converted is left
-    exactly as it was, still openable with the passphrase it already had, and
-    reported.
+    Nothing is ever deleted here. A backup that cannot be converted is
+    reported. If interruption happens after its database is replaced, its
+    manifest retains enough transition evidence for load_record to finish the
+    conversion safely.
 
     Returns (converted, [(name, reason), ...]). Each backup is converted on its
     own, so one failure does not stop the rest.
 
-    Residual window, stated rather than hidden: the database file and its
-    manifest are replaced one after the other, so a crash between them leaves a
-    checksum mismatch. load_record reports that as an interrupted re-key rather
-    than as corruption, and the backup can be deleted and remade.
+    A transition marker is written before each database is re-keyed. If the
+    process stops between replacing the database and replacing its manifest,
+    load_record can prove what operation was underway and safely finish it.
     """
     from datetime import timedelta
 
@@ -239,16 +247,23 @@ def rekey_backups(current_key: str, new_key: str, days: Optional[int] = None,
         manifest_path = record.database_path.with_suffix(".json")
         try:
             payload = json.loads(manifest_path.read_text())
-            if payload.get("key_fingerprint") == key_fingerprint(new_key):
+            target_fingerprint = key_fingerprint(new_key)
+            if payload.get("key_fingerprint") == target_fingerprint:
                 continue                      # already converted, idempotent
+            payload["rekey_in_progress"] = {
+                "from_key_fingerprint": (
+                    payload.get("key_fingerprint") or key_fingerprint(current_key)
+                ),
+                "to_key_fingerprint": target_fingerprint,
+                "database_sha256": payload.get("sha256"),
+            }
+            _write_manifest_atomic(manifest_path, payload)
             rekey_file(record.database_path, current_key, new_key)
             payload["sha256"] = _sha256(record.database_path)
             payload["size_bytes"] = record.database_path.stat().st_size
-            payload["key_fingerprint"] = key_fingerprint(new_key)
-            tmp = manifest_path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(payload, indent=2) + "\n")
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, manifest_path)
+            payload["key_fingerprint"] = target_fingerprint
+            payload.pop("rekey_in_progress", None)
+            _write_manifest_atomic(manifest_path, payload)
             converted += 1
         except Exception as exc:
             failed.append((record.database_path.name, str(exc)))
@@ -268,27 +283,35 @@ def _repair_interrupted_rekey(database_path: Path, manifest: Path, payload: dict
     tampered file can still open and pass an integrity check, and repairing on
     that basis would launder tampering into a fresh, trusted record.
 
-    The specific evidence of an interrupted conversion is that the manifest
-    names a DIFFERENT key from the one that actually opens the file. That is
-    only true when the database was re-keyed and its manifest was not. A
-    tampered backup whose manifest already names the current key does not match
-    that shape and is left alone, still reported as a mismatch.
+    The specific evidence of an interrupted conversion is either a manifest
+    naming a different key from the one that now opens the file (the original
+    protocol), or a pre-written transition marker naming the active target key
+    and the exact pre-conversion checksum (needed for older manifests that had
+    no key fingerprint). A checksum mismatch without one of those shapes is
+    left alone and reported rather than being laundered into a trusted record.
     """
     from database.crypto import key_fingerprint
 
     active = db_connection.get_active_key()
     recorded = payload.get("key_fingerprint")
-    if not active or not recorded or recorded == key_fingerprint(active):
+    transition = payload.get("rekey_in_progress") or {}
+    active_fingerprint = key_fingerprint(active) if active else ""
+    recorded_transition = (
+        transition.get("to_key_fingerprint") == active_fingerprint
+        and transition.get("database_sha256") == payload.get("sha256")
+    )
+    prior_key_transition = bool(
+        active and recorded and recorded != active_fingerprint
+    )
+    if not (recorded_transition or prior_key_transition):
         return False
     if not _integrity(database_path):
         return False
     payload["sha256"] = digest
     payload["size_bytes"] = database_path.stat().st_size
-    payload["key_fingerprint"] = key_fingerprint(active)
-    tmp = manifest.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2) + "\n")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, manifest)
+    payload["key_fingerprint"] = active_fingerprint
+    payload.pop("rekey_in_progress", None)
+    _write_manifest_atomic(manifest, payload)
     return True
 
 
@@ -392,7 +415,12 @@ def load_record(
         sha256=digest,
         size_bytes=database_path.stat().st_size,
         integrity_ok=openable,
-        key_fingerprint=payload.get("key_fingerprint", ""),
+        key_fingerprint=(
+            payload.get("key_fingerprint", "")
+            or (payload.get("rekey_in_progress") or {}).get(
+                "from_key_fingerprint", ""
+            )
+        ),
         book_id=database_book_id,
         book_name=str(payload.get("book_name") or "Book"),
     )
@@ -419,6 +447,19 @@ def list_backups(backup_dir: Optional[Path] = None) -> list[BackupRecord]:
 
 def restore_backup(database_path: Path, backup_dir: Optional[Path] = None,
                    audit=None) -> Path:
+    """Restore while holding exclusive access to the live encrypted book."""
+    if db_connection.READ_ONLY:
+        raise RuntimeError("A read-only session cannot restore a recovery point.")
+
+    from utils import maintenance_lock
+
+    live = Path(db_connection.DATABASE_PATH)
+    with maintenance_lock.hold(live):
+        return _restore_backup_locked(database_path, backup_dir, audit)
+
+
+def _restore_backup_locked(database_path: Path, backup_dir: Optional[Path] = None,
+                           audit=None) -> Path:
     """Replace the live book with a recovery point, in one visible step.
 
     The prepared copy is brought fully up to date before it goes live: copied,

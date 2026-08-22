@@ -779,6 +779,42 @@ def test_an_interrupted_backup_conversion_repairs_itself(book, monkeypatch):
     assert repaired.database_path.exists(), "it must never be deleted"
 
 
+def test_interrupted_conversion_repairs_a_legacy_manifest(book, monkeypatch):
+    """The transition marker supplies proof when the old manifest has no key
+    fingerprint, as was true for backups made before v1.4.3."""
+    import json
+
+    import services.backups as backups
+
+    record = _backup()
+    payload = json.loads(record.manifest_path.read_text())
+    payload.pop("key_fingerprint")
+    record.manifest_path.write_text(json.dumps(payload))
+
+    original_write = backups._write_manifest_atomic
+    writes = 0
+
+    def stop_before_final_manifest(path, content):
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise SystemExit("simulated interruption")
+        original_write(path, content)
+
+    monkeypatch.setattr(backups, "_write_manifest_atomic", stop_before_final_manifest)
+    with pytest.raises(SystemExit, match="simulated interruption"):
+        backups.rekey_backups(derive_key(OLD), derive_key(NEW))
+
+    dbconn.set_active_key(derive_key(NEW))
+    monkeypatch.setattr(backups, "_write_manifest_atomic", original_write)
+    repaired = backups.load_record(record.database_path)
+    repaired_payload = json.loads(record.manifest_path.read_text())
+
+    assert backups.opens_with_active_key(repaired) is True
+    assert "rekey_in_progress" not in repaired_payload
+    assert repaired_payload["key_fingerprint"] == repaired.key_fingerprint
+
+
 def test_a_tampered_backup_is_still_rejected(book):
     """The repair above must not launder tampering into a fresh checksum."""
     import services.backups as backups

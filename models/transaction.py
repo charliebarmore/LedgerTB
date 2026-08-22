@@ -561,6 +561,8 @@ class ImportedTransaction:
         elif status:
             query += " AND it.status = ? AND it.superseded_by_batch IS NULL"
             params.append(status)
+        else:
+            query += " AND it.superseded_by_batch IS NULL"
 
         if bank_account_id:
             query += " AND it.bank_account_id = ?"
@@ -643,6 +645,8 @@ class ImportedTransaction:
             clauses.append("it.status = ?")
             clauses.append("it.superseded_by_batch IS NULL")
             params.append(status)
+        else:
+            clauses.append("it.superseded_by_batch IS NULL")
         if bank_account_id:
             clauses.append("it.bank_account_id = ?")
             params.append(bank_account_id)

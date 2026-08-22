@@ -78,7 +78,11 @@ with col4:
     status_filter = st.selectbox(
         "Status",
         options=["All", "Posted", "Pending", "Categorized", "Dismissed", "Reversed"],
-        index=0
+        index=0,
+        help=(
+            "All shows current transaction rows. Choose Reversed to inspect "
+            "superseded import history."
+        ),
     )
 
 with col5:
