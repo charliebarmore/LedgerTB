@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from pathlib import Path
 
 from constants import AccountSubtype
 from streamlit.testing.v1 import AppTest
@@ -54,6 +55,14 @@ def test_paginated_accounting_pages_render(client_id, accounts, monkeypatch):
     assert not audit.exception
     assert any(metric.label == "Total Changes" for metric in audit.metric)
     assert any(button.label == "Next" and not button.disabled for button in audit.button)
+
+
+def test_statement_editor_reserves_space_for_its_scrollbar():
+    """The rightmost amount must not render beneath the editor scrollbar."""
+    source = Path(page_path("pages/4_Import_Transactions.py")).read_text()
+
+    assert ".st-key-document_transaction_editor .dvn-scroller" in source
+    assert "scrollbar-gutter: stable both-edges" in source
 
 
 def test_chart_of_accounts_uses_correct_plural_labels(

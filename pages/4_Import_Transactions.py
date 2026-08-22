@@ -1269,6 +1269,17 @@ elif selected_tab == "Upload Statement":
                     "Description": row["description"],
                     "Amount": row["amount"],
                 } for row in parsed_document_rows])
+                # Glide Data Grid overlays its vertical scrollbar on the
+                # rightmost column. Reserve the scrollbar's space so the
+                # right-aligned final digits remain visible. Scope this to the
+                # statement editor instead of changing every table in the app.
+                st.html("""
+                    <style>
+                    .st-key-document_transaction_editor .dvn-scroller {
+                        scrollbar-gutter: stable both-edges;
+                    }
+                    </style>
+                """)
                 edited_frame = st.data_editor(
                     parsed_frame,
                     hide_index=True,
