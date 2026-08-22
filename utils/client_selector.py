@@ -11,6 +11,7 @@ from models.transaction import ImportedTransaction
 from database import connection as db_connection
 from services.backups import backup_health
 from utils import icons
+from utils.client_context import sync_active_client_context
 
 
 # Narrow the sidebar (default is ~21rem). Uses width only — Streamlit collapses
@@ -164,6 +165,9 @@ def render_client_selector() -> Optional[int]:
 
     # Update session state
     st.session_state.selected_client_id = selected_id
+    sync_active_client_context(
+        st.session_state, selected_id, db_connection.DATABASE_PATH
+    )
 
     # Add-client affordance right where the clients are listed. A button rather
     # than a page_link so it can land on the Add Client view directly — a

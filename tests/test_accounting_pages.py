@@ -191,9 +191,13 @@ def test_changing_account_type_clears_incompatible_subtype(
     page.run()
     assert not page.exception
 
-    page.selectbox(key=f"edit_account_type_{expense.id}").set_value("Asset").run()
+    page.selectbox(
+        key=f"edit_account_type_{expense.id}__chart_of_accounts_g0"
+    ).set_value("Asset").run()
     assert not page.exception
-    subtype = page.selectbox(key=f"edit_account_subtype_{expense.id}")
+    subtype = page.selectbox(
+        key=f"edit_account_subtype_{expense.id}__chart_of_accounts_g0"
+    )
     assert subtype.value is None
     assert AccountSubtype.OPERATING_EXPENSE not in subtype.options
 
@@ -211,10 +215,12 @@ def test_add_account_subtypes_follow_type_without_form_submission(
     page = AppTest.from_file(
         page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30
     ).run()
-    page.selectbox(key="add_account_subtype").set_value(
+    page.selectbox(key="add_account_subtype__chart_of_accounts_g0").set_value(
         AccountSubtype.CASH
     ).run()
-    page.selectbox(key="add_account_type").set_value("Liability").run()
+    page.selectbox(key="add_account_type__chart_of_accounts_g0").set_value(
+        "Liability"
+    ).run()
     assert not page.exception
     subtype = next(
         box for box in page.selectbox
@@ -223,6 +229,57 @@ def test_add_account_subtypes_follow_type_without_form_submission(
     assert subtype.options == ["Review later"] + AccountSubtype.for_type("Liability")
     assert subtype.value is None
     assert AccountSubtype.OPERATING_EXPENSE not in subtype.options
+
+
+def test_chart_of_accounts_discards_write_state_after_client_switch(
+    client_id, accounts, monkeypatch
+):
+    second_client_id = Client(name="Second Chart Client").save(seed_accounts=False)
+    Account(
+        client_id=second_client_id,
+        account_number="9000",
+        name="Second Client Account",
+        type="Expense",
+    ).save()
+    selected = {"client_id": client_id}
+    _select_client(monkeypatch, lambda: selected["client_id"])
+
+    page = AppTest.from_file(
+        page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30
+    ).run()
+    assert not page.exception
+    page.text_input(key="add_account_number__chart_of_accounts_g0").set_value(
+        "1999"
+    )
+    page.text_input(key="add_account_name__chart_of_accounts_g0").set_value(
+        "FIRST CLIENT UNSAVED"
+    )
+    page.file_uploader(key="coa_upload__chart_of_accounts_g0").upload(
+        "first-client.csv",
+        b"Account Number,Name,Type\n1888,Uploaded First Client,Asset\n",
+        "text/csv",
+    ).run()
+    assert not page.exception
+    assert any(button.label.startswith("Import 1 account") for button in page.button)
+
+    # A raw edit id and browser-backed Add/Upload values all belong to client A.
+    # The client change must clear the id and render fresh generation-1 widgets.
+    page.session_state["editing_account"] = accounts["cash"]
+    selected["client_id"] = second_client_id
+    page.run()
+
+    assert not page.exception
+    assert "editing_account" not in page.session_state
+    assert page.text_input(
+        key="add_account_number__chart_of_accounts_g1"
+    ).value == ""
+    assert page.text_input(
+        key="add_account_name__chart_of_accounts_g1"
+    ).value == ""
+    assert page.file_uploader(
+        key="coa_upload__chart_of_accounts_g1"
+    ).value is None
+    assert not any(button.label.startswith("Import ") for button in page.button)
 
 
 def test_report_statements_render_with_balance_checks(client_id, accounts, monkeypatch):
@@ -490,6 +547,64 @@ def test_journal_form_clears_keyed_line_widgets_after_save(
     # Header widgets reset too — description clears and type returns to Regular.
     assert journal.text_input(key="je_hdr_desc_g1").value == ""
     assert journal.selectbox(key="je_hdr_type_g1").value == "Regular"
+
+
+def test_journal_discards_unsaved_state_for_same_client_id_in_another_book(
+    client_id, accounts, monkeypatch, tmp_path
+):
+    """A bare client id is not an ownership boundary: ids restart per book."""
+    from database import connection as dbconn
+    from database.connection import init_database
+
+    _select_client(monkeypatch, client_id)
+    journal = AppTest.from_file(
+        page_path("pages/2_Journal_Entries.py"), default_timeout=30
+    ).run()
+    assert not journal.exception
+    journal.selectbox(key="account_0_g0").set_value(accounts["cash"]).run()
+    journal.number_input(key="debit_0_g0").set_value(321.0).run()
+    journal.text_input(key="je_hdr_desc_g0").set_value(
+        "FIRST BOOK UNSAVED"
+    ).run()
+
+    second_book = tmp_path / "second-book.db"
+    monkeypatch.setattr(dbconn, "DATABASE_PATH", second_book)
+    init_database()
+    second_client_id = Client(
+        name="Same Id, Different Book"
+    ).save(seed_accounts=False)
+    assert second_client_id == client_id
+    Account(
+        client_id=second_client_id,
+        account_number="1100",
+        name="Second Book Cash",
+        type="Asset",
+    ).save()
+    Account(
+        client_id=second_client_id,
+        account_number="4100",
+        name="Second Book Revenue",
+        type="Revenue",
+    ).save()
+
+    # Simulate other client-owned workflow state that must never survive the
+    # book boundary, even though both selected clients have numeric id 1.
+    journal.session_state["editing_entry_id"] = 123
+    journal.session_state["correct_import_entry_id"] = 123
+    journal.session_state["journal_active_tab"] = "View Entries"
+    journal.session_state["filter_search"] = "FIRST BOOK"
+    journal.session_state["journal_page"] = 4
+    journal.run()
+
+    assert not journal.exception
+    assert journal.session_state["je_form_gen"] == 1
+    assert journal.session_state["journal_active_tab"] == "New Entry"
+    assert journal.session_state["editing_entry_id"] is None
+    assert "correct_import_entry_id" not in journal.session_state
+    assert "filter_search" not in journal.session_state
+    assert journal.selectbox(key="account_0_g1").value is None
+    assert journal.number_input(key="debit_0_g1").value == 0.0
+    assert journal.text_input(key="je_hdr_desc_g1").value == ""
 
 
 def test_journal_totals_reflect_committed_values_immediately(

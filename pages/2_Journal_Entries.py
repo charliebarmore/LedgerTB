@@ -14,6 +14,7 @@ from models.transaction import ImportedTransaction
 from services.import_corrections import correct_imported_category
 from database import init_database
 from database import connection as dbconn
+from utils.client_context import scope_page_to_client
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
@@ -23,6 +24,13 @@ from utils.ui import view_switcher
 
 
 _FORM_WIDGET_PREFIXES = ("account_", "debit_", "credit_", "memo_", "je_hdr_")
+
+
+def _empty_je_lines():
+    return [
+        {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''},
+        {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''},
+    ]
 
 
 def start_new_form_generation():
@@ -69,6 +77,53 @@ if not client_id:
     st.page_link("pages/0_Clients.py", label="Go to Clients →")
     st.stop()
 
+journal_scope = scope_page_to_client(
+    st.session_state, "journal_entries", client_id, dbconn.DATABASE_PATH
+)
+if journal_scope.changed:
+    # Unsaved lines and record ids are client-owned.  Rotate the entry form's
+    # widget generation as well: clearing only Python session state lets the
+    # browser re-impose the previous client's values on the next render.
+    start_new_form_generation()
+    st.session_state.je_lines = _empty_je_lines()
+    st.session_state.editing_entry_id = None
+    st.session_state.journal_active_tab = "New Entry"
+    st.session_state.pop("_journal_active_tab_rendered", None)
+    for key in (
+        "edit_entry_id",
+        "correct_import_entry_id",
+        "confirm_delete_entry_id",
+        "je_entry_date",
+        "je_entry_type",
+        "je_source_reference",
+        "je_description",
+        "je_aje_reference",
+        "je_saved_message",
+        "import_correction_success",
+        "search_entry_id",
+        "filter_start",
+        "filter_end",
+        "filter_type",
+        "filter_search",
+        "filter_account",
+        "journal_filter_signature",
+        "journal_page",
+        "reversal_entry_id",
+        "reversal_date",
+        "confirm_reversal",
+        "draft_result",
+    ):
+        st.session_state.pop(key, None)
+    for key in list(st.session_state):
+        if key.startswith((
+            "correction_target_",
+            "correction_date_",
+            "correction_reason_",
+            "post_correction_",
+            "cancel_correction_",
+        )):
+            del st.session_state[key]
+
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
@@ -76,10 +131,7 @@ current_fy_start, _ = fiscal_year_bounds(date.today(), client.fiscal_year_end_mo
 
 # Initialize session state
 if 'je_lines' not in st.session_state:
-    st.session_state.je_lines = [
-        {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''},
-        {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''}
-    ]
+    st.session_state.je_lines = _empty_je_lines()
 
 if "je_form_gen" not in st.session_state:
     st.session_state.je_form_gen = 0
@@ -132,10 +184,7 @@ if 'edit_entry_id' in st.session_state:
 
 def reset_entry_form():
     start_new_form_generation()
-    st.session_state.je_lines = [
-        {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''},
-        {'account_id': 0, 'debit': 0.0, 'credit': 0.0, 'memo': ''}
-    ]
+    st.session_state.je_lines = _empty_je_lines()
     st.session_state.editing_entry_id = None
     # Clear header fields
     if 'je_entry_date' in st.session_state:
