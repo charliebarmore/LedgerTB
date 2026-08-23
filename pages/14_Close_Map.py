@@ -10,11 +10,13 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
+from database import connection as dbconn
 from models import close_map
 from models.client import Client
 from models.fiscal_period import FiscalPeriod
 from money import to_dollars
 from utils import icons
+from utils.client_context import scope_page_to_client
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 
@@ -35,6 +37,17 @@ st.caption(
     "before the year is closed."
 )
 
+# Period and account ids restart in every book, and note ids can collide
+# across clients. Widget state that names one of those ids must be owned by
+# (book, client) or a switch can silently keep the previous selection — or
+# hand a typed-but-unsaved resolution to another client's same-numbered
+# note. The scope generation rotates the keys, the only reset the browser
+# honors.
+close_map_scope = scope_page_to_client(
+    st.session_state, "close_map", client_id, dbconn.DATABASE_PATH
+)
+close_map_key = close_map_scope.key
+
 periods = FiscalPeriod.get_all(client_id, period_type="Year")
 if not periods:
     FiscalPeriod.ensure_periods_exist(
@@ -51,7 +64,7 @@ period_id = st.selectbox(
         f"({period_by_id[pid].start_date:%m/%d/%Y} – "
         f"{period_by_id[pid].end_date:%m/%d/%Y})"
     ),
-    key="close_map_period",
+    key=close_map_key("period"),
 )
 period = period_by_id[period_id]
 summary = close_map.readiness(client_id, period_id)
@@ -205,7 +218,7 @@ selected_account_id = st.selectbox(
         f"{row_by_id[aid].account_number} — {row_by_id[aid].account_name} "
         f"({row_by_id[aid].status})"
     ),
-    key="close_map_account",
+    key=close_map_key("account"),
 )
 detail = close_map.account_detail(client_id, period_id, selected_account_id)
 row = detail["row"]
@@ -369,7 +382,7 @@ with notes_col:
     for note in open_notes:
         st.warning(f"{note['body']} · {note['created_by']}")
         with st.form(f"resolve_note_{note['id']}"):
-            resolution = st.text_input("Resolution", key=f"resolution_{note['id']}")
+            resolution = st.text_input("Resolution", key=close_map_key(f"resolution_{note['id']}"))
             if st.form_submit_button("Resolve note"):
                 try:
                     close_map.resolve_note(client_id, note["id"], resolution)

@@ -1116,3 +1116,75 @@ def test_import_history_reverses_batch_into_review_queue(
     )
     reports.checkbox(key="gl_hide_reversed_imports__reports_g0").uncheck().run()
     assert not reports.exception
+
+
+def test_transactions_filters_reset_for_same_client_id_in_another_book(
+    client_id, accounts, monkeypatch, tmp_path
+):
+    """Filters and paging are owned by (book, client): ids restart per book."""
+    from database import connection as dbconn
+    from database.connection import init_database
+
+    ImportedTransaction.bulk_insert([
+        ImportedTransaction(
+            client_id=client_id,
+            import_batch="first-book",
+            transaction_date=date(2026, 1, 1) + timedelta(days=index),
+            description=f"FIRST BOOK ROW {index}",
+            amount=-(index + 1),
+            bank_account_id=accounts["cash"],
+            status="Pending",
+        )
+        for index in range(55)
+    ])
+    _select_client(monkeypatch, client_id)
+    page = AppTest.from_file(
+        page_path("pages/6_Transactions.py"), default_timeout=30
+    ).run()
+    assert not page.exception
+
+    # Narrow the view and move to page 2 in the first book.
+    page.selectbox(key="status__transactions_g0").select("Pending")
+    page.run()
+    next(button for button in page.button if button.label == "Next").click()
+    page.run()
+    assert not page.exception
+    assert page.session_state["page__transactions_g0"] == 2
+
+    second_book = tmp_path / "second-book.db"
+    monkeypatch.setattr(dbconn, "DATABASE_PATH", second_book)
+    init_database()
+    second_client_id = Client(
+        name="Same Id, Different Book"
+    ).save(seed_accounts=False)
+    assert second_client_id == client_id
+    second_bank = Account(
+        client_id=second_client_id,
+        account_number="1100",
+        name="Second Book Cash",
+        type="Asset",
+    )
+    second_bank.save()
+    ImportedTransaction.bulk_insert([
+        ImportedTransaction(
+            client_id=second_client_id,
+            import_batch="second-book",
+            transaction_date=date(2026, 1, 2),
+            description="SECOND BOOK ROW",
+            amount=-20,
+            bank_account_id=second_bank.id,
+            status="Posted",
+        ),
+    ])
+    page.run()
+
+    assert not page.exception
+    # A new widget generation: default filters, page 1, only this book's rows.
+    assert page.selectbox(key="status__transactions_g1").value == "All"
+    assert page.session_state["page__transactions_g1"] == 1
+    assert next(
+        metric for metric in page.metric if metric.label == "Filtered Transactions"
+    ).value == "1"
+    switched_text = " ".join(str(item.value) for item in page.text)
+    assert "SECOND BOOK ROW" in switched_text
+    assert "FIRST BOOK ROW" not in switched_text

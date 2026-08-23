@@ -8,10 +8,12 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database import init_database
+from database import connection as dbconn
 from models.account import Account
 from models.client import Client
 from models.reconciliation import BankReconciliation
 from utils import icons
+from utils.client_context import scope_page_to_client
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 
@@ -31,6 +33,16 @@ if not client_id:
     st.stop()
 
 client = Client.get_by_id(client_id)
+
+# Draft and account ids restart in every book. The in-progress editor grid
+# (which cleared checkboxes are ticked but not yet saved) must belong to
+# (book, client) or a same-numbered draft in another book would inherit
+# them. The scope generation rotates the widget keys on any switch.
+recon_scope = scope_page_to_client(
+    st.session_state, "bank_reconciliation", client_id, dbconn.DATABASE_PATH
+)
+recon_key = recon_scope.key
+
 accounts = [
     account for account in Account.get_all(client_id, active_only=False)
     if account.type in ("Asset", "Liability")
@@ -45,6 +57,7 @@ selected_account_id = st.selectbox(
     "Account",
     options=list(account_by_id),
     format_func=lambda account_id: account_by_id[account_id].display_name(),
+    key=recon_key("account"),
 )
 account = account_by_id[selected_account_id]
 st.caption(f"Viewing: **{client.name}** · Normal balance: {'credit' if account.type == 'Liability' else 'debit'}")
@@ -139,7 +152,7 @@ else:
                 "Amount": st.column_config.NumberColumn("Amount", format="$%.2f"),
                 "Journal Entry": st.column_config.NumberColumn("JE #", format="%d"),
             },
-            key=f"reconciliation_editor_{draft.id}",
+            key=recon_key(f"editor_{draft.id}"),
         )
         if st.button("Save cleared items", type="primary"):
             try:

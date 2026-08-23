@@ -277,9 +277,68 @@ def test_close_map_page_renders_account_readiness(client_id, accounts, monkeypat
 
     assert not at.exception
     assert any("Close Map" in title.value for title in at.title)
-    assert any("1000" in option for option in at.selectbox(key="close_map_account").options)
+    assert any("1000" in option for option in at.selectbox(key="account__close_map_g0").options)
     assert any(
         "Prior-year review context — FY 2025" in expander.label
         for expander in at.expander
     )
     assert any("Reference only" in caption.value for caption in at.caption)
+
+
+def test_close_map_resolution_input_is_owned_by_book_and_client(
+    client_id, accounts, monkeypatch, tmp_path
+):
+    """A typed-but-unsaved resolution must never surface under another
+    client's same-numbered note — note ids restart in every book."""
+    from database import connection as dbconn
+    from database.connection import init_database
+    from models.client import Client
+
+    period = _period(client_id)
+    _post(client_id, date(2026, 1, 2), accounts["cash"], accounts["revenue"])
+    first_note_id = close_map.add_note(
+        client_id, period.id, accounts["cash"], "First book open question"
+    )
+
+    import utils.client_selector as selector
+    monkeypatch.setattr(selector, "render_client_selector", lambda: client_id)
+
+    at = AppTest.from_file(
+        page_path("pages/14_Close_Map.py"), default_timeout=30
+    ).run()
+    assert not at.exception
+    at.text_input(
+        key=f"resolution_{first_note_id}__close_map_g0"
+    ).set_value("FIRST BOOK DRAFT RESOLUTION").run()
+
+    second_book = tmp_path / "second-book.db"
+    monkeypatch.setattr(dbconn, "DATABASE_PATH", second_book)
+    init_database()
+    second_client_id = Client(
+        name="Same Id, Different Book"
+    ).save(seed_accounts=False)
+    assert second_client_id == client_id
+    from models.account import Account
+    cash = Account(
+        client_id=second_client_id, account_number="1000",
+        name="Second Book Cash", type="Asset",
+    )
+    cash.save()
+    revenue = Account(
+        client_id=second_client_id, account_number="4000",
+        name="Second Book Revenue", type="Revenue",
+    )
+    revenue.save()
+    second_period = _period(second_client_id)
+    _post(second_client_id, date(2026, 1, 2), cash.id, revenue.id)
+    second_note_id = close_map.add_note(
+        second_client_id, second_period.id, cash.id, "Second book open question"
+    )
+    assert second_note_id == first_note_id
+    at.run()
+
+    assert not at.exception
+    resolution = at.text_input(key=f"resolution_{second_note_id}__close_map_g1")
+    assert resolution.value in ("", None)
+    rendered = " ".join(str(item.value) for item in at.text_input)
+    assert "FIRST BOOK DRAFT RESOLUTION" not in rendered
