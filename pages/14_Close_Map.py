@@ -18,6 +18,7 @@ from money import to_dollars
 from utils import icons
 from utils.client_context import scope_page_to_client
 from utils.client_selector import render_client_selector
+from utils.fiscal_dates import fiscal_year_ending_year
 from utils.unlock import require_unlock
 
 
@@ -51,7 +52,9 @@ close_map_key = close_map_scope.key
 periods = FiscalPeriod.get_all(client_id, period_type="Year")
 if not periods:
     FiscalPeriod.ensure_periods_exist(
-        client_id, date.today().year, client.fiscal_year_end_month
+        client_id,
+        fiscal_year_ending_year(date.today(), client.fiscal_year_end_month),
+        client.fiscal_year_end_month,
     )
     periods = FiscalPeriod.get_all(client_id, period_type="Year")
 

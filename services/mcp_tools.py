@@ -97,8 +97,9 @@ def _require_client(client_id: int) -> Client:
 
 
 def _resolve_account(client_id: int, account_number: str) -> Account:
+    requested = str(account_number).strip()
     matches = [a for a in Account.get_all(client_id, active_only=False)
-               if a.account_number == str(account_number)]
+               if a.account_number == requested]
     if not matches:
         raise ValueError(f"No account numbered {account_number} for this client.")
     return matches[0]
@@ -108,8 +109,12 @@ def list_clients() -> list:
     return [{"client_id": c.id, "name": c.name} for c in Client.get_all()]
 
 
-def list_accounts(client_id: int) -> list:
+def list_accounts(client_id: int, account_number: Optional[str] = None) -> list:
     _require_client(client_id)
+    accounts = Account.get_all(client_id, active_only=False)
+    if account_number:
+        requested = str(account_number).strip()
+        accounts = [a for a in accounts if a.account_number == requested]
     return [
         {
             "account_id": a.id,
@@ -119,7 +124,7 @@ def list_accounts(client_id: int) -> list:
             "subtype": a.subtype or "",
             "active": bool(a.is_active),
         }
-        for a in Account.get_all(client_id, active_only=False)
+        for a in accounts
     ]
 
 
@@ -170,11 +175,21 @@ def propose_client_branding(
     }
 
 
+def _validated_fiscal_year(value) -> int:
+    try:
+        year = int(value)
+    except (TypeError, ValueError):
+        raise ValueError("fiscal_year must be a four-digit year.")
+    if not 1900 <= year <= 9999:
+        raise ValueError("fiscal_year must be between 1900 and 9999.")
+    return year
+
+
 def _resolve_year_period(client_id: int, fiscal_year: int):
     from models.fiscal_period import FiscalPeriod
 
     _require_client(client_id)
-    label = f"FY {int(fiscal_year)}"
+    label = f"FY {_validated_fiscal_year(fiscal_year)}"
     period = next(
         (item for item in FiscalPeriod.get_all(client_id, period_type="Year")
          if item.period_name == label),
@@ -182,9 +197,48 @@ def _resolve_year_period(client_id: int, fiscal_year: int):
     )
     if period is None:
         raise ValueError(
-            f"No {label} for this client. Add the fiscal year in LedgerTB first."
+            f"No {label} for this client. Use ensure_fiscal_year, or add it in "
+            "LedgerTB -> Trial Balance Worksheet -> + Add Year."
         )
     return period
+
+
+@mutating
+def ensure_fiscal_year(client_id: int, fiscal_year: int) -> dict:
+    """Create one client's Year, Quarter, and Month periods if absent."""
+    from models.fiscal_period import FiscalPeriod
+
+    client = _require_client(client_id)
+    year = _validated_fiscal_year(fiscal_year)
+
+    label = f"FY {year}"
+    before = {
+        period.period_name for period in FiscalPeriod.get_all(client_id)
+        if period.period_name == label
+        or period.period_name.startswith(f"{label} - ")
+    }
+    periods = FiscalPeriod.ensure_periods_exist(
+        client_id, year, client.fiscal_year_end_month
+    )
+    period = next(item for item in periods if item.period_name == label)
+    periods_added = sum(item.period_name not in before for item in periods)
+    return {
+        "fiscal_year": year,
+        "created": label not in before,
+        "repaired": label in before and periods_added > 0,
+        "periods_added": periods_added,
+        "period": {
+            "start": period.start_date.isoformat(),
+            "end": period.end_date.isoformat(),
+        },
+        "note": (
+            "Fiscal year created and available to Close Map."
+            if label not in before else
+            "Fiscal year calendar repaired."
+            if periods_added else
+            "Fiscal year already existed; nothing changed."
+        ),
+    }
 
 
 def _close_row(row) -> dict:
@@ -539,7 +593,7 @@ def general_ledger(client_id: int, account_number: str,
 def find_entries(client_id: int, search: Optional[str] = None,
                  start: Optional[str] = None, end: Optional[str] = None,
                  account_number: Optional[str] = None,
-                 entry_type: Optional[str] = None, limit: int = 50) -> list:
+                 entry_type: Optional[str] = None, limit: int = 50) -> dict:
     """Search journal entries by text/amount, date range, account, or type."""
     _require_client(client_id)
     account_id = (_resolve_account(client_id, account_number).id
@@ -553,7 +607,7 @@ def find_entries(client_id: int, search: Optional[str] = None,
         account_id=account_id,
         limit=min(int(limit), 200),
     )
-    return [
+    results = [
         {
             "entry_id": e.id,
             "date": e.entry_date.isoformat() if hasattr(e.entry_date, "isoformat") else str(e.entry_date),
@@ -571,6 +625,7 @@ def find_entries(client_id: int, search: Optional[str] = None,
         }
         for e in entries
     ]
+    return {"entries": results, "count": len(results)}
 
 
 def entry_detail(client_id: int, entry_id: int) -> dict:
@@ -814,7 +869,9 @@ def propose_import(client_id: int, bank_account_number: str, rows: list,
         d["source_id"] = source_id
         d["source_filename"] = source_label
 
-    duplicate_count = classify_import_duplicates(staged_dicts, client_id)
+    classify_import_duplicates(
+        staged_dicts, client_id, persist_backfill=False
+    )
 
     # Never double-stage: rows whose identity already exists (staged earlier
     # or already posted) are skipped, so re-proposing is harmless.
@@ -827,6 +884,7 @@ def propose_import(client_id: int, bank_account_number: str, rows: list,
         )
         already = {r["idempotency_key"] for r in cursor.fetchall()}
     fresh = [d for d in staged_dicts if d["idempotency_key"] not in already]
+    flagged_fresh = sum(bool(d.get("is_duplicate")) for d in fresh)
 
     if fresh:
         ImportedTransaction.bulk_insert([
@@ -850,9 +908,12 @@ def propose_import(client_id: int, bank_account_number: str, rows: list,
         "batch_id": batch_id,
         "staged": len(fresh),
         "skipped_already_known": len(staged_dicts) - len(fresh),
-        "flagged_as_possible_duplicates": duplicate_count,
+        "flagged_as_possible_duplicates": flagged_fresh,
+        "staged_clean": len(fresh) - flagged_fresh,
         "note": ("Staged for human review — LedgerTB -> Import Transactions "
-                 "-> Review & Categorize. Nothing posts until a person "
+                 "-> Review & Categorize. Exact retries are skipped; rows with "
+                 "the same accounting facts from a different batch are staged "
+                 "but flagged for a person. Nothing posts until a person "
                  "categorizes and posts it there."),
     }
 
@@ -924,7 +985,7 @@ def post_entry(client_id: int, entry_date: str, description: str,
 
 @mutating
 def export_close_package(client_id: int, period_start: str, period_end: str,
-                         out_dir: str) -> dict:
+                         out_dir: str = "") -> dict:
     """Write the close package (branded PDF + Excel workbook) to disk so a
     workpaper tool (e.g. LedgerPDF) can ingest it. Filesystem writes are
     consent-gated: out_dir must sit inside the book's approved export folder
@@ -976,11 +1037,21 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
             "Data Safety -> Assistant access (or set the "
             "LEDGERTB_MCP_EXPORT_ROOTS environment variable)."
         )
-    target = Path(out_dir).resolve()
+    requested_out_dir = (out_dir or "").strip()
+    if requested_out_dir:
+        requested_path = Path(requested_out_dir).expanduser()
+        target = (
+            requested_path.resolve()
+            if requested_path.is_absolute()
+            else (roots[0] / requested_path).resolve()
+        )
+    else:
+        target = roots[0]
     if not any(target == root or root in target.parents for root in roots):
+        approved = os.pathsep.join(str(root) for root in roots)
         raise ValueError(
-            f"{out_dir} is outside LEDGERTB_MCP_EXPORT_ROOTS; exports are "
-            "only written inside the folders the user approved."
+            f"{out_dir} is outside the approved export folder(s): {approved}. "
+            "Omit out_dir to export into the first approved folder."
         )
     target.mkdir(parents=True, exist_ok=True, mode=0o700)
 
@@ -1021,7 +1092,8 @@ def export_close_package(client_id: int, period_start: str, period_end: str,
 @mutating
 def create_client(name: str, entity_type: str = "",
                   fiscal_year_end_month: int = 12,
-                  seed_default_chart: bool = True) -> dict:
+                  seed_default_chart: bool = True,
+                  initial_fiscal_year: int = 0) -> dict:
     """Create a new client (set of books), optionally seeded with the default
     chart of accounts. Available at access level 'propose' and above."""
     from models.client import Client
@@ -1029,8 +1101,18 @@ def create_client(name: str, entity_type: str = "",
     name = (name or "").strip()
     if not name:
         raise ValueError("The client needs a name.")
-    if not 1 <= int(fiscal_year_end_month) <= 12:
+    try:
+        fiscal_end_month = int(fiscal_year_end_month)
+    except (TypeError, ValueError):
         raise ValueError("fiscal_year_end_month must be 1-12.")
+    if not 1 <= fiscal_end_month <= 12:
+        raise ValueError("fiscal_year_end_month must be 1-12.")
+    if initial_fiscal_year:
+        fiscal_year = _validated_fiscal_year(initial_fiscal_year)
+    else:
+        from utils.fiscal_dates import fiscal_year_ending_year
+
+        fiscal_year = fiscal_year_ending_year(date.today(), fiscal_end_month)
     existing = [c for c in Client.get_all(active_only=False) if c.name == name]
     if existing:
         raise ValueError(
@@ -1040,13 +1122,38 @@ def create_client(name: str, entity_type: str = "",
     client = Client(
         name=name,
         entity_type=(entity_type or "").strip() or None,
-        fiscal_year_end_month=int(fiscal_year_end_month),
+        fiscal_year_end_month=fiscal_end_month,
     )
-    client_id = client.save(seed_accounts=bool(seed_default_chart))
+    from database.connection import get_connection
+    from models.fiscal_period import FiscalPeriod
+
+    conn = get_connection()
+    try:
+        client_id = client.save(
+            seed_accounts=bool(seed_default_chart), conn=conn
+        )
+        periods = FiscalPeriod.ensure_periods_exist(
+            client_id, fiscal_year, fiscal_end_month, conn=conn
+        )
+        year_period = next(
+            period for period in periods
+            if period.period_name == f"FY {fiscal_year}"
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
     chart = list_accounts(client_id)
     return {
         "client_id": client_id,
         "accounts_seeded": len(chart) if seed_default_chart else 0,
+        "fiscal_year": fiscal_year,
+        "fiscal_year_period": {
+            "start": year_period.start_date.isoformat(),
+            "end": year_period.end_date.isoformat(),
+        },
         "note": ("Client created" +
                  (" with the default chart of accounts."
                   if seed_default_chart else
@@ -1062,13 +1169,13 @@ def import_accounts(client_id: int, rows: list) -> dict:
     subtype/description. Existing numbers are skipped; unmappable rows are
     reported, never silently dropped. Available at 'propose' and above."""
     from models.account import Account
-    from services.coa_import import normalize_type
+    from services.coa_import import normalize_import_subtype, normalize_type
 
     _require_client(client_id)
     if not rows:
         raise ValueError("No account rows given.")
     existing = {a.account_number for a in Account.get_all(client_id, active_only=False)}
-    created, skipped_existing, errors = [], [], []
+    created, skipped_existing, errors, warnings = [], [], [], []
     assigned_numbers = []
     seen = set()
     for i, r in enumerate(rows, start=1):
@@ -1102,17 +1209,20 @@ def import_accounts(client_id: int, rows: list) -> dict:
             number = pending["number"]
             seen.add(number)
             assigned_numbers.append((number, name))
-        supplied_subtype = (
-            str(r.get("subtype", "") or "").strip() or implied_subtype
+        explicit_subtype = str(
+            r.get("subtype", "") or r.get("detail_type", "") or ""
+        ).strip()
+        stored_subtype, warning = normalize_import_subtype(
+            acct_type, name, explicit_subtype, implied_subtype
         )
+        if warning:
+            warnings.append(f"rows[{i}]: #{number} {warning}")
         account = Account(
             client_id=client_id,
             account_number=number,
             name=name,
             type=acct_type,
-            subtype=AccountSubtype.normalize_for_storage(
-                acct_type, supplied_subtype, account_name=name
-            ),
+            subtype=stored_subtype,
             description=str(r.get("description", "") or "").strip() or None,
         )
         account.save()
@@ -1123,6 +1233,8 @@ def import_accounts(client_id: int, rows: list) -> dict:
         "numbers_assigned": [{"number": no, "name": nm}
                              for no, nm in assigned_numbers],
         "errors": errors,
+        "warnings": warnings,
         "note": ("Every row is accounted for above — nothing is silently "
-                 "dropped. Fix error rows and re-send just those."),
+                 "dropped. Fix error rows and re-send just those; review any "
+                 "semantic warnings on rows that were created."),
     }

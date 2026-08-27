@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, List
 from datetime import date
 from calendar import monthrange
-from database.connection import get_cursor
+from database.connection import get_connection, get_cursor
 from models.audit_log import AuditLog
 from money import to_dollars
 from utils.fiscal_dates import require_valid_range
@@ -18,10 +18,14 @@ class FiscalPeriod:
     end_date: date = None
     is_closed: bool = False
 
-    def save(self) -> int:
-        """Save the fiscal period to the database."""
+    def save(self, conn=None) -> int:
+        """Save the period, optionally in the caller's transaction."""
         require_valid_range(self.start_date, self.end_date, "Fiscal period")
-        with get_cursor(commit=True) as cursor:
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
+        try:
+            cursor = conn.cursor()
             if self.id is None:
                 cursor.execute(
                     """
@@ -78,7 +82,15 @@ class FiscalPeriod:
                         "is_closed": self.is_closed,
                     },
                 )
-
+            if owns_conn:
+                conn.commit()
+        except Exception:
+            if owns_conn:
+                conn.rollback()
+            raise
+        finally:
+            if owns_conn:
+                conn.close()
         return self.id
 
     @staticmethod
@@ -404,175 +416,116 @@ class FiscalPeriod:
             )
 
     @staticmethod
-    def generate_periods(client_id: int, year: int, fiscal_year_end_month: int = 12) -> List['FiscalPeriod']:
-        """
-        Generate fiscal periods for a given year based on the client's fiscal year end month.
-        Creates Year, Quarter, and Month periods.
+    def _calendar(client_id: int, year: int,
+                  fiscal_year_end_month: int) -> List['FiscalPeriod']:
+        """Build the canonical Year + 4 Quarters + 12 Months in memory."""
+        end_month = int(fiscal_year_end_month)
+        if not 1 <= end_month <= 12:
+            raise ValueError("Fiscal year-end month must be between 1 and 12.")
 
-        Args:
-            client_id: The client ID
-            year: The calendar year
-            fiscal_year_end_month: The month the fiscal year ends (1-12, default 12 for December)
-
-        Returns:
-            List of created FiscalPeriod objects
-        """
-        periods = []
-
-        # Delete existing periods for this year to avoid duplicates
-        # Check if periods already exist
-        with get_cursor() as cursor:
-            cursor.execute("""
-                SELECT COUNT(*) as cnt FROM fiscal_periods
-                WHERE client_id = ? AND period_name LIKE ?
-            """, (client_id, f"FY {year}%"))
-            cnt = cursor.fetchone()['cnt']
-
-        if cnt > 0:
-            # Return existing periods
-            return FiscalPeriod.get_all(client_id)
-
-        # Calculate fiscal year start and end
-        if fiscal_year_end_month == 12:
-            # Calendar year fiscal year
+        if end_month == 12:
             fy_start = date(year, 1, 1)
-            fy_end = date(year, 12, 31)
         else:
-            # Fiscal year ends in a different month
-            # FY 2024 ending June 2024 starts July 2023
-            fy_start = date(year - 1, fiscal_year_end_month + 1, 1)
-            fy_end = date(year, fiscal_year_end_month, monthrange(year, fiscal_year_end_month)[1])
+            fy_start = date(year - 1, end_month + 1, 1)
+        fy_end = date(year, end_month, monthrange(year, end_month)[1])
 
-        # Create Year period
-        year_period = FiscalPeriod(
-            client_id=client_id,
-            period_name=f"FY {year}",
-            period_type="Year",
-            start_date=fy_start,
-            end_date=fy_end,
-            is_closed=False
-        )
-        year_period.save()
-        periods.append(year_period)
+        def month_at(offset: int) -> tuple[int, int]:
+            absolute = fy_start.year * 12 + fy_start.month - 1 + offset
+            return absolute // 12, absolute % 12 + 1
 
-        # Create Quarter periods
-        quarter_names = ["Q1", "Q2", "Q3", "Q4"]
-        for q_idx in range(4):
-            q_start_month = (fiscal_year_end_month % 12) + 1 + (q_idx * 3)
-            q_start_year = year - 1 if q_start_month <= fiscal_year_end_month and fiscal_year_end_month != 12 else year
-
-            if fiscal_year_end_month == 12:
-                # Calendar year quarters
-                q_start_month = 1 + (q_idx * 3)
-                q_start_year = year
-                q_end_month = q_start_month + 2
-                q_end_year = year
-            else:
-                # Calculate for non-calendar fiscal year
-                q_start_month = ((fiscal_year_end_month % 12) + 1 + (q_idx * 3))
-                if q_start_month > 12:
-                    q_start_month -= 12
-                    q_start_year = year
-                else:
-                    q_start_year = year - 1
-
-                q_end_month = q_start_month + 2
-                q_end_year = q_start_year
-                if q_end_month > 12:
-                    q_end_month -= 12
-                    q_end_year += 1
-
-            if fiscal_year_end_month == 12:
-                q_start = date(q_start_year, q_start_month, 1)
-                q_end = date(q_end_year, q_end_month, monthrange(q_end_year, q_end_month)[1])
-            else:
-                q_start = date(q_start_year, q_start_month, 1)
-                q_end = date(q_end_year, q_end_month, monthrange(q_end_year, q_end_month)[1])
-
-            quarter_period = FiscalPeriod(
+        periods = [FiscalPeriod(
+            client_id=client_id, period_name=f"FY {year}", period_type="Year",
+            start_date=fy_start, end_date=fy_end, is_closed=False,
+        )]
+        for quarter in range(4):
+            start_year, start_month = month_at(quarter * 3)
+            end_year, quarter_end_month = month_at(quarter * 3 + 2)
+            periods.append(FiscalPeriod(
                 client_id=client_id,
-                period_name=f"FY {year} - {quarter_names[q_idx]}",
+                period_name=f"FY {year} - Q{quarter + 1}",
                 period_type="Quarter",
-                start_date=q_start,
-                end_date=q_end,
-                is_closed=False
-            )
-            quarter_period.save()
-            periods.append(quarter_period)
+                start_date=date(start_year, start_month, 1),
+                end_date=date(
+                    end_year, quarter_end_month,
+                    monthrange(end_year, quarter_end_month)[1],
+                ),
+                is_closed=False,
+            ))
 
-        # Create Month periods
-        month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-        if fiscal_year_end_month == 12:
-            # Calendar year - months are simple
-            for m in range(1, 13):
-                m_start = date(year, m, 1)
-                m_end = date(year, m, monthrange(year, m)[1])
-
-                month_period = FiscalPeriod(
-                    client_id=client_id,
-                    period_name=f"FY {year} - {month_names[m-1]}",
-                    period_type="Month",
-                    start_date=m_start,
-                    end_date=m_end,
-                    is_closed=False
-                )
-                month_period.save()
-                periods.append(month_period)
-        else:
-            # Non-calendar fiscal year
-            current_month = fiscal_year_end_month + 1
-            current_year = year - 1
-            if current_month > 12:
-                current_month = 1
-                current_year = year
-
-            for _ in range(12):
-                m_start = date(current_year, current_month, 1)
-                m_end = date(current_year, current_month, monthrange(current_year, current_month)[1])
-
-                month_period = FiscalPeriod(
-                    client_id=client_id,
-                    period_name=f"FY {year} - {month_names[current_month-1]}",
-                    period_type="Month",
-                    start_date=m_start,
-                    end_date=m_end,
-                    is_closed=False
-                )
-                month_period.save()
-                periods.append(month_period)
-
-                current_month += 1
-                if current_month > 12:
-                    current_month = 1
-                    current_year += 1
-
+        month_names = [
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        ]
+        for offset in range(12):
+            month_year, month = month_at(offset)
+            periods.append(FiscalPeriod(
+                client_id=client_id,
+                period_name=f"FY {year} - {month_names[month - 1]}",
+                period_type="Month",
+                start_date=date(month_year, month, 1),
+                end_date=date(
+                    month_year, month, monthrange(month_year, month)[1]
+                ),
+                is_closed=False,
+            ))
         return periods
 
     @staticmethod
-    def ensure_periods_exist(client_id: int, year: int, fiscal_year_end_month: int = 12) -> List['FiscalPeriod']:
-        """
-        Ensure fiscal periods exist for a given year, creating them if needed.
+    def generate_periods(client_id: int, year: int,
+                         fiscal_year_end_month: int = 12,
+                         conn=None) -> List['FiscalPeriod']:
+        """Atomically create or repair the canonical calendar for one FY."""
+        expected = FiscalPeriod._calendar(
+            client_id, int(year), fiscal_year_end_month
+        )
+        label = f"FY {int(year)}"
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT * FROM fiscal_periods
+                   WHERE client_id = ?
+                     AND (period_name = ? OR period_name LIKE ?)
+                   ORDER BY id""",
+                (client_id, label, f"{label} - %"),
+            )
+            existing = {}
+            for row in cursor.fetchall():
+                existing.setdefault(row["period_name"], row)
 
-        Args:
-            client_id: The client ID
-            year: The calendar year
-            fiscal_year_end_month: The month the fiscal year ends
+            complete = []
+            for period in expected:
+                row = existing.get(period.period_name)
+                if row:
+                    complete.append(FiscalPeriod(
+                        id=row["id"], client_id=row["client_id"],
+                        period_name=row["period_name"],
+                        period_type=row["period_type"],
+                        start_date=date.fromisoformat(row["start_date"]),
+                        end_date=date.fromisoformat(row["end_date"]),
+                        is_closed=bool(row["is_closed"]),
+                    ))
+                else:
+                    period.save(conn=conn)
+                    complete.append(period)
+            if owns_conn:
+                conn.commit()
+            return complete
+        except Exception:
+            if owns_conn:
+                conn.rollback()
+            raise
+        finally:
+            if owns_conn:
+                conn.close()
 
-        Returns:
-            List of FiscalPeriod objects for the year
-        """
-        # Check if periods exist for this year
-        with get_cursor() as cursor:
-            cursor.execute("""
-                SELECT COUNT(*) as cnt FROM fiscal_periods
-                WHERE client_id = ? AND period_name LIKE ?
-            """, (client_id, f"FY {year}%"))
-
-            count = cursor.fetchone()['cnt']
-
-        if count == 0:
-            return FiscalPeriod.generate_periods(client_id, year, fiscal_year_end_month)
-
-        return FiscalPeriod.get_all(client_id)
+    @staticmethod
+    def ensure_periods_exist(client_id: int, year: int,
+                             fiscal_year_end_month: int = 12,
+                             conn=None) -> List['FiscalPeriod']:
+        """Idempotently create missing pieces of one canonical FY calendar."""
+        return FiscalPeriod.generate_periods(
+            client_id, year, fiscal_year_end_month, conn=conn
+        )

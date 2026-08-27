@@ -1,5 +1,7 @@
 """Tests for the chart-of-accounts CSV parser (services/coa_import.py)."""
 
+import pytest
+
 from services.coa_import import parse_coa_csv, normalize_type
 
 
@@ -89,6 +91,21 @@ def test_quickbooks_type_names_map_with_implied_subtypes():
     # The unmappable row is loudly reported, never silently dropped.
     assert len(errors) == 1
     assert "will NOT be imported" in errors[0] and "Suspense Widget" in errors[0]
+
+
+@pytest.mark.parametrize("name", [
+    "Accumulated Depreciation", "AccumDepr", "Accum Dep", "A/D",
+])
+def test_accumulated_depreciation_names_override_qb_fixed_asset(name):
+    from services.coa_import import parse_coa_csv
+
+    accounts, errors = parse_coa_csv(
+        f"Number,Name,Type\n1510,{name},Fixed Asset\n"
+    )
+
+    assert not errors
+    assert accounts[0]["subtype"] == "Accumulated Depreciation"
+    assert "warning" in accounts[0]
 
 
 def test_explicit_legacy_subtype_is_canonicalized_but_unknown_text_is_preserved():
