@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Changelog — LedgerTB</title>
+<meta name="description" content="What changed in each LedgerTB release, from the latest accounting workflow improvements back to the first public version.">
+<link rel="canonical" href="https://ledgertb.com/changelog.html">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="favicon.ico">
+<meta property="og:title" content="LedgerTB changelog">
+<meta property="og:description" content="A plain-language history of LedgerTB releases and accounting workflow improvements.">
+<meta property="og:image" content="https://ledgertb.com/og-image-v1.2.png">
+<meta property="og:url" content="https://ledgertb.com/changelog.html">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://ledgertb.com/og-image-v1.2.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link rel="stylesheet" href="legal.css">
+<style>
+  .changelog { max-width: 800px; }
+  .release-head {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .release-head h2 { margin-bottom: 0; }
+  .release-date {
+    color: var(--muted-dark);
+    font-family: var(--mono);
+    font-size: .76rem;
+  }
+  .release-label {
+    background: var(--teal);
+    border-radius: 999px;
+    color: var(--cream);
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: .66rem;
+    letter-spacing: .08em;
+    margin-left: 8px;
+    padding: 3px 8px;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
+  .release h3 {
+    font-size: 1rem;
+    margin: 23px 0 8px;
+  }
+  .release-links {
+    color: var(--muted-dark);
+    font-size: .85rem;
+    margin-top: 19px;
+  }
+  .milestones { list-style: none; padding-left: 0; }
+  .milestones li {
+    border-top: 1px solid rgba(11, 26, 31, .13);
+    display: grid;
+    gap: 5px 22px;
+    grid-template-columns: 7rem 1fr;
+    padding: 17px 0;
+  }
+  .milestones li:last-child { border-bottom: 1px solid rgba(11, 26, 31, .13); }
+  .milestones strong { font-family: var(--mono); font-size: .82rem; }
+  .milestones span { color: var(--muted-dark); }
+  @media (max-width: 620px) {
+    .milestones li { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header><div class="wrap"><nav class="site-nav" aria-label="Changelog navigation">
+  <a class="brand" href="/" aria-label="LedgerTB home"><img src="mark.svg" alt=""><span>Ledger<span class="tb">TB</span></span></a>
+  <a class="back" href="/">Back to LedgerTB</a>
+</nav></div></header>
+<main><div class="wrap">
+  <div class="eyebrow">Product updates</div>
+  <h1>Changelog</h1>
+  <p class="effective">A plain-language history of LedgerTB’s public releases</p>
+  <p class="summary">LedgerTB updates preserve existing books and apply any
+  required database upgrades when a book is opened. GitHub release notes remain
+  the detailed technical record; this page highlights what changed for the
+  person doing the accounting work.</p>
+
+  <article class="changelog">
+    <section class="release" id="v1-5-1">
+      <div class="release-head">
+        <h2>LedgerTB v1.5.1 <span class="release-label">Latest</span></h2>
+        <span class="release-date">August 27, 2026</span>
+      </div>
+      <p>This release makes transaction categorization more reliable and
+      hardens the assistant setup and chart-import contracts introduced around
+      the v1.5 reporting release.</p>
+      <h3>Everyday workflow</h3>
+      <ul>
+        <li>Editing an account now brings the edit form into view instead of
+        leaving it below a long chart.</li>
+        <li>Assistant-proposed credit-card activity follows the same charge and
+        payment sign convention as a regular CSV import.</li>
+        <li>Repeated processor transactions learn reusable patterns without
+        treating each long transaction identifier as a new vendor.</li>
+        <li>An optional client business-context field gives AI categorization
+        the facts it needs without sending general engagement notes.</li>
+      </ul>
+      <h3>Assistant and import safeguards</h3>
+      <ul>
+        <li>Chart imports document subtype and QuickBooks detail-type fields,
+        report malformed rows individually, and recognize common accumulated-
+        depreciation account names as contra assets.</li>
+        <li>Assistant-created clients receive a complete, repairable fiscal
+        calendar so Close Map is available immediately.</li>
+        <li>Close-package export folders, account lookup, retry detection, and
+        legacy import duplicate checks now have clearer and safer behavior.</li>
+      </ul>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.5.1">Detailed release notes</a> ·
+      <a href="https://github.com/charliebarmore/LedgerTB/compare/v1.5.0...v1.5.1">Source comparison</a></p>
+    </section>
+
+    <section class="release" id="v1-5-0">
+      <div class="release-head">
+        <h2>LedgerTB v1.5.0</h2>
+        <span class="release-date">August 24, 2026</span>
+      </div>
+      <ul>
+        <li>Income statements and balance sheets can group accounts by curated
+        statement subtype, with explicit Unclassified sections when the chart
+        still needs work.</li>
+        <li>A new indirect-method Statement of Cash Flows ties to cash movement,
+        supports prior-year comparison, and identifies classification or
+        reconciliation issues rather than guessing.</li>
+        <li>Unsaved work, filters, and drill-down state are isolated to the
+        selected client and encrypted book.</li>
+        <li>Parsed statement amounts remain readable beside the editor scrollbar.</li>
+      </ul>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.5.0">Detailed release notes</a> ·
+      <a href="https://github.com/charliebarmore/LedgerTB/compare/v1.4.4...v1.5.0">Source comparison</a></p>
+    </section>
+
+    <section class="release" id="v1-4-4">
+      <div class="release-head">
+        <h2>LedgerTB v1.4.4</h2>
+        <span class="release-date">August 22, 2026</span>
+      </div>
+      <ul>
+        <li>Book restores hold an exclusive maintenance lock while replacing a book.</li>
+        <li>Import reversals cannot be dated before later postings tied to the source entry.</li>
+        <li>Superseded import rows stay out of the ordinary transaction view and totals while remaining available in reversal history.</li>
+        <li>Interrupted legacy-backup conversions can be detected and repaired safely.</li>
+      </ul>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.4.4">Detailed release notes</a></p>
+    </section>
+
+    <section class="release" id="v1-4-3">
+      <div class="release-head">
+        <h2>LedgerTB v1.4.3</h2>
+        <span class="release-date">August 21, 2026</span>
+      </div>
+      <ul>
+        <li>A posted bank import can be undone and returned to review without
+        deleting history: LedgerTB posts a reversal and links the replacement rows.</li>
+        <li>General Ledger can hide complete original/reversal pairs on screen
+        while exports retain the full labeled history.</li>
+        <li>Book passphrase rotation and local macOS release signing gained
+        stronger operating-system coordination.</li>
+      </ul>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.4.3">Detailed release notes</a></p>
+    </section>
+
+    <section class="release" id="v1-4-2">
+      <div class="release-head">
+        <h2>LedgerTB v1.4.2</h2>
+        <span class="release-date">August 14, 2026</span>
+      </div>
+      <ul>
+        <li>Excel and PDF close packages display encoded punctuation in
+        descriptions as ordinary text without rewriting ledger history.</li>
+        <li>Statement-image OCR and the source macOS launcher were updated for
+        current Apple Silicon and macOS compatibility.</li>
+      </ul>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.4.2">Detailed release notes</a></p>
+    </section>
+
+    <section class="release" id="earlier-releases">
+      <div class="release-head">
+        <h2>Earlier releases</h2>
+        <span class="release-date">August 11–14, 2026</span>
+      </div>
+      <ul class="milestones">
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.4.1">v1.4.1</a></strong><span>Added in-app Help &amp; Updates with explicit, user-initiated support and release links.</span></li>
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.4.0">v1.4.0</a></strong><span>Added assistant-proposed correction chains and clarified Chart of Accounts labels.</span></li>
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.3.1">v1.3.1</a></strong><span>Added professional-use disclosures and clearer privacy and AI data-flow documentation.</span></li>
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.3.0">v1.3.0</a></strong><span>Carried Close Map context across years and added client-and-firm co-branding.</span></li>
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.2.0">v1.2.0</a></strong><span>Introduced Close Map, account-level evidence, two-stage signoff, and close-package integration.</span></li>
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.1.2">v1.1.2</a></strong><span>Improved desktop shutdown, book-lock handling, export-folder selection, and MCP setup guidance.</span></li>
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.1.1">v1.1.1</a></strong><span>Stopped Integrity Sweep from treating valid prior-year entries as current-period problems.</span></li>
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.1.0">v1.1.0</a></strong><span>Added prior-year comparisons across statements, the worksheet, exports, and assistant reports.</span></li>
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.0.1">v1.0.1</a></strong><span>Made clean Integrity Sweep results explicit and consistently structured.</span></li>
+        <li><strong><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.0.0">v1.0.0</a></strong><span>First public release of encrypted, local-first double-entry bookkeeping for client work.</span></li>
+      </ul>
+    </section>
+  </article>
+
+  <div class="related"><strong>Keep exploring</strong>
+    <a href="/">LedgerTB</a> ·
+    <a href="https://github.com/charliebarmore/LedgerTB/releases/latest">Latest release</a> ·
+    <a href="https://github.com/charliebarmore/LedgerTB">Source code</a>
+  </div>
+</div></main>
+<footer><div class="wrap">
+  <div class="footer-links"><a href="/">LedgerTB</a><a href="changelog.html">Changelog</a>
+    <a href="terms.html">Terms</a><a href="disclaimer.html">Disclaimer</a>
+    <a href="privacy.html">Privacy &amp; Data</a><a href="https://github.com/charliebarmore/LedgerTB">GitHub</a></div>
+  <p class="credit">© 2026 Ledger Labs LLC · LedgerTB source code is MIT licensed.</p>
+</div></footer>
+</body>
+</html>
