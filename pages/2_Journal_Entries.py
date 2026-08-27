@@ -12,14 +12,20 @@ from models.draft_entry import DraftEntry
 from models.journal_entry import JournalEntry, JournalEntryLine
 from models.transaction import ImportedTransaction
 from services.import_corrections import correct_imported_category
+from services.preferences import get_date_format
 from database import init_database
 from database import connection as dbconn
-from utils.client_context import pop_client_intent, scope_page_to_client
+from utils.client_context import (
+    pop_client_intent,
+    scope_page_to_client,
+    set_client_intent,
+)
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
 from constants import EntryType
 from utils.fiscal_dates import fiscal_year_bounds
+from utils.dates import display_date
 from utils.ui import view_switcher
 
 
@@ -64,6 +70,7 @@ st.set_page_config(page_title="Journal Entries", page_icon=icons.JOURNAL_ENTRIES
 # Gate on the database passphrase before any DB access, then ensure schema.
 require_unlock()
 init_database()
+date_format = get_date_format()
 
 client_id = render_client_selector()
 
@@ -112,6 +119,7 @@ if journal_scope.changed:
         "reversal_date",
         "confirm_reversal",
         "draft_result",
+        "journal_return_report",
     ):
         st.session_state.pop(key, None)
     for key in list(st.session_state):
@@ -135,11 +143,27 @@ if isinstance(journal_intent, dict):
     requested_entry_id = journal_intent.get("entry_id")
     if isinstance(requested_entry_id, int) and requested_entry_id > 0:
         st.session_state.edit_entry_id = requested_entry_id
+    return_report = journal_intent.get("return_report")
+    if isinstance(return_report, dict):
+        st.session_state.journal_return_report = return_report
 
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
 current_fy_start, _ = fiscal_year_bounds(date.today(), client.fiscal_year_end_month)
+
+return_report = st.session_state.get("journal_return_report")
+if isinstance(return_report, dict) and return_report.get("report") == "General Ledger":
+    if st.button("← Back to General Ledger", key="journal_back_to_report"):
+        set_client_intent(
+            st.session_state,
+            "report",
+            return_report,
+            client_id,
+            dbconn.DATABASE_PATH,
+        )
+        st.session_state.pop("journal_return_report", None)
+        st.switch_page("pages/5_Reports.py")
 
 # Initialize session state
 if 'je_lines' not in st.session_state:
@@ -358,6 +382,7 @@ if correction_entry_id:
                 # current month.
                 value=correction_link.get("transaction_date") or date.today(),
                 key=f"correction_date_{correction_entry_id}",
+                format=date_format,
                 help="Use an open accounting period. The imported transaction date is not changed.",
             )
             reason = st.text_input(
@@ -462,7 +487,10 @@ if active_view == "New Entry":
     # Generation-keyed (hdr_key) so saving or loading an entry actually resets
     # them — unkeyed widgets keep their browser-side state across a reset.
     with col1:
-        entry_date = st.date_input("Date", value=default_date, key=hdr_key("date"))
+        entry_date = st.date_input(
+            "Date", value=default_date, key=hdr_key("date"),
+            format=date_format,
+        )
 
     with col2:
         type_index = entry_type_options.index(default_type) if default_type in entry_type_options else 0
@@ -668,10 +696,16 @@ elif active_view == "View Entries":
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        filter_start = st.date_input("From Date", value=current_fy_start, key="filter_start")
+        filter_start = st.date_input(
+            "From Date", value=current_fy_start, key="filter_start",
+            format=date_format,
+        )
 
     with col2:
-        filter_end = st.date_input("To Date", value=date.today(), key="filter_end")
+        filter_end = st.date_input(
+            "To Date", value=date.today(), key="filter_end",
+            format=date_format,
+        )
 
     with col3:
         filter_type = st.selectbox("Entry Type", options=['All'] + EntryType.ALL, key="filter_type")
@@ -773,7 +807,11 @@ elif active_view == "View Entries":
                 header += f" ({entry.aje_reference or 'AJE'})"
             elif entry.entry_type != 'Regular':
                 header += f" ({entry.entry_type})"
-            header += f" | {entry.entry_date} | {entry.description or 'No description'} | ${entry.total_debits():,.2f}"
+            header += (
+                f" | {display_date(entry.entry_date, date_format)} | "
+                f"{entry.description or 'No description'} | "
+                f"${entry.total_debits():,.2f}"
+            )
 
             # Use different styling for special entry types
             if entry.entry_type == 'Beginning Balance':
@@ -865,7 +903,8 @@ elif active_view == "Reverse Entry":
         st.info("Enter an existing journal entry number for this client.")
     else:
         st.markdown(
-            f"**JE #{original.id}** · {original.entry_date} · "
+            f"**JE #{original.id}** · "
+            f"{display_date(original.entry_date, date_format)} · "
             f"{original.description or 'No description'} · ${original.total_debits():,.2f}"
         )
         for line in original.lines:
@@ -891,6 +930,7 @@ elif active_view == "Reverse Entry":
 
         reversal_date = st.date_input(
             "Reversal date", value=date.today(), key="reversal_date",
+            format=date_format,
         )
         confirmed = st.checkbox(
             "I understand this posts a new entry and does not delete the original.",
@@ -928,7 +968,10 @@ if active_view == "Drafts":
                   for a in Account.get_all(client_id, active_only=False)}
         for d in _pending:
             with st.container(border=True):
-                st.markdown(f"**{d.entry_date} · {d.description}**")
+                st.markdown(
+                    f"**{display_date(d.entry_date, date_format)} · "
+                    f"{d.description}**"
+                )
                 st.caption(f"Draft #{d.id} · {d.entry_type} · proposed by "
                            f"{d.proposed_by}"
                            + (f" · {d.proposed_at}" if d.proposed_at else ""))
@@ -959,7 +1002,7 @@ if active_view == "Drafts":
                         st.markdown(f"**Original · JE #{d.original_entry_id}**")
                         if original:
                             st.caption(
-                                f"{original.entry_date} · "
+                                f"{display_date(original.entry_date, date_format)} · "
                                 f"{original.description or 'No description'}"
                             )
                             st.table([
@@ -974,7 +1017,10 @@ if active_view == "Drafts":
                             st.error("The linked original entry is unavailable.")
                     with proposed_col:
                         st.markdown(f"**Proposed correction · Draft #{d.id}**")
-                        st.caption(f"{d.entry_date} · {d.description}")
+                        st.caption(
+                            f"{display_date(d.entry_date, date_format)} · "
+                            f"{d.description}"
+                        )
                         st.table(proposed_rows)
                 else:
                     st.table(proposed_rows)

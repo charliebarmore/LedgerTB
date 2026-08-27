@@ -39,6 +39,7 @@ from services.close_package import (
     consistent_export_window,
     load_close_package_snapshot,
 )
+from services.preferences import get_date_format
 
 
 st.set_page_config(
@@ -51,6 +52,7 @@ st.set_page_config(
 # Gate on the database passphrase before any DB access, then ensure schema.
 require_unlock()
 init_database()
+date_format = get_date_format()
 
 client_id = render_client_selector()
 
@@ -197,13 +199,15 @@ apply_default_on_change(period_end_key, depends_on=selected_period_id,
 with col3:
     period_start = st.date_input(
         "From",
-        key=period_start_key
+        key=period_start_key,
+        format=date_format,
     )
 
 with col4:
     period_end = st.date_input(
         "To",
-        key=period_end_key
+        key=period_end_key,
+        format=date_format,
     )
 
 if period_start > period_end:
@@ -713,7 +717,8 @@ if st.session_state.get('show_aje_form', False):
                 key=worksheet_key("aje_reference"),
             )
             aje_date = st.date_input(
-                "Date", value=period_end, key=worksheet_key("aje_date")
+                "Date", value=period_end, key=worksheet_key("aje_date"),
+                format=date_format,
             )
 
         with form_cols[1]:

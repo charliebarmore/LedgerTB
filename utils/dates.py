@@ -22,6 +22,22 @@ def slash_date(d) -> str:
     return f"{d.month}/{d.day}/{d:%Y}"
 
 
+def display_date(value, date_format: str) -> str:
+    """Format a date using the saved display preference."""
+    from datetime import date
+
+    if isinstance(value, str):
+        try:
+            value = date.fromisoformat(value)
+        except ValueError:
+            return value
+    if date_format == "DD/MM/YYYY":
+        return f"{value.day:02d}/{value.month:02d}/{value.year:04d}"
+    if date_format == "YYYY/MM/DD":
+        return f"{value.year:04d}/{value.month:02d}/{value.day:02d}"
+    return f"{value.month:02d}/{value.day:02d}/{value.year:04d}"
+
+
 def long_datetime(dt) -> str:
     """August 4, 2026 at 3:07 PM"""
     return f"{long_date(dt)} at {(dt.hour % 12) or 12}:{dt:%M} {dt:%p}"

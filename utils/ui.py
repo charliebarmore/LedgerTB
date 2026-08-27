@@ -108,6 +108,7 @@ table.pb-statement {
     border-collapse: collapse;
     font-variant-numeric: tabular-nums;
     margin: 0.25rem 0 0.75rem 0;
+    user-select: text;
 }
 table.pb-statement.wide { max-width: 64rem; }
 table.pb-statement td {
@@ -116,6 +117,20 @@ table.pb-statement td {
     vertical-align: bottom;
 }
 table.pb-statement td.amt { text-align: right; white-space: nowrap; width: 8.5rem; }
+table.pb-statement td.amt { cursor: text; }
+table.pb-statement a.pb-drill {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: #94a3b8;
+    text-underline-offset: 0.16rem;
+}
+table.pb-statement a.pb-drill:hover { color: #1f3a5f; }
+table.pb-statement a.pb-new-tab {
+    color: #6b7280;
+    font-size: 0.78em;
+    margin-left: 0.35rem;
+    text-decoration: none;
+}
 table.pb-statement td.note-cell { color: #6b7280; font-size: 0.85em; }
 table.pb-statement span.muted { color: #6b7280; font-size: 0.85em; margin-left: 0.5rem; }
 table.pb-statement tr.head td {
@@ -156,7 +171,9 @@ def _statement_amount(value, lead_dollar, value_format="money"):
 def financial_statement(rows, headers=None, formats=None):
     """Render rows as an actual financial statement, not a widget pile.
 
-    rows: iterables of (kind, label, amounts, note) — note optional.
+    rows: iterables of (kind, label, amounts, note, href) — note and href
+          optional. An href turns the actual line label into a drill-down link
+          and adds a small explicit open-in-new-tab link.
       kind: 'section' (major heading), 'group' (subgroup heading),
             'item' (indented line),
             'subtotal' (bold, top rule), 'total' (bold, double-ruled amount),
@@ -179,7 +196,17 @@ def financial_statement(rows, headers=None, formats=None):
         kind, label = row[0], row[1]
         amounts = row[2] if len(row) > 2 and row[2] is not None else []
         note = row[3] if len(row) > 3 else None
+        href = row[4] if len(row) > 4 else None
         label_html = _html.escape(str(label))
+        if href:
+            safe_href = _html.escape(str(href), quote=True)
+            safe_label = label_html
+            label_html = (
+                f"<a class='pb-drill' href='{safe_href}'>{safe_label}</a>"
+                f"<a class='pb-new-tab' href='{safe_href}' target='_blank' "
+                "rel='noopener noreferrer' aria-label='Open in a new tab' "
+                "title='Open in a new tab'>↗</a>"
+            )
         if note:
             label_html += f"<span class='muted'>{_html.escape(str(note))}</span>"
         if kind == "note":
@@ -211,6 +238,7 @@ table.pb-ledger {
     font-variant-numeric: tabular-nums;
     font-size: 0.92em;
     margin: 0.25rem 0 0.75rem 0;
+    user-select: text;
 }
 table.pb-ledger td, table.pb-ledger th {
     border: none;
@@ -224,6 +252,7 @@ table.pb-ledger th {
     border-bottom: 1px solid #b9bec7;
 }
 table.pb-ledger td.r, table.pb-ledger th.r { text-align: right; white-space: nowrap; }
+table.pb-ledger td.r { cursor: text; }
 table.pb-ledger tr:nth-child(even) td { background: rgba(151, 166, 195, 0.08); }
 table.pb-ledger tr.total td {
     font-weight: 700; border-top: 1px solid #565d68; background: none;

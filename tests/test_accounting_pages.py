@@ -335,8 +335,14 @@ def test_report_statements_render_with_balance_checks(client_id, accounts, monke
         assert not page.exception, view
         if expected:
             assert any(expected in str(s.value) for s in page.success), view
-        # the GL drill-down selectbox replaced the per-account buttons
-        assert any("gl_pick" in (box.key or "") for box in page.selectbox), view
+        # Account labels themselves are now the drill-down surface; the old
+        # detached account picker must not return.
+        assert any(
+            "Click an account" in str(item.value) for item in page.caption
+        ), view
+        assert not any(
+            box.label == "Drill into general ledger" for box in page.selectbox
+        ), view
 
 
 def test_cash_flow_report_renders_quality_check_and_export(
@@ -653,6 +659,51 @@ def test_general_ledger_defaults_to_all_accounts(client_id, accounts, monkeypatc
     filter_box = next(b for b in drilled.selectbox if b.label == "Account filter")
     assert filter_box.value == accounts["cash"]
 
+    # Changing the period must not reconstruct the account picker as All.
+    drilled.selectbox(key="gl_date_preset__reports_g0").select("Custom").run()
+    drilled.date_input(key="gl_start__reports_g0").set_value(
+        date(2026, 2, 1)
+    ).run()
+    filter_box = next(b for b in drilled.selectbox if b.label == "Account filter")
+    assert filter_box.value == accounts["cash"]
+
+
+def test_report_url_drilldown_and_browser_back_restore_source(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    post_entry(
+        client_id, date(2026, 2, 15),
+        [(accounts["cash"], 100, 0), (accounts["revenue"], 0, 100)],
+    )
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.query_params.update({
+        "report": "General Ledger",
+        "client_id": str(client_id),
+        "account_id": str(accounts["cash"]),
+        "start": "2026-02-01",
+        "end": "2026-02-28",
+        "return_report": "Income Statement",
+        "return_start": "2026-01-01",
+        "return_end": "2026-02-28",
+    })
+    page.run()
+
+    assert not page.exception
+    assert page.session_state["active_report"] == "General Ledger"
+    assert page.selectbox(key="gl_account_filter__reports_g0").value == accounts["cash"]
+    assert page.date_input(key="gl_start__reports_g0").value == date(2026, 2, 1)
+    assert page.date_input(key="gl_end__reports_g0").value == date(2026, 2, 28)
+
+    page.query_params.clear()
+    page.run()
+    assert not page.exception
+    assert page.session_state["active_report"] == "Income Statement"
+    assert page.date_input(key="is_start__reports_g0").value == date(2026, 1, 1)
+    assert page.date_input(key="is_end__reports_g0").value == date(2026, 2, 28)
+
 
 def test_year_close_checklist_page_renders(client_id, accounts, monkeypatch):
     _select_client(monkeypatch, client_id)
@@ -792,7 +843,16 @@ def test_current_client_journal_intent_survives_destination_context_reset(
     set_client_intent(
         journal.session_state,
         "journal",
-        {"entry_id": target.id, "view": "New Entry"},
+        {
+            "entry_id": target.id,
+            "view": "New Entry",
+            "return_report": {
+                "report": "General Ledger",
+                "account_id": second_cash.id,
+                "start_date": date(2026, 7, 1),
+                "end_date": date(2026, 7, 31),
+            },
+        },
         second_client_id,
         dbconn.DATABASE_PATH,
     )
@@ -804,6 +864,9 @@ def test_current_client_journal_intent_survives_destination_context_reset(
     assert journal.session_state["je_form_gen"] == 1
     assert journal.text_input(key="je_hdr_desc_g1").value == "test entry"
     assert journal.selectbox(key="account_0_g1").value == second_cash.id
+    assert any(
+        button.label == "← Back to General Ledger" for button in journal.button
+    )
 
 
 def test_journal_totals_reflect_committed_values_immediately(

@@ -17,9 +17,11 @@ from services.book_review import (
     run_integrity_sweep,
     set_review_policy,
 )
+from services.preferences import get_date_format
 from utils.client_context import set_client_intent
 from utils.client_selector import render_client_selector
 from utils.fiscal_dates import fiscal_year_bounds
+from utils.dates import display_date
 from utils.unlock import require_unlock
 from utils.untrusted import defang_markdown
 from utils import icons
@@ -28,6 +30,7 @@ st.set_page_config(page_title="Book Review", page_icon=icons.REVIEW, layout="wid
 
 require_unlock()
 init_database()
+date_format = get_date_format()
 
 client_id = render_client_selector()
 
@@ -60,16 +63,21 @@ review_widget_scope = f"{book_token}_{client_id}"
 period_cols = st.columns([1, 1, 2])
 with period_cols[0]:
     period_start = st.date_input(
-        "From", value=fy_start, key=f"review_start_{review_widget_scope}"
+        "From", value=fy_start, key=f"review_start_{review_widget_scope}",
+        format=date_format,
     )
 with period_cols[1]:
     period_end = st.date_input(
-        "To", value=date.today(), key=f"review_end_{review_widget_scope}"
+        "To", value=date.today(), key=f"review_end_{review_widget_scope}",
+        format=date_format,
     )
 if period_start > period_end:
     st.error("The review period start cannot be after its end.")
     st.stop()
-period_label = f"{period_start.isoformat()} to {period_end.isoformat()}"
+period_label = (
+    f"{display_date(period_start, date_format)} to "
+    f"{display_date(period_end, date_format)}"
+)
 
 # ------------------------------------------------------------- policy notes
 with st.expander("Accounting policy notes (the reviewer honors these)"):

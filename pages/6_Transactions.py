@@ -19,6 +19,8 @@ from utils.unlock import require_unlock
 from utils import icons
 from utils.export import sanitize_df
 from utils.fiscal_dates import fiscal_year_bounds, previous_fiscal_year_bounds
+from services.preferences import get_date_format
+from utils.dates import display_date
 
 # Initialize database
 
@@ -46,6 +48,7 @@ current_fy_start, current_fy_end = fiscal_year_bounds(today, client.fiscal_year_
 previous_fy_start, previous_fy_end = previous_fiscal_year_bounds(
     today, client.fiscal_year_end_month
 )
+date_format = get_date_format()
 # Filters and pagination belong to (book, client): client ids restart at 1
 # in every book, so a bare client id would let one book's view state leak
 # into another book's same-numbered client. The scope generation gives each
@@ -66,7 +69,8 @@ with col1:
         "Date Range",
         options=[
             "All Time", "Last 30 days", "Last 90 days",
-            "This Fiscal Year", "Last Fiscal Year", "Custom",
+            "This Fiscal Year", "Last Fiscal Year",
+            "This Calendar Year", "Last Calendar Year", "Custom",
         ],
         index=0,
         key=transactions_key("date_range"),
@@ -77,6 +81,7 @@ with col2:
         start_date = st.date_input(
             "Start Date", value=date.today() - timedelta(days=30),
             key=transactions_key("start_date"),
+            format=date_format,
         )
     else:
         start_date = None
@@ -84,7 +89,8 @@ with col2:
 with col3:
     if date_range == "Custom":
         end_date = st.date_input(
-            "End Date", value=date.today(), key=transactions_key("end_date")
+            "End Date", value=date.today(), key=transactions_key("end_date"),
+            format=date_format,
         )
     else:
         end_date = None
@@ -123,6 +129,12 @@ elif date_range == "This Fiscal Year":
 elif date_range == "Last Fiscal Year":
     start_date = previous_fy_start
     end_date = previous_fy_end
+elif date_range == "This Calendar Year":
+    start_date = date(today.year, 1, 1)
+    end_date = today
+elif date_range == "Last Calendar Year":
+    start_date = date(today.year - 1, 1, 1)
+    end_date = date(today.year - 1, 12, 31)
 elif date_range == "All Time":
     start_date = None
     end_date = None
@@ -251,7 +263,10 @@ else:
         cols = st.columns([1.1, 2.3, 1.1, 1.3, 1.3, 0.8, 1.0])
 
         with cols[0]:
-            st.text(str(t.transaction_date) if t.transaction_date else "")
+            st.text(
+                display_date(t.transaction_date, date_format)
+                if t.transaction_date else ""
+            )
 
         with cols[1]:
             st.text(t.description[:40] if t.description else "")
@@ -291,7 +306,9 @@ else:
                 label = "Cleared" if t.reconciliation_status == "Completed" else "Cleared (draft)"
                 st.markdown(f":green[{label}]")
                 if t.statement_end_date:
-                    st.caption(f"Stmt {t.statement_end_date}")
+                    st.caption(
+                        f"Stmt {display_date(t.statement_end_date, date_format)}"
+                    )
             else:
                 st.caption("Uncleared")
 
