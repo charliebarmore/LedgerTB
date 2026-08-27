@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.account import Account
 from models.client import Client
 from models.audit_log import AuditLog
-from models.reports import ReportGenerator
+from models.reports import CASH_FLOW_STATEMENT_SECTIONS, ReportGenerator
 from database import init_database
 from database import connection as dbconn
 from utils.client_context import (
@@ -818,20 +818,9 @@ elif selected_report == "Cash Flow":
         rows.append(("subtotal", total_label, _cf_amounts(section['total'])))
         return rows
 
-    statement_rows = (
-        _cf_section(
-            "Operating Activities", report['operating'],
-            "Net Cash Provided by Operating Activities",
-        )
-        + _cf_section(
-            "Investing Activities", report['investing'],
-            "Net Cash Provided by Investing Activities",
-        )
-        + _cf_section(
-            "Financing Activities", report['financing'],
-            "Net Cash Provided by Financing Activities",
-        )
-    )
+    statement_rows = []
+    for title, key, total_label in CASH_FLOW_STATEMENT_SECTIONS:
+        statement_rows += _cf_section(title, report[key], total_label)
     show_unclassified = bool(
         report['unclassified']['lines']
         or report['unclassified']['current_entries']

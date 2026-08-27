@@ -269,7 +269,10 @@ def trial_balance(client_id: int, as_of: str = "",
 def income_statement(client_id: int, start: str, end: str,
                      compare_to_prior_year: bool = False) -> dict:
     """Income statement for a period (ISO dates): revenues, expenses, and net
-    income. Set compare_to_prior_year for line-by-line PY amounts and changes."""
+    income. multistep_ready says whether every Revenue and Expense account is
+    classified well enough to show Gross Profit and Operating Income; review
+    statement_warnings when false. Set compare_to_prior_year for line-by-line
+    PY amounts, changes, and combined current/prior classification diagnostics."""
     _require_level("read")
     return mcp_tools.income_statement(
         client_id, start, end, compare_to_prior_year

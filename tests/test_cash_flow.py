@@ -4,7 +4,7 @@ import pytest
 
 from constants import AccountSubtype
 from models.account import Account
-from models.reports import ReportGenerator
+from models.reports import CASH_FLOW_STATEMENT_SECTIONS, ReportGenerator
 from tests.conftest import post_entry
 
 
@@ -415,6 +415,23 @@ def test_comparative_cash_flow_merges_lines_and_periods(client_id, accounts):
     assert report["actual_cash_change"]["prior"] == 100
     assert report["current_ready"] is True
     assert report["prior_ready"] is True
+
+    expected_total_labels = {
+        total_label
+        for _title, _key, total_label in CASH_FLOW_STATEMENT_SECTIONS
+    }
+    current_labels = set(
+        ReportGenerator.cash_flow_statement_to_dataframe(
+            ReportGenerator.cash_flow_statement(client_id, START, END)
+        )["Item"]
+    )
+    comparative_labels = set(
+        ReportGenerator.comparative_cash_flow_statement_to_dataframe(report)[
+            "Item"
+        ]
+    )
+    assert expected_total_labels <= current_labels
+    assert expected_total_labels <= comparative_labels
 
 
 def test_offsetting_unclassified_entries_remain_visible_in_exports(

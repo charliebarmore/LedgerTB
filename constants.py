@@ -280,10 +280,21 @@ class AccountSubtype:
                 return cls.ACCOUNTS_PAYABLE
             return cls.OTHER_CURRENT_LIABILITY
         if account_type == AccountType.EQUITY and normalized == "capital":
-            return (
-                cls.OTHER_EQUITY if "treasury" in name
-                else cls.OWNER_CONTRIBUTION
-            )
+            if "treasury" in name:
+                return cls.OTHER_EQUITY
+            # Corporate stock and paid-in capital are unambiguously
+            # contributed capital.  A generic owner/member/partner capital
+            # account can contain much more than contributions, so leave that
+            # legacy value unresolved for the chart-review workflow instead of
+            # silently choosing a statement group.
+            if re.search(
+                r"\b(?:common|preferred)\s+stock\b|\bcapital\s+stock\b|"
+                r"\b(?:additional\s+)?paid[- ]in\s+capital\b|"
+                r"\bcontributed\s+capital\b",
+                name,
+            ):
+                return cls.OWNER_CONTRIBUTION
+            return None
         return cls._ALIASES.get(account_type, {}).get(normalized)
 
     @classmethod
