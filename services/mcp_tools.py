@@ -733,13 +733,22 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
 
 @mutating
 def propose_import(client_id: int, bank_account_number: str, rows: list,
-                   source_label: str = "Assistant import") -> dict:
-    """Stage normalized bank/card rows for human review in LedgerTB's import
-    flow. Rows never post from here: a person categorizes and posts them in
-    the app, with the same duplicate protection as a CSV import."""
+                   source_label: str = "Assistant import",
+                   sign_convention: str = "auto") -> dict:
+    """Stage bank/card statement rows for human review in LedgerTB's import
+    flow. Amounts use the source register's convention: bank withdrawals are
+    negative, while card charges are positive. LedgerTB normalizes both so
+    negative always means money out. Rows never post from here: a person
+    categorizes and posts them in the app, with the same duplicate protection
+    as a CSV import."""
     import json as _json
 
     from models.transaction import ImportedTransaction
+    from services.csv_import import (
+        SIGN_CONVENTIONS,
+        apply_sign_convention,
+        default_sign_convention,
+    )
     from services.import_identity import (
         classify_import_duplicates,
         hash_source,
@@ -758,7 +767,16 @@ def propose_import(client_id: int, bank_account_number: str, rows: list,
         raise ValueError("No rows to stage.")
     if len(rows) > 500:
         raise ValueError("Stage at most 500 rows per proposal.")
+    if sign_convention not in {"auto", *SIGN_CONVENTIONS}:
+        raise ValueError(
+            "sign_convention must be auto, bank, credit_card, or flip."
+        )
 
+    resolved_sign_convention = (
+        default_sign_convention(account.type)
+        if sign_convention == "auto"
+        else sign_convention
+    )
     staged_dicts = []
     for i, r in enumerate(rows, start=1):
         row_date = _parse_date(str(r.get("date", "")), f"rows[{i}].date")
@@ -766,7 +784,12 @@ def propose_import(client_id: int, bank_account_number: str, rows: list,
         if not description:
             raise ValueError(f"rows[{i}] needs a description.")
         try:
-            amount = round(float(r.get("amount")), 2)
+            amount = round(
+                apply_sign_convention(
+                    float(r.get("amount")), resolved_sign_convention
+                ),
+                2,
+            )
         except (TypeError, ValueError):
             raise ValueError(f"rows[{i}].amount must be a number.")
         if amount == 0:

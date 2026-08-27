@@ -58,6 +58,26 @@ def test_preview_of_a_file_shorter_than_the_sample_size():
     assert len(df) == 3
 
 
+@pytest.mark.parametrize(
+    ("description", "expected"),
+    [
+        ("INTUIT 55247773/DEPOSIT", "INTUIT DEPOSIT"),
+        ("INTUIT 6833O3O3TRAN FEE", "INTUIT TRAN FEE"),
+        ("INTUIT 601409031DEPOSIT", "INTUIT DEPOSIT"),
+        ("INTUIT 1234O5O6QBOOKS ONLINE", "INTUIT QBOOKS ONLINE"),
+    ],
+)
+def test_normalize_description_removes_long_register_ids(
+    description, expected
+):
+    assert CSVImporter.normalize_description(description) == expected
+
+
+@pytest.mark.parametrize("description", ["7ELEVEN", "3M COMPANY"])
+def test_normalize_description_preserves_numbered_merchant_names(description):
+    assert CSVImporter.normalize_description(description) == description
+
+
 # --- directional import totals -------------------------------------------
 
 from services.csv_import import apply_sign_convention, summarize_import_amounts

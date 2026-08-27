@@ -230,8 +230,10 @@ st.subheader("AI categorization")
 st.caption(
     "Powered by your own Anthropic API key, stored in the system credential "
     "vault — never in a file. When suggestions run, transaction dates, "
-    "descriptions, amounts, and your account names/numbers are sent to "
-    "Anthropic's API. Suggestions only; nothing posts without review."
+    "descriptions, amounts, account names/numbers, client entity and business "
+    "types, and the client's optional AI business context are sent to "
+    "Anthropic's API. General client Notes are not sent. Suggestions only; "
+    "nothing posts without review."
 )
 
 from config import ANTHROPIC_API_KEY

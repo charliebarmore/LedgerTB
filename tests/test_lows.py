@@ -69,6 +69,29 @@ def test_find_match_still_matches_real_pattern(client_id, accounts):
     assert match["account_id"] == accounts["expense"]
 
 
+def test_find_match_renormalizes_rules_learned_before_id_cleanup(
+    client_id, accounts
+):
+    from database.connection import get_cursor
+
+    with get_cursor(commit=True) as cur:
+        cur.execute(
+            "INSERT INTO categorization_rules "
+            "(client_id, pattern, default_account_id, confidence, times_used) "
+            "VALUES (?, 'INTUIT 55247773/DEPOSIT', ?, 1.0, 4)",
+            (client_id, accounts["revenue"]),
+        )
+
+    match = PatternLearner.find_match(
+        client_id, "INTUIT 601409031DEPOSIT"
+    )
+
+    assert match is not None
+    assert match["account_id"] == accounts["revenue"]
+    assert match["pattern"] == "INTUIT DEPOSIT"
+    assert match["match_type"] == "exact"
+
+
 def test_leading_whitespace_does_not_smuggle_a_formula_past_the_filter():
     """Excel ignores padding when deciding whether a cell is a formula, so a
     check on value[0] alone let " =1+1" through into CSV exports."""

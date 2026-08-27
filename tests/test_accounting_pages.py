@@ -208,6 +208,36 @@ def test_changing_account_type_clears_incompatible_subtype(
     assert saved.subtype is None
 
 
+def test_edit_account_scrolls_the_editor_into_view(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    rendered_html = []
+    monkeypatch.setattr(
+        st,
+        "html",
+        lambda body, **kwargs: rendered_html.append((body, kwargs)),
+    )
+
+    page = AppTest.from_file(
+        page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30
+    ).run()
+    account_id = accounts["cash"]
+    page.button(
+        key=f"edit_{account_id}__chart_of_accounts_g0"
+    ).click().run()
+
+    assert not page.exception
+    assert page.session_state["editing_account"] == account_id
+    assert "_coa_scroll_to_editor" not in page.session_state
+    assert any("Edit Account:" in item.value for item in page.subheader)
+    assert len(rendered_html) == 1
+    body, options = rendered_html[0]
+    assert "account-edit-form" in body
+    assert "scrollIntoView" in body
+    assert options["unsafe_allow_javascript"] is True
+
+
 def test_add_account_subtypes_follow_type_without_form_submission(
     client_id, accounts, monkeypatch
 ):

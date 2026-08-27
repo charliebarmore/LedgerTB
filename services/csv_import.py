@@ -379,6 +379,21 @@ class CSVImporter:
         text = re.sub(r'\*+\d{4}', '', text)
         text = re.sub(r'X+\d{4}', '', text)
 
+        # Remove volatile, digit-led register IDs without discarding a stable
+        # suffix attached by OCR or table extraction. For example,
+        # "55247773/DEPOSIT" and "6833O3O3TRAN FEE" become "DEPOSIT" and
+        # "TRAN FEE". Requiring an eight-character run with at least four
+        # digits preserves numbered merchant names such as 7ELEVEN and 3M.
+        text = re.sub(
+            r'(?<![A-Z0-9])'
+            r'(?=[0-9][A-Z0-9]{7,}(?![A-Z0-9]))'
+            r'(?=(?:[A-Z]*\d){4})'
+            r'(?:[A-Z0-9]*\d(?=[A-Z]{4,}(?![A-Z0-9]))|[A-Z0-9]+)'
+            r'(?:[/#:_-]+)?',
+            '',
+            text,
+        )
+
         # Remove extra whitespace
         text = ' '.join(text.split())
 

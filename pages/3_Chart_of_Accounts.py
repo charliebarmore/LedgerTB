@@ -41,6 +41,7 @@ coa_scope = scope_page_to_client(
 )
 if coa_scope.changed:
     st.session_state.pop("editing_account", None)
+    st.session_state.pop("_coa_scroll_to_editor", None)
 
 coa_key = coa_scope.key
 
@@ -180,15 +181,48 @@ with tab1:
                             # Edit button
                             if st.button("Edit", key=coa_key(f"edit_{account.id}")):
                                 st.session_state['editing_account'] = account.id
+                                st.session_state['_coa_scroll_to_editor'] = True
+                                st.rerun()
 
-        # Edit account modal
+        # Edit account panel
         if 'editing_account' in st.session_state:
             account = Account.get_by_id(st.session_state['editing_account'], client_id=client_id)
             if account is None:
                 # Unknown or stale id (e.g. left over from before a client switch) -
                 # drop it rather than risk editing/deleting another client's account.
                 st.session_state.pop('editing_account', None)
+                st.session_state.pop('_coa_scroll_to_editor', None)
             if account:
+                scroll_to_editor = st.session_state.pop(
+                    '_coa_scroll_to_editor', False
+                )
+                scroll_script = ""
+                if scroll_to_editor:
+                    # The editor follows the complete account list, so opening it
+                    # can otherwise look like an unresponsive button. The script
+                    # is static and runs once after Streamlit mounts the anchor.
+                    scroll_script = """
+                        <script>
+                        (() => {
+                            const anchor = document.getElementById(
+                                "account-edit-form"
+                            );
+                            if (!anchor) return;
+                            window.requestAnimationFrame(() => {
+                                anchor.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "start"
+                                });
+                            });
+                        })();
+                        </script>
+                    """
+                st.html(
+                    '<div id="account-edit-form" '
+                    'style="scroll-margin-top: 1rem;"></div>'
+                    + scroll_script,
+                    unsafe_allow_javascript=scroll_to_editor,
+                )
                 st.divider()
                 st.subheader(f"Edit Account: {account.display_name()}")
 

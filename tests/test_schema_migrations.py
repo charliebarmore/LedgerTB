@@ -34,7 +34,8 @@ def test_create_tables_records_migrations(db):
         "011_firm_branding", "012_draft_entries", "013_import_dismissal",
         "014_assistant_review", "015_review_action", "016_book_identity",
         "017_close_map", "018_client_branding", "019_draft_correction_links",
-        "020_book_audit_events", "021_import_batch_reversal"]
+        "020_book_audit_events", "021_import_batch_reversal",
+        "022_client_business_context"]
     conn.close()
 
 
@@ -47,7 +48,7 @@ def test_create_tables_is_idempotent(db):
 
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM schema_migrations")
-    assert cur.fetchone()[0] == 21
+    assert cur.fetchone()[0] == 22
     conn.close()
 
 
@@ -84,6 +85,16 @@ def test_actor_columns_exist(db):
         columns = {row[1] for row in cur.fetchall()}
         assert column in columns, f"{table} missing {column}"
     conn.close()
+
+
+def test_client_business_context_column_exists(db):
+    conn = get_connection()
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(clients)").fetchall()
+    }
+    conn.close()
+
+    assert "business_context" in columns
 
 
 def test_multiple_profile_migration_preserves_existing_mapping():

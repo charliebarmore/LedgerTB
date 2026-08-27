@@ -367,17 +367,20 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
 @server.tool()
 @_mutating
 def propose_import(client_id: int, bank_account_number: str, rows: list,
-                   source_label: str = "Assistant import") -> dict:
+                   source_label: str = "Assistant import",
+                   sign_convention: str = "auto") -> dict:
     """Stage bank/card transactions for human review in LedgerTB's import
-    flow — use this after normalizing ANY statement format (CSV, PDF, OFX,
-    a pasted table). rows: [{"date": "2026-07-03", "description": "...",
-    "amount": -12.50}] — positive = money in, negative = money out, from the
-    bank account's perspective. Duplicate-checked; nothing posts until a
-    person categorizes and posts it in the app. Needs access level "propose"
-    or higher."""
+    flow — use this after parsing ANY statement format (CSV, PDF, OFX, or a
+    pasted table). Send amounts as printed in the source register: bank
+    deposits are positive and withdrawals negative; card charges are positive
+    and payments negative. LedgerTB normalizes card signs so negative always
+    means money out. sign_convention defaults to "auto" from the account type;
+    pass "bank", "credit_card", or "flip" only when the source differs.
+    Duplicate-checked; nothing posts until a person categorizes and posts it
+    in the app. Needs access level "propose" or higher."""
     _require_level("propose")
     return mcp_tools.propose_import(client_id, bank_account_number, rows,
-                                    source_label)
+                                    source_label, sign_convention)
 
 
 @server.tool()
