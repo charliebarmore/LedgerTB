@@ -88,9 +88,45 @@
   person doing the accounting work.</p>
 
   <article class="changelog">
+    <section class="release" id="v1-6-0">
+      <div class="release-head">
+        <h2>LedgerTB v1.6.0 <span class="release-label">Latest</span></h2>
+        <span class="release-date">August 27, 2026</span>
+      </div>
+      <p>This release turns reports into a connected investigation workflow,
+      adds practical period controls, and makes financial-statement
+      presentation more consistent across the app and exported workpapers.</p>
+      <h3>Report workflow</h3>
+      <ul>
+        <li>Account lines on financial statements now drill directly into the
+        General Ledger, with an explicit option to keep the report open in a
+        second tab.</li>
+        <li>Browser Back and in-app return links restore the originating
+        report, client, account, and date range after reviewing detail or a
+        journal entry.</li>
+        <li>Changing General Ledger dates no longer resets the selected
+        account, and report figures can be selected and copied.</li>
+      </ul>
+      <h3>Dates and presentation</h3>
+      <ul>
+        <li>Fiscal-year, calendar-year, month-end, and recent-period presets
+        reduce repeated date entry across financial reports.</li>
+        <li>Each encrypted book can display dates as MM/DD/YYYY, DD/MM/YYYY,
+        or YYYY/MM/DD; new books default to the US format.</li>
+        <li>Cash-flow wording now works for positive and negative totals,
+        repeated Operating Expenses headings are removed, and statement
+        negatives use parentheses consistently in close-package Excel and
+        PDF output.</li>
+        <li>Ambiguous legacy capital accounts remain visibly unclassified for
+        human review instead of being silently treated as contributions.</li>
+      </ul>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.6.0">Detailed release notes</a> ·
+      <a href="https://github.com/charliebarmore/LedgerTB/compare/v1.5.1...v1.6.0">Source comparison</a></p>
+    </section>
+
     <section class="release" id="v1-5-1">
       <div class="release-head">
-        <h2>LedgerTB v1.5.1 <span class="release-label">Latest</span></h2>
+        <h2>LedgerTB v1.5.1</h2>
         <span class="release-date">August 27, 2026</span>
       </div>
       <p>This release makes transaction categorization more reliable and
