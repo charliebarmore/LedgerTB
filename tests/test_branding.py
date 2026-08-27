@@ -128,6 +128,10 @@ def test_firm_settings_renders_selected_client_branding(
         item.value == "Client deliverable branding" for item in page.subheader
     )
     assert any(
+        item.value == "Display preferences" for item in page.subheader
+    )
+    assert any(item.label == "Date format" for item in page.selectbox)
+    assert any(
         item.label == "Client display name" for item in page.text_input
     )
     assert any(

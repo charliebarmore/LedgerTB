@@ -16,6 +16,7 @@ from utils.unlock import require_unlock
 from utils import icons
 from models.client import Client
 from models.audit_log import AuditLog
+from services.preferences import get_date_format
 from utils.fiscal_dates import fiscal_year_bounds
 
 
@@ -29,6 +30,7 @@ st.set_page_config(
 # Gate on the database passphrase before any DB access, then ensure schema.
 require_unlock()
 init_database()
+date_format = get_date_format()
 
 client_id = render_client_selector()
 
@@ -74,14 +76,16 @@ with filter_cols[0]:
     start_date = st.date_input(
         "From Date",
         value=default_start_date,
-        key=audit_key("audit_start_date")
+        key=audit_key("audit_start_date"),
+        format=date_format,
     )
 
 with filter_cols[1]:
     end_date = st.date_input(
         "To Date",
         value=today,
-        key=audit_key("audit_end_date")
+        key=audit_key("audit_end_date"),
+        format=date_format,
     )
 
 with filter_cols[2]:
@@ -90,7 +94,8 @@ with filter_cols[2]:
         options=[
             "All", "clients", "accounts", "journal_entries",
             "imported_transactions", "categorization_rules", "fiscal_periods",
-            "bank_reconciliations", "transactions_export", "trial_balance_export",
+            "bank_reconciliations", "app_preferences", "transactions_export",
+            "trial_balance_export",
             "trial_balance_worksheet_export", "adjusted_trial_balance_export",
             "income_statement_export", "balance_sheet_export", "general_ledger_export",
             "database_backup", "database_restore",

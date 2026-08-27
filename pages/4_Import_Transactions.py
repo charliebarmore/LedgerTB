@@ -28,6 +28,7 @@ from services.import_identity import classify_import_duplicates, hash_source
 from services.import_batch_reversal import (
     preview_import_batch_reversal, reverse_import_batch,
 )
+from services.preferences import get_date_format
 from services.document_import import (
     extract_document, parse_statement_text, parse_statement_with_ai,
 )
@@ -54,6 +55,7 @@ st.set_page_config(page_title="Import Transactions", page_icon=icons.IMPORT, lay
 # Gate on the database passphrase before any DB access, then ensure schema.
 require_unlock()
 init_database()
+date_format = get_date_format()
 
 client_id = render_client_selector()
 
@@ -2303,6 +2305,7 @@ elif selected_tab == "Import History":
                 reversal_date = st.date_input(
                     "Reversal date", value=date.today(),
                     key=f"batch_reversal_date_{selected_batch}",
+                    format=date_format,
                     help="The equal-and-opposite journal entries use this date.",
                 )
                 reversal_reason = st.text_area(

@@ -11,6 +11,7 @@ from typing import Optional, List, Callable
 
 from models.journal_entry import JournalEntry, JournalEntryLine
 from models.account import Account
+from services.preferences import get_date_format
 
 
 def render_aje_form(
@@ -56,7 +57,9 @@ def render_aje_form(
 
         with header_cols[0]:
             aje_ref = st.text_input("AJE Reference", value=next_aje_ref, disabled=True)
-            aje_date = st.date_input("Date", value=period_end)
+            aje_date = st.date_input(
+                "Date", value=period_end, format=get_date_format()
+            )
 
         with header_cols[1]:
             aje_desc = st.text_input("Description", placeholder="Describe the adjusting entry...")

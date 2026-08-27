@@ -12,6 +12,7 @@ from database import connection as dbconn
 from models.account import Account
 from models.client import Client
 from models.reconciliation import BankReconciliation
+from services.preferences import get_date_format
 from utils import icons
 from utils.client_context import scope_page_to_client
 from utils.client_selector import render_client_selector
@@ -22,6 +23,7 @@ st.set_page_config(page_title="Bank Reconciliation", page_icon=icons.RECONCILIAT
 # Gate on the database passphrase before any DB access, then ensure schema.
 require_unlock()
 init_database()
+date_format = get_date_format()
 
 client_id = render_client_selector()
 
@@ -70,9 +72,15 @@ if draft is None:
     with st.form("start_reconciliation"):
         start_col, end_col, balance_col = st.columns(3)
         with start_col:
-            statement_start = st.date_input("Statement start date", value=default_start)
+            statement_start = st.date_input(
+                "Statement start date", value=default_start,
+                format=date_format,
+            )
         with end_col:
-            statement_end = st.date_input("Statement end date", value=max(default_start, date.today()))
+            statement_end = st.date_input(
+                "Statement end date", value=max(default_start, date.today()),
+                format=date_format,
+            )
         with balance_col:
             statement_balance = st.number_input(
                 "Statement ending balance", value=0.0, step=0.01, format="%.2f",
@@ -93,9 +101,15 @@ else:
         with st.form("edit_statement"):
             start_col, end_col, balance_col = st.columns(3)
             with start_col:
-                statement_start = st.date_input("Statement start date", value=draft.statement_start_date)
+                statement_start = st.date_input(
+                    "Statement start date", value=draft.statement_start_date,
+                    format=date_format,
+                )
             with end_col:
-                statement_end = st.date_input("Statement end date", value=draft.statement_end_date)
+                statement_end = st.date_input(
+                    "Statement end date", value=draft.statement_end_date,
+                    format=date_format,
+                )
             with balance_col:
                 statement_balance = st.number_input(
                     "Statement ending balance", value=float(draft.statement_ending_balance),

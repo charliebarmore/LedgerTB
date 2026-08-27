@@ -17,6 +17,11 @@ from services.branding import (
     save_branding,
     save_client_branding,
 )
+from services.preferences import (
+    DATE_FORMAT_LABELS,
+    get_preferences,
+    save_date_format,
+)
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
@@ -30,6 +35,25 @@ client_id = render_client_selector()
 
 st.title("Firm Settings")
 
+st.subheader("Display preferences")
+st.caption(
+    "Choose how dates appear in LedgerTB. This preference is stored inside "
+    "the encrypted book and applies to every client in it."
+)
+preferences = get_preferences()
+date_format_options = list(DATE_FORMAT_LABELS)
+date_format = st.selectbox(
+    "Date format",
+    options=date_format_options,
+    index=date_format_options.index(preferences.date_format),
+    format_func=lambda value: DATE_FORMAT_LABELS[value],
+    key="firm_date_format",
+)
+if st.button("Save display preferences", key="save_display_preferences"):
+    save_date_format(date_format)
+    st.success("Display preferences saved.")
+
+st.divider()
 st.subheader("Document branding")
 st.caption(
     "Your firm's identity on generated deliverables — the close package PDF "
