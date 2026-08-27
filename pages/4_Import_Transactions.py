@@ -1715,7 +1715,8 @@ elif selected_tab == "Review & Categorize":
                             revenue_accts = [a for a in all_accounts if a.type == 'Revenue']
                             categorization_service.categorize_transactions(
                                 uncategorized,
-                                expense_accts + revenue_accts
+                                expense_accts + revenue_accts,
+                                business_context=client.categorization_context(),
                             )
 
                         # Store result in session state for display after rerun
@@ -1743,8 +1744,10 @@ elif selected_tab == "Review & Categorize":
                 with col2:
                     st.caption(
                         "Sends transaction dates, descriptions, amounts, and the "
-                        "available account names/numbers to Anthropic. Suggestions "
-                        "only; nothing posts automatically."
+                        "available account names/numbers to Anthropic, along with "
+                        "the client's entity type, business type, and optional AI "
+                        "business context. General client Notes are not sent. "
+                        "Suggestions only; nothing posts automatically."
                     )
             else:
                 st.success("All transactions have been categorized!")

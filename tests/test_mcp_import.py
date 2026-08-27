@@ -59,6 +59,50 @@ def test_propose_import_stages_with_identity_and_is_idempotent(
     assert len(mcp_tools.list_staged_imports(client_id)) == 3
 
 
+def test_propose_import_normalizes_credit_card_statement_signs(
+    client_id, accounts
+):
+    card = Account.get_by_id(
+        accounts["credit_card"], client_id=client_id
+    )
+    rows = [
+        {"date": "2026-07-03", "description": "CANVA", "amount": 15.00},
+        {
+            "date": "2026-07-07",
+            "description": "CARD PAYMENT",
+            "amount": -100.00,
+        },
+    ]
+
+    mcp_tools.propose_import(client_id, card.account_number, rows, "Card stmt")
+
+    staged = ImportedTransaction.get_by_status(client_id, "Pending")
+    amounts = {row.description: row.amount for row in staged}
+    assert amounts == {"CANVA": -15.00, "CARD PAYMENT": 100.00}
+
+
+def test_propose_import_allows_explicit_sign_override(client_id, accounts):
+    card = Account.get_by_id(
+        accounts["credit_card"], client_id=client_id
+    )
+    rows = [
+        {"date": "2026-07-03", "description": "OFX CANVA", "amount": -15.00}
+    ]
+
+    mcp_tools.propose_import(
+        client_id,
+        card.account_number,
+        rows,
+        "Normalized OFX",
+        sign_convention="bank",
+    )
+
+    staged = ImportedTransaction.get_by_status(client_id, "Pending")
+    assert [(row.description, row.amount) for row in staged] == [
+        ("OFX CANVA", -15.00)
+    ]
+
+
 def test_propose_import_validation(client_id, accounts):
     cash_no = _cash_number(client_id, accounts)
     with pytest.raises(ValueError, match="cash or credit-card"):
@@ -72,6 +116,10 @@ def test_propose_import_validation(client_id, accounts):
         mcp_tools.propose_import(client_id, cash_no,
                                  [{"date": "2026-07-03", "description": "x",
                                    "amount": 0}])
+    with pytest.raises(ValueError, match="sign_convention"):
+        mcp_tools.propose_import(
+            client_id, cash_no, ROWS, sign_convention="statement-ish"
+        )
 
 
 def test_hydration_does_not_self_match_and_posting_adopts_the_row(

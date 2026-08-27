@@ -57,6 +57,13 @@ def test_add_client_industry_description_tracks_selection(db, monkeypatch):
     assert not any(v.startswith("**Professional Services**") for v in infos)
 
 
+def test_add_client_has_dedicated_ai_business_context(db, monkeypatch):
+    at = _run_clients_page(monkeypatch)
+
+    context = at.text_area(key="add_business_context")
+    assert "AI categorization" in context.label
+
+
 def test_view_switcher_deep_link_and_default(db, monkeypatch):
     # Default view is the client list -- the add form is not rendered.
     at = _run_clients_page(monkeypatch, view="View Clients")

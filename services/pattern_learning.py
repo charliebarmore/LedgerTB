@@ -148,11 +148,24 @@ class PatternLearner:
             )
 
             for rule in cursor.fetchall():
-                pattern = rule['pattern']
+                # Rules learned by an older normalizer retain their original
+                # stored text for auditability. Evaluate them with today's
+                # normalizer so newly removable register IDs do not strand
+                # otherwise useful vendor mappings after an upgrade.
+                pattern = CSVImporter.normalize_description(rule['pattern'])
                 # Skip empty/whitespace patterns defensively (also avoids the
                 # ZeroDivision in the word-overlap check below).
                 if not pattern or not pattern.strip():
                     continue
+                if pattern == normalized:
+                    return {
+                        'account_id': rule['default_account_id'],
+                        'account_name': rule['account_name'],
+                        'account_number': rule['account_number'],
+                        'confidence': rule['confidence'],
+                        'pattern': pattern,
+                        'match_type': 'exact'
+                    }
                 # Substring match, but only for patterns long enough to be
                 # meaningful -- a 1-3 char pattern would match almost anything.
                 if len(pattern) >= 4 and (pattern in normalized or normalized in pattern):

@@ -40,7 +40,8 @@ ADD_FORM_KEYS = [
     "add_client_name", "add_dba_name", "add_tax_id", "add_entity_type",
     "add_business_type", "add_fiscal_month", "add_address_line1", "add_address_city",
     "add_address_state", "add_address_zip", "add_contact_name", "add_contact_email",
-    "add_contact_phone", "add_notes", "add_seed_accounts",
+    "add_contact_phone", "add_notes", "add_business_context",
+    "add_seed_accounts",
 ]
 
 
@@ -144,6 +145,9 @@ if view == "View Clients":
                     st.session_state['edit_contact_email'] = client.contact_email or ""
                     st.session_state['edit_contact_phone'] = client.contact_phone or ""
                     st.session_state['edit_notes'] = client.notes or ""
+                    st.session_state['edit_business_context'] = (
+                        client.business_context or ""
+                    )
 
                 with st.container():
                     new_name = st.text_input("Legal Name", key="edit_name")
@@ -166,6 +170,21 @@ if view == "View Clients":
                         key="edit_business_type"
                     )
                     st.caption(f"*{BUSINESS_TYPES.get(new_business_type, '')}*")
+
+                    new_business_context = st.text_area(
+                        "Business context for AI categorization",
+                        key="edit_business_context",
+                        max_chars=2000,
+                        height=120,
+                        help=(
+                            "Describe how this business earns money, unusual "
+                            "timing or settlement flows, and account-specific "
+                            "facts that affect categorization. This field, "
+                            "entity type, and business type are sent to "
+                            "Anthropic only when AI categorization runs. "
+                            "General Notes are not sent."
+                        ),
+                    )
 
                     new_fiscal_month = st.selectbox(
                         "Fiscal Year End Month",
@@ -213,6 +232,9 @@ if view == "View Clients":
                             client.contact_email = new_contact_email or None
                             client.contact_phone = new_contact_phone or None
                             client.notes = new_notes or None
+                            client.business_context = (
+                                new_business_context.strip() or None
+                            )
 
                             try:
                                 client.save(seed_accounts=False)
@@ -349,6 +371,24 @@ else:
                 - Personal budget categories
                 """)
 
+        business_context = st.text_area(
+            "Business context for AI categorization",
+            placeholder=(
+                "Example: Custom design studio organized as an S-corp. "
+                "February tile orders are customer pre-sales. Stripe, Square, "
+                "and Intuit settle differently; accounts 2100 and 2110 are "
+                "card liabilities."
+            ),
+            key="add_business_context",
+            max_chars=2000,
+            height=120,
+            help=(
+                "Optional. This field, entity type, and business type are sent "
+                "to Anthropic only when AI categorization runs. General Notes "
+                "are not sent."
+            ),
+        )
+
         st.divider()
 
         fiscal_month = st.selectbox(
@@ -407,6 +447,7 @@ else:
                     contact_email=contact_email or None,
                     contact_phone=contact_phone or None,
                     notes=notes or None,
+                    business_context=business_context.strip() or None,
                 )
 
                 try:
