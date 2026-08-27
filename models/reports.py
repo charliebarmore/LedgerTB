@@ -14,6 +14,28 @@ from utils.fiscal_dates import (
 import pandas as pd
 
 
+# One label contract for the screen, standalone spreadsheets, and close-package
+# Excel/PDF.  The dual wording remains accurate when current and comparative
+# periods have opposite signs.
+CASH_FLOW_STATEMENT_SECTIONS = (
+    (
+        "Operating Activities",
+        "operating",
+        "Net Cash Provided by (Used in) Operating Activities",
+    ),
+    (
+        "Investing Activities",
+        "investing",
+        "Net Cash Provided by (Used in) Investing Activities",
+    ),
+    (
+        "Financing Activities",
+        "financing",
+        "Net Cash Provided by (Used in) Financing Activities",
+    ),
+)
+
+
 def _fiscal_year_start(as_of_date: date, fiscal_year_end_month: int) -> date:
     """Return the first day of the fiscal year that as_of_date falls in."""
     return fiscal_year_bounds(as_of_date, fiscal_year_end_month)[0]
@@ -815,8 +837,9 @@ class ReportGenerator:
             number = item.get('account_number') or ''
             return f"{number} - {item['name']}" if number else item['name']
 
-        def append_group(group):
-            rows.append(('group', group['group'], None))
+        def append_group(group, *, show_heading=True):
+            if show_heading:
+                rows.append(('group', group['group'], None))
             rows.extend(
                 ('item', label(item), item) for item in group['accounts']
             )
@@ -881,7 +904,10 @@ class ReportGenerator:
             if operating_groups:
                 rows.append(('section', 'Operating Expenses', None))
                 for group in operating_groups:
-                    append_group(group)
+                    append_group(
+                        group,
+                        show_heading=group['key'] != 'operating_expenses',
+                    )
                 if operating_revenue or cogs:
                     rows.append((
                         'total', 'Operating Income', report['operating_income']
@@ -2334,20 +2360,12 @@ class ReportGenerator:
                 rows.append({'Item': f"  {line['name']}", 'Amount': line['amount']})
             rows.append({'Item': total_label, 'Amount': section['total']})
 
-        append_section(
-            'OPERATING ACTIVITIES', report['operating'],
-            'Net Cash Provided by Operating Activities',
-        )
-        rows.append({'Item': '', 'Amount': ''})
-        append_section(
-            'INVESTING ACTIVITIES', report['investing'],
-            'Net Cash Provided by Investing Activities',
-        )
-        rows.append({'Item': '', 'Amount': ''})
-        append_section(
-            'FINANCING ACTIVITIES', report['financing'],
-            'Net Cash Provided by Financing Activities',
-        )
+        for index, (title, key, total_label) in enumerate(
+            CASH_FLOW_STATEMENT_SECTIONS
+        ):
+            append_section(title.upper(), report[key], total_label)
+            if index < len(CASH_FLOW_STATEMENT_SECTIONS) - 1:
+                rows.append({'Item': '', 'Amount': ''})
         unclassified_entries = report['unclassified']['entries']
         if report['unclassified']['lines'] or unclassified_entries:
             rows.append({'Item': '', 'Amount': ''})
@@ -2429,20 +2447,12 @@ class ReportGenerator:
                 rows.append({'Item': f"  {line['name']}", **values(line)})
             rows.append({'Item': total_label, **values(section['total'])})
 
-        append_section(
-            'OPERATING ACTIVITIES', report['operating'],
-            'Net Cash Provided by Operating Activities',
-        )
-        rows.append({'Item': ''})
-        append_section(
-            'INVESTING ACTIVITIES', report['investing'],
-            'Net Cash Provided by Investing Activities',
-        )
-        rows.append({'Item': ''})
-        append_section(
-            'FINANCING ACTIVITIES', report['financing'],
-            'Net Cash Provided by Financing Activities',
-        )
+        for index, (title, key, total_label) in enumerate(
+            CASH_FLOW_STATEMENT_SECTIONS
+        ):
+            append_section(title.upper(), report[key], total_label)
+            if index < len(CASH_FLOW_STATEMENT_SECTIONS) - 1:
+                rows.append({'Item': ''})
         current_entries = report['unclassified']['current_entries']
         prior_entries = report['unclassified']['prior_entries']
         if report['unclassified']['lines'] or current_entries or prior_entries:

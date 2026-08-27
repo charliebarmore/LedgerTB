@@ -177,9 +177,17 @@ retainer and explain your accounts."* Everything waits for you in the
 app.
 
 Financial-statement tools retain their original flat account arrays and totals
-and also return additive grouped sections. `cash_flow_statement` returns a
-derived indirect-method statement for a date range, optionally compared with
-the prior year. Treat its three quality fields separately: `ties` proves the
-cash arithmetic, `operating_reconciled` proves the indirect operating bridge,
-and `classification_complete` proves that no cash-affecting entry remains in
-the explicit unclassified section. `ready` is true only when all three pass.
+and also return additive grouped sections. For `income_statement`,
+`multistep_ready` is true only when every Revenue and Expense account in the
+current period has a statement subtype. When false, Gross Profit and Operating
+Income are `null` rather than potentially misleading, and `statement_warnings`
+explains what needs review. With `compare_to_prior_year`, the same fields inside
+`comparison` cover both the current period and any available prior period;
+prior-period warnings are prefixed accordingly.
+
+`cash_flow_statement` returns a derived indirect-method statement for a date
+range, optionally compared with the prior year. Treat its three quality fields
+separately: `ties` proves the cash arithmetic, `operating_reconciled` proves the
+indirect operating bridge, and `classification_complete` proves that no
+cash-affecting entry remains in the explicit unclassified section. `ready` is
+true only when all three pass.

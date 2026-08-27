@@ -47,6 +47,23 @@ def test_new_accounts_normalize_safe_aliases_and_preserve_unknown_text(client_id
     assert Account.get_by_id(custom.id, client_id).subtype == "CPA Custom Group"
 
 
+def test_ambiguous_legacy_capital_stays_visible_for_human_review(client_id):
+    capital = Account(
+        client_id=client_id,
+        account_number="3000",
+        name="Member Capital",
+        type=AccountType.EQUITY,
+        subtype="Capital",
+    )
+    capital.save()
+
+    stored = Account.get_by_id(capital.id, client_id)
+    assert stored.subtype == "Capital"
+    assert AccountSubtype.resolve(
+        stored.type, stored.subtype, stored.name
+    ) is None
+
+
 @pytest.mark.parametrize("legacy", ["Bank", "Checking", "Savings"])
 def test_legacy_bank_aliases_resolve_to_cash(legacy):
     assert AccountSubtype.resolve(AccountType.ASSET, legacy) == AccountSubtype.CASH

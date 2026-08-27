@@ -366,6 +366,10 @@ def test_cash_flow_report_renders_quality_check_and_export(
         button.label == "Download Excel"
         for button in page.get("download_button")
     )
+    html = "\n".join(
+        str(item.body) for item in page.get("html") if hasattr(item, "body")
+    )
+    assert "Net Cash Provided by (Used in) Operating Activities" in html
 
 
 def test_legacy_income_statement_defaults_to_classic_layout(

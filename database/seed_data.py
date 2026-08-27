@@ -73,42 +73,72 @@ CORE_ACCOUNTS = [
 # =============================================================================
 EQUITY_ACCOUNTS = {
     "S-Corporation": [
-        ("3000", "Common Stock", "Equity", "Capital"),
-        ("3100", "Additional Paid-In Capital", "Equity", "Capital"),
+        (
+            "3000", "Common Stock", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
+        (
+            "3100", "Additional Paid-In Capital", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
         ("3200", "Shareholder Distributions", "Equity", "Distributions"),
-        ("3300", "Treasury Stock", "Equity", "Capital"),
+        ("3300", "Treasury Stock", "Equity", AccountSubtype.OTHER_EQUITY),
         ("3900", "Retained Earnings", "Equity", "Retained Earnings"),
     ],
     "C-Corporation": [
-        ("3000", "Common Stock", "Equity", "Capital"),
-        ("3100", "Additional Paid-In Capital", "Equity", "Capital"),
+        (
+            "3000", "Common Stock", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
+        (
+            "3100", "Additional Paid-In Capital", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
         ("3200", "Dividends Paid", "Equity", "Dividends"),
-        ("3300", "Treasury Stock", "Equity", "Capital"),
+        ("3300", "Treasury Stock", "Equity", AccountSubtype.OTHER_EQUITY),
         ("3900", "Retained Earnings", "Equity", "Retained Earnings"),
     ],
     "LLC (Single-Member)": [
-        ("3000", "Owner's Capital", "Equity", "Capital"),
+        (
+            "3000", "Owner's Capital", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
         ("3100", "Owner's Draws", "Equity", "Draws"),
         ("3900", "Retained Earnings", "Equity", "Retained Earnings"),
     ],
     "LLC (Partnership)": [
-        ("3000", "Member Capital - Member 1", "Equity", "Capital"),
-        ("3010", "Member Capital - Member 2", "Equity", "Capital"),
+        (
+            "3000", "Member Capital - Member 1", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
+        (
+            "3010", "Member Capital - Member 2", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
         ("3100", "Member Distributions - Member 1", "Equity", "Distributions"),
         ("3110", "Member Distributions - Member 2", "Equity", "Distributions"),
         ("3200", "Guaranteed Payments", "Equity", "Guaranteed Payments"),
         ("3900", "Retained Earnings", "Equity", "Retained Earnings"),
     ],
     "Partnership": [
-        ("3000", "Partner Capital - Partner 1", "Equity", "Capital"),
-        ("3010", "Partner Capital - Partner 2", "Equity", "Capital"),
+        (
+            "3000", "Partner Capital - Partner 1", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
+        (
+            "3010", "Partner Capital - Partner 2", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
         ("3100", "Partner Distributions - Partner 1", "Equity", "Distributions"),
         ("3110", "Partner Distributions - Partner 2", "Equity", "Distributions"),
         ("3200", "Guaranteed Payments", "Equity", "Guaranteed Payments"),
         ("3900", "Retained Earnings", "Equity", "Retained Earnings"),
     ],
     "Sole Proprietorship": [
-        ("3000", "Owner's Capital", "Equity", "Capital"),
+        (
+            "3000", "Owner's Capital", "Equity",
+            AccountSubtype.OWNER_CONTRIBUTION,
+        ),
         ("3100", "Owner's Draws", "Equity", "Draws"),
         ("3900", "Retained Earnings", "Equity", "Retained Earnings"),
     ],

@@ -230,6 +230,37 @@ def test_unclassified_revenue_hides_misleading_multistep_subtotals(
     assert "Unclassified Revenues" in labels
 
 
+def test_operating_expenses_section_does_not_repeat_its_group_heading(
+    client_id, accounts
+):
+    operating_expense = Account(
+        client_id=client_id,
+        account_number="6100",
+        name="Rent Expense",
+        type="Expense",
+        subtype=AccountSubtype.OPERATING_EXPENSE,
+    )
+    operating_expense.save()
+    post_entry(client_id, date(2026, 4, 1), [
+        (operating_expense.id, 25, 0), (accounts["cash"], 0, 25),
+    ])
+
+    report = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    rows = ReportGenerator.income_statement_rows(report)
+
+    assert ("section", "Operating Expenses", None) in rows
+    assert not any(
+        kind == "group" and label == "Operating Expenses"
+        for kind, label, _value in rows
+    )
+    assert any(
+        kind == "group_total" and label == "Total Operating Expenses"
+        for kind, label, _value in rows
+    )
+
+
 def test_other_income_only_does_not_render_an_empty_revenue_heading(
     client_id, accounts
 ):

@@ -119,6 +119,12 @@ def test_statement_tools_optionally_return_prior_year_comparisons(
     }
     assert income["comparison"]["total_revenue"]["prior"] == 200
     assert income["comparison"]["total_revenue"]["change"] == 300
+    assert income["comparison"]["multistep_ready"] is False
+    assert income["comparison"]["statement_warnings"]
+    assert any(
+        warning.startswith("Prior year:")
+        for warning in income["comparison"]["statement_warnings"]
+    )
 
     balance = mcp_tools.balance_sheet(
         client_id, "2026-12-31", compare_to_prior_year=True

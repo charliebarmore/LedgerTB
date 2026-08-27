@@ -35,7 +35,11 @@ from reportlab.platypus import (
 from database import connection as dbconn
 from constants import AccountSubtype
 from database.connection import get_connection, get_cursor
-from models.reports import ReportGenerator, TrialBalanceWorksheetRow
+from models.reports import (
+    CASH_FLOW_STATEMENT_SECTIONS,
+    ReportGenerator,
+    TrialBalanceWorksheetRow,
+)
 from money import to_dollars
 from services.branding import (
     ClientBranding,
@@ -48,6 +52,8 @@ from utils.export import set_excel_literal
 
 _HEADER_FONT = Font(bold=True)
 _MONEY_FMT = "#,##0.00"
+_STATEMENT_MONEY_FMT = '#,##0.00;(#,##0.00);"-"'
+_STATEMENT_PERCENT_FMT = '0.0"%";(0.0"%");"-"'
 _TOTAL_BORDER = Border(top=Side(style="thin", color="000000"))
 
 
@@ -324,12 +330,12 @@ def _append_statement_section(ws, title: str, items: List[dict],
         cells = _append_literal_row(
             ws, [_statement_label(item), item["balance"]]
         )
-        cells[1].number_format = _MONEY_FMT
+        cells[1].number_format = _STATEMENT_MONEY_FMT
     total_cells = _append_literal_row(ws, [total_label, total_value])
     for cell in total_cells:
         cell.font = _HEADER_FONT
         cell.border = _TOTAL_BORDER
-    total_cells[1].number_format = _MONEY_FMT
+    total_cells[1].number_format = _STATEMENT_MONEY_FMT
 
 
 def _append_statement_total(ws, label: str, value: float):
@@ -337,7 +343,7 @@ def _append_statement_total(ws, label: str, value: float):
     for cell in cells:
         cell.font = _HEADER_FONT
         cell.border = _TOTAL_BORDER
-    cells[1].number_format = _MONEY_FMT
+    cells[1].number_format = _STATEMENT_MONEY_FMT
 
 
 def _comparison_values(item: Dict) -> list:
@@ -368,8 +374,8 @@ def _append_comparative_statement_section(
             ws, [_statement_label(item)] + _comparison_values(item)
         )
         for cell in cells[1:4]:
-            cell.number_format = _MONEY_FMT
-        cells[4].number_format = '0.0"%"'
+            cell.number_format = _STATEMENT_MONEY_FMT
+        cells[4].number_format = _STATEMENT_PERCENT_FMT
     _append_comparative_statement_total(ws, total_label, total)
 
 
@@ -395,8 +401,8 @@ def _append_comparative_statement_groups(
                 ws, [f"    {_statement_label(item)}"] + _comparison_values(item)
             )
             for cell in cells[1:4]:
-                cell.number_format = _MONEY_FMT
-            cells[4].number_format = '0.0"%"'
+                cell.number_format = _STATEMENT_MONEY_FMT
+            cells[4].number_format = _STATEMENT_PERCENT_FMT
         subtotal_cells = _append_literal_row(
             ws,
             [f"  Total {group['group']}"] + _comparison_values(group['subtotal']),
@@ -405,8 +411,8 @@ def _append_comparative_statement_groups(
             cell.font = _HEADER_FONT
             cell.border = _TOTAL_BORDER
         for cell in subtotal_cells[1:4]:
-            cell.number_format = _MONEY_FMT
-        subtotal_cells[4].number_format = '0.0"%"'
+            cell.number_format = _STATEMENT_MONEY_FMT
+        subtotal_cells[4].number_format = _STATEMENT_PERCENT_FMT
 
     _append_comparative_statement_total(ws, total_label, total)
 
@@ -437,8 +443,8 @@ def _append_comparative_income_statement(ws, report: Dict) -> None:
                 cell.border = _TOTAL_BORDER
         if values is not None:
             for cell in cells[1:4]:
-                cell.number_format = _MONEY_FMT
-            cells[4].number_format = '0.0"%"'
+                cell.number_format = _STATEMENT_MONEY_FMT
+            cells[4].number_format = _STATEMENT_PERCENT_FMT
 
 
 def _append_comparative_statement_total(ws, label: str, total: Dict):
@@ -447,8 +453,8 @@ def _append_comparative_statement_total(ws, label: str, total: Dict):
         cell.font = _HEADER_FONT
         cell.border = _TOTAL_BORDER
     for cell in cells[1:4]:
-        cell.number_format = _MONEY_FMT
-    cells[4].number_format = '0.0"%"'
+        cell.number_format = _STATEMENT_MONEY_FMT
+    cells[4].number_format = _STATEMENT_PERCENT_FMT
 
 
 def build_close_package(
@@ -765,16 +771,12 @@ def build_close_package(
     )
     if not comparative_cash_flow['prior_available']:
         _append_literal_row(ws, ["No prior-year data", "", "", "", ""])
-    for title, key, total_label in [
-        ("Operating Activities", "operating",
-         "Net Cash Provided by Operating Activities"),
-        ("Investing Activities", "investing",
-         "Net Cash Provided by Investing Activities"),
-        ("Financing Activities", "financing",
-         "Net Cash Provided by Financing Activities"),
-        ("Unclassified Cash Activity", "unclassified",
-         "Net Unclassified Cash Activity"),
-    ]:
+    cash_flow_sections = CASH_FLOW_STATEMENT_SECTIONS + ((
+        "Unclassified Cash Activity",
+        "unclassified",
+        "Net Unclassified Cash Activity",
+    ),)
+    for title, key, total_label in cash_flow_sections:
         section = comparative_cash_flow[key]
         if (
             key == "unclassified"
@@ -835,7 +837,7 @@ def build_close_package(
                 "", "", "", "",
             ])
             cells[amount_column - 1].value = entry["amount"]
-            cells[amount_column - 1].number_format = _MONEY_FMT
+            cells[amount_column - 1].number_format = _STATEMENT_MONEY_FMT
 
     for period_name, entries, amount_column in [
         ("CURRENT NONCASH INVESTING AND FINANCING ACTIVITY",
@@ -858,7 +860,7 @@ def build_close_package(
                 "", "", "", "",
             ])
             cells[amount_column - 1].value = entry["amount"]
-            cells[amount_column - 1].number_format = _MONEY_FMT
+            cells[amount_column - 1].number_format = _STATEMENT_MONEY_FMT
 
     for sheet in wb.worksheets:
         sheet.oddFooter.left.text = display_name
@@ -886,16 +888,23 @@ _PDF_META = ParagraphStyle("meta", fontName="Helvetica", fontSize=10, leading=14
 
 
 def _money(value: float) -> str:
-    return f"{value:,.2f}" if value else ""
+    if not value:
+        return ""
+    body = f"{abs(value):,.2f}"
+    return f"({body})" if value < 0 else body
 
 
 def _money_total(value: float) -> str:
     """Display statement totals explicitly, including a meaningful zero."""
-    return f"{value:,.2f}"
+    body = f"{abs(value):,.2f}"
+    return f"({body})" if value < 0 else body
 
 
 def _percent(value: Optional[float]) -> str:
-    return "" if value is None else f"{value:,.1f}%"
+    if value is None:
+        return ""
+    body = f"{abs(value):,.1f}%"
+    return f"({body})" if value < 0 else body
 
 
 def _pdf_comparison_values(item: Dict, totals: bool = False) -> list:
@@ -1269,16 +1278,12 @@ def build_close_package_pdf(
         ),
         Spacer(1, 10),
     ]
-    for title, key, total_label in [
-        ("Operating Activities", "operating",
-         "Net Cash Provided by Operating Activities"),
-        ("Investing Activities", "investing",
-         "Net Cash Provided by Investing Activities"),
-        ("Financing Activities", "financing",
-         "Net Cash Provided by Financing Activities"),
-        ("Unclassified Cash Activity", "unclassified",
-         "Net Unclassified Cash Activity"),
-    ]:
+    cash_flow_sections = CASH_FLOW_STATEMENT_SECTIONS + ((
+        "Unclassified Cash Activity",
+        "unclassified",
+        "Net Unclassified Cash Activity",
+    ),)
+    for title, key, total_label in cash_flow_sections:
         section = comparative_cash_flow[key]
         if (
             key == "unclassified"

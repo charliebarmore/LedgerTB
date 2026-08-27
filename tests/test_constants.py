@@ -33,6 +33,13 @@ def test_account_subtypes_are_ordered_by_account_type():
     assert AccountSubtype.resolve(
         AccountType.EQUITY, "Capital", "Treasury Stock"
     ) == AccountSubtype.OTHER_EQUITY
+    assert AccountSubtype.resolve(
+        AccountType.EQUITY, "Capital", "Additional Paid-In Capital"
+    ) == AccountSubtype.OWNER_CONTRIBUTION
+    assert AccountSubtype.resolve(
+        AccountType.EQUITY, "Capital", "Owner's Capital"
+    ) is None
+    assert AccountSubtype.resolve(AccountType.EQUITY, "Capital") is None
     assert not AccountSubtype.is_canonical(AccountType.ASSET, "Receivable")
 
 

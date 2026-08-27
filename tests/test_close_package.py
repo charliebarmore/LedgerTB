@@ -258,6 +258,9 @@ def test_close_package_renders_curated_statement_groups(client_id, accounts):
     wb = openpyxl.load_workbook(BytesIO(package.read()))
 
     income = wb["Income Statement"]
+    income_labels = [
+        income.cell(row, 1).value for row in range(1, income.max_row + 1)
+    ]
     income_rows = {
         income.cell(row, 1).value: income.cell(row, 2).value
         for row in range(1, income.max_row + 1)
@@ -267,6 +270,8 @@ def test_close_package_renders_curated_statement_groups(client_id, accounts):
     assert income_rows["  Cost of Goods Sold"] is None
     assert income_rows["Gross Profit"] == pytest.approx(200)
     assert income_rows["Operating Income"] == pytest.approx(150)
+    assert income_labels.count("Operating Expenses") == 1
+    assert "  Operating Expenses" not in income_labels
 
     balance = wb["Balance Sheet"]
     balance_rows = {
@@ -296,6 +301,52 @@ def test_close_package_renders_curated_statement_groups(client_id, accounts):
             assert label in text
     finally:
         doc.close()
+
+
+def test_close_package_uses_sign_neutral_cash_labels_and_parentheses(
+    client_id, accounts
+):
+    operating_expense = Account(
+        client_id=client_id,
+        account_number="6100",
+        name="Rent Expense",
+        type="Expense",
+        subtype=AccountSubtype.OPERATING_EXPENSE,
+    )
+    operating_expense.save()
+    post_entry(client_id, date(2026, 2, 1), [
+        (operating_expense.id, 125, 0), (accounts["cash"], 0, 125),
+    ])
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+    snapshot = load_close_package_snapshot(client_id, *Q1)
+
+    workbook = openpyxl.load_workbook(BytesIO(build_close_package(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read()))
+    cash_flow = workbook["Cash Flow"]
+    total_label = "Net Cash Provided by (Used in) Operating Activities"
+    total_row = next(
+        row for row in range(1, cash_flow.max_row + 1)
+        if cash_flow.cell(row, 1).value == total_label
+    )
+    assert cash_flow.cell(total_row, 2).value == pytest.approx(-125)
+    assert cash_flow.cell(total_row, 2).number_format == (
+        '#,##0.00;(#,##0.00);"-"'
+    )
+
+    document = pdfium.PdfDocument(build_close_package_pdf(
+        client_id, "Test Co", *Q1, tb_rows, snapshot=snapshot
+    ).read())
+    try:
+        text = "\n".join(
+            document[index].get_textpage().get_text_range()
+            for index in range(len(document))
+        )
+        assert total_label in text
+        assert "(125.00)" in text
+        assert "-125.00" not in text
+    finally:
+        document.close()
 
 
 def test_close_package_discloses_offsetting_unclassified_cash_entries(
