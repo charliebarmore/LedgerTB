@@ -10,6 +10,7 @@ from models.reports import ReportGenerator
 from models.transaction import ImportedTransaction
 from utils.fiscal_dates import (
     fiscal_year_bounds,
+    fiscal_year_ending_year,
     previous_fiscal_year_bounds,
     prior_year_date,
     prior_year_period,
@@ -29,6 +30,8 @@ def test_calendar_and_noncalendar_fiscal_year_bounds():
     assert previous_fiscal_year_bounds(date(2026, 3, 15), 6) == (
         date(2024, 7, 1), date(2025, 6, 30)
     )
+    assert fiscal_year_ending_year(date(2026, 6, 30), 6) == 2026
+    assert fiscal_year_ending_year(date(2026, 7, 1), 6) == 2027
 
 
 def test_prior_year_comparison_dates_include_leap_day_fallback():

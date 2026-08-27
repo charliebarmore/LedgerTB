@@ -437,6 +437,8 @@ with tab3:
                 f"(listed above). Importing now creates a partial chart — fix "
                 f"the file to bring in everything.", icon="⚠️",
             )
+        for warning in [a.get("warning") for a in parsed if a.get("warning")]:
+            st.warning(warning, icon="⚠️")
 
         if parsed:
             existing = {a.account_number for a in Account.get_all(client_id, active_only=False)}

@@ -15,7 +15,7 @@ connections cannot reach it — the dial is physically outside its world.
 | Level | The assistant can… |
 |---|---|
 | **Read only** | query everything, change nothing |
-| **Read + propose** *(default)* | file draft entries, stage imports, and propose Close Map explanations or client-brand text/colors; you approve everything |
+| **Read + propose** *(default)* | file drafts and staged imports for your approval; propose Close Map explanations or branding; scaffold clients, accounts, and open fiscal calendars directly |
 | **Read + propose + post** | additionally post balanced journal entries — **append-only** |
 
 Even at the highest level the engine refuses every edit and delete: an
@@ -63,8 +63,25 @@ from an already-running MCP process.
   the assistant normalizes, LedgerTB stages with full duplicate
   protection, and you categorize and post in **Import Transactions →
   Review & Categorize** exactly as with a CSV upload. Re-proposing the
-  same statement stages nothing twice. A person can dismiss unwanted staged
-  rows; their identity and audit history remain, but they leave the queue.
+  same complete statement stages nothing twice. A matching transaction from a
+  changed batch is staged but flagged instead, because two same-day,
+  same-amount transactions can both be real; a person decides in review.
+  `staged_clean` and `flagged_as_possible_duplicates` divide the staged rows,
+  while `skipped_already_known` counts exact retries. A person can dismiss
+  unwanted staged rows; their identity and audit history remain, but they
+  leave the queue.
+- **Client setup includes its period calendar.** `create_client` creates the
+  fiscal year containing today unless `initial_fiscal_year` names another
+  year. `ensure_fiscal_year` idempotently adds another year when Close Map or
+  comparative work needs it; it may insert setup periods but can never close,
+  reopen, edit, or delete them.
+- **Chart imports are typed and reviewable.** `import_accounts` accepts
+  `number` (optional), `name`, `type`, `subtype` (optional), and `description`
+  (optional). QuickBooks types imply a reporting subtype, while an explicit
+  subtype wins. Every row is reported. High-confidence accumulated-
+  depreciation names are normalized out of QuickBooks' generic Fixed Asset
+  subtype and returned with a visible semantic-review warning; the CSV chart
+  importer applies the same rule.
 - **Close Map stays human-controlled.** `close_readiness` and
   `account_close_detail` let the assistant identify unsupported, changed, or
   unexplained balances. Account detail also exposes the immediately preceding
@@ -128,6 +145,8 @@ from an already-running MCP process.
 **export folder you choose for this book on Data Safety** (stored in the
 credential vault, outside the assistant's reach; blank = file export off).
 Another book has no export permission until you choose its folder. The
+assistant may omit `out_dir` to use that folder directly; a supplied
+subdirectory must remain inside it. The
 `LEDGERTB_MCP_EXPORT_ROOTS` environment variable is a fallback for
 config-managed setups where nothing was chosen in the app; it can no longer
 override your choice. It used to, and that was wrong: an MCP server's

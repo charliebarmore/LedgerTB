@@ -69,18 +69,21 @@ class Client:
             row = cursor.fetchone()
         return Client._from_row(row) if row else None
 
-    def save(self, seed_accounts: bool = True) -> int:
+    def save(self, seed_accounts: bool = True, conn=None) -> int:
         """
         Save or update the client.
 
         Args:
-            seed_accounts: If True and this is a new client, seed default chart of accounts
+            seed_accounts: If True and this is a new client, seed its chart.
+            conn: Optional caller-owned connection for a larger transaction.
         """
         from models.audit_log import AuditLog
 
         # Kept on a raw connection (with try/finally for leak safety) because the
         # account seeder writes on the same connection/transaction as the insert.
-        conn = get_connection()
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
         is_new = self.id is None
         old_values = None
 
@@ -184,12 +187,15 @@ class Client:
                 )
             # Client creation and its requested starter chart are one onboarding
             # transaction. A seeding failure must not leave a half-created client.
-            conn.commit()
+            if owns_conn:
+                conn.commit()
         except Exception:
-            conn.rollback()
+            if owns_conn:
+                conn.rollback()
             raise
         finally:
-            conn.close()
+            if owns_conn:
+                conn.close()
         return self.id
 
     def categorization_context(self) -> str:

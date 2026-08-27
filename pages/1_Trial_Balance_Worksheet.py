@@ -26,6 +26,7 @@ from utils.ui import apply_default_on_change
 from utils.unlock import require_unlock
 from utils import icons
 from utils.export import set_excel_literal
+from utils.fiscal_dates import fiscal_year_ending_year
 from models.client import Client
 from models.fiscal_period import FiscalPeriod
 from models.reports import ReportGenerator
@@ -90,8 +91,8 @@ col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
 
 with col1:
     # Get current year and ensure periods exist
-    current_year = date.today().year
     fiscal_year_end = client.fiscal_year_end_month
+    current_year = fiscal_year_ending_year(date.today(), fiscal_year_end)
 
     # Check available years from existing periods
     periods = FiscalPeriod.get_all(client_id)

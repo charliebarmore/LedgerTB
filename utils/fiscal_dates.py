@@ -21,6 +21,11 @@ def fiscal_year_bounds(as_of_date: date, fiscal_year_end_month: int) -> tuple[da
     return date(start_year, start_month, 1), fiscal_end
 
 
+def fiscal_year_ending_year(as_of_date: date, fiscal_year_end_month: int) -> int:
+    """Return the conventional FY label: the year in which that FY ends."""
+    return fiscal_year_bounds(as_of_date, fiscal_year_end_month)[1].year
+
+
 def previous_fiscal_year_bounds(
     as_of_date: date, fiscal_year_end_month: int
 ) -> tuple[date, date]:

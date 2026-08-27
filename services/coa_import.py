@@ -7,6 +7,7 @@ file upload and the actual inserts.
 
 import csv
 import io
+import re
 
 from constants import AccountSubtype, AccountType
 
@@ -93,6 +94,49 @@ def normalize_type(raw):
     return _TYPE_ALIASES.get(_norm(raw))
 
 
+def normalize_import_subtype(account_type: str, account_name: str,
+                             explicit_subtype: str = "",
+                             implied_subtype: str = None):
+    """Return ``(canonical subtype, optional semantic-review warning)``.
+
+    QuickBooks has no contra-asset type, so accumulated depreciation commonly
+    arrives as Fixed Asset. High-confidence names are safe to normalize; the
+    warning keeps that interpretation visible to the person reviewing the COA.
+    An explicit subtype always wins.
+    """
+    explicit = (explicit_subtype or "").strip()
+    raw_subtype = explicit or implied_subtype
+    warning = None
+    compact_name = re.sub(r"[^a-z0-9]+", "", (account_name or "").casefold())
+    accumulated_depreciation_name = compact_name == "ad"
+    if not accumulated_depreciation_name:
+        for prefix in ("accumulated", "accum", "acc"):
+            if compact_name.startswith(prefix):
+                tail = compact_name[len(prefix):]
+                accumulated_depreciation_name = (
+                    tail == "dep" or tail.startswith("depr")
+                )
+                break
+    if (
+        not explicit
+        and account_type == AccountType.ASSET
+        and implied_subtype == AccountSubtype.FIXED_ASSET
+        and accumulated_depreciation_name
+    ):
+        raw_subtype = AccountSubtype.ACCUMULATED_DEPRECIATION
+        warning = (
+            f"{account_name} was classified as Accumulated Depreciation from "
+            "its name even though QuickBooks supplied Fixed Asset. Review the "
+            "subtype if that interpretation is not correct."
+        )
+    return (
+        AccountSubtype.normalize_for_storage(
+            account_type, raw_subtype, account_name=account_name
+        ),
+        warning,
+    )
+
+
 def parse_coa_csv(content: str):
     """Parse a chart-of-accounts CSV.
 
@@ -149,19 +193,22 @@ def parse_coa_csv(content: str):
         if number:
             seen.add(number)
 
-        raw_subtype = (
-            (row.get(headers.get("subtype", "")) or "").strip()
-            or implied_subtype
+        explicit_subtype = (
+            row.get(headers.get("subtype", "")) or ""
         )
-        accounts.append({
+        subtype, warning = normalize_import_subtype(
+            acct_type, name, explicit_subtype, implied_subtype
+        )
+        account = {
             "number": number,
             "name": name,
             "type": acct_type,
-            "subtype": AccountSubtype.normalize_for_storage(
-                acct_type, raw_subtype, account_name=name
-            ),
+            "subtype": subtype,
             "description": (row.get(headers.get("description", "")) or "").strip() or None,
-        })
+        }
+        if warning:
+            account["warning"] = f"Row {i}: {warning}"
+        accounts.append(account)
 
     return accounts, errors
 

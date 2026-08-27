@@ -418,7 +418,8 @@ _mcp_book_id = active_book_id()
 _mcp_names = credential_names(dbconn.DATABASE_PATH)
 _MCP_LEVELS = {
     "read": "Read only — query the books, change nothing",
-    "propose": "Read + propose — file drafts and stage imports; you post everything (recommended)",
+    "propose": ("Read + propose — drafts and imports await you; setup tools "
+                "may add clients, accounts, and fiscal calendars (recommended)"),
     "post": "Read + propose + post — may also post balanced entries, append-only",
 }
 _mcp_enabled = bool(

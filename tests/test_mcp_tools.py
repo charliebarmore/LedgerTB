@@ -6,6 +6,7 @@ import pytest
 
 from database import connection as dbconn
 from database.connection import get_cursor
+from models.account import Account
 from models.transaction import ImportedTransaction
 from models.fiscal_period import FiscalPeriod
 from services import mcp_tools
@@ -169,9 +170,9 @@ def test_statement_tools_optionally_return_prior_year_comparisons(
 def test_find_entries_and_detail(client_id, accounts):
     _seed(client_id, accounts)
 
-    found = mcp_tools.find_entries(client_id, search="Test entry")
-    assert found, "seeded entries should be findable"
-    detail = mcp_tools.entry_detail(client_id, found[0]["entry_id"])
+    result = mcp_tools.find_entries(client_id, search="Test entry")
+    assert result["count"] > 0, "seeded entries should be findable"
+    detail = mcp_tools.entry_detail(client_id, result["entries"][0]["entry_id"])
     assert len(detail["lines"]) == 2
     assert sum(l["debit"] for l in detail["lines"]) == sum(
         l["credit"] for l in detail["lines"])
@@ -180,6 +181,28 @@ def test_find_entries_and_detail(client_id, accounts):
         mcp_tools.entry_detail(client_id, 99999)
     with pytest.raises(ValueError, match="No client"):
         mcp_tools.trial_balance(999999)
+
+
+def test_empty_entry_search_and_filtered_account_lookup(client_id, accounts):
+    assert mcp_tools.find_entries(client_id, search="NO-SUCH-ENTRY") == {
+        "entries": [], "count": 0,
+    }
+
+    cash = Account.get_by_id(accounts["cash"], client_id=client_id)
+    assert mcp_tools.list_accounts(client_id, cash.account_number) == [{
+        "account_id": cash.id,
+        "number": cash.account_number,
+        "name": cash.name,
+        "type": cash.type,
+        "subtype": cash.subtype or "",
+        "active": True,
+    }]
+    assert mcp_tools.list_accounts(client_id, "NOT-THERE") == []
+
+    ledger = mcp_tools.general_ledger(
+        client_id, f"  {cash.account_number}  ", "2026-01-01", "2026-12-31"
+    )
+    assert ledger["account"].startswith(cash.account_number)
 
 
 def test_integrity_sweep_reports_clean_books_explicitly(client_id, accounts):

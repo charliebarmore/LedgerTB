@@ -73,7 +73,8 @@ def _mark_duplicate(transaction: dict, kind: str, info: dict) -> None:
 
 
 def classify_import_duplicates(transactions: Iterable[dict], client_id: int,
-                               exclude_ids=frozenset()) -> int:
+                               exclude_ids=frozenset(),
+                               persist_backfill: bool = True) -> int:
     """Mark duplicates within an upload and against durable imported history.
 
     Existing pre-migration rows are fingerprinted in place so historical imports
@@ -108,6 +109,7 @@ def classify_import_duplicates(transactions: Iterable[dict], client_id: int,
         by_idempotency = {}
         for row in existing:
             fingerprint = row["row_fingerprint"]
+            idempotency_key = row["idempotency_key"]
             if not fingerprint:
                 fingerprint = row_fingerprint({
                     "transaction_date": row["transaction_date"],
@@ -115,21 +117,28 @@ def classify_import_duplicates(transactions: Iterable[dict], client_id: int,
                     "amount": row["amount"] / 100,
                 }, client_id, row["bank_account_id"])
                 legacy_key = _digest({"legacy_imported_transaction_id": row["id"]})
-                cursor.execute(
-                    """UPDATE imported_transactions
-                       SET row_fingerprint = ?, idempotency_key = COALESCE(idempotency_key, ?)
-                       WHERE id = ?""",
-                    (fingerprint, legacy_key, row["id"]),
-                )
+                idempotency_key = idempotency_key or legacy_key
+                # Normal app imports may durably backfill derived identity.
+                # Assistant connections are append-only, so MCP callers turn
+                # this off and still receive the same in-memory comparison.
+                if persist_backfill:
+                    cursor.execute(
+                        """UPDATE imported_transactions
+                           SET row_fingerprint = ?,
+                               idempotency_key = COALESCE(idempotency_key, ?)
+                           WHERE id = ?""",
+                        (fingerprint, legacy_key, row["id"]),
+                    )
             # Reversed/superseded imports no longer represent an active ledger
             # posting. Keep their idempotency keys so the exact same source row
             # still cannot be replayed, but do not make a replacement look like
             # a duplicate merely because it has the same accounting facts.
             if not row["superseded_by_batch"]:
                 by_fingerprint[fingerprint].append(row)
-            if row["idempotency_key"]:
-                by_idempotency[row["idempotency_key"]] = row
-        conn.commit()
+            if idempotency_key:
+                by_idempotency[idempotency_key] = row
+        if persist_backfill:
+            conn.commit()
     except Exception:
         conn.rollback()
         raise
