@@ -348,6 +348,14 @@
     margin-bottom: 52px;
   }
   .download-head p { color: var(--muted-light); max-width: 40rem; }
+  .download-head .changelog-link {
+    color: var(--cream);
+    display: inline-block;
+    font-weight: 600;
+    margin-top: 12px;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
   .download-grid { border-top: 1px solid rgba(253, 252, 234, .17); display: grid; grid-template-columns: 1fr 1fr; }
   .download-option { padding: 34px 40px 10px 0; }
   .download-option + .download-option { border-left: 1px solid rgba(253, 252, 234, .17); padding-left: 40px; }
@@ -426,6 +434,7 @@
         <a href="#workflow">Workflow</a>
         <a href="#assistant">AI assistant</a>
         <a href="#security">Security</a>
+        <a href="changelog.html">Changelog</a>
         <a class="nav-download" href="#download">Download</a>
       </div>
     </nav>
@@ -716,7 +725,8 @@
         assistant setup and chart imports with atomic fiscal calendars,
         documented subtype support, safer exports, and clearer duplicate
         reporting. Both downloads are built from the tagged source; upgrading
-        preserves your books.</p>
+        preserves your books.<br>
+        <a class="changelog-link" href="changelog.html">Read the full changelog →</a></p>
       </div>
 
       <p class="fine legal-notice"><strong>Before using LedgerTB:</strong>
@@ -761,6 +771,7 @@
       </a>
       <div class="footer-links">
         <a href="https://github.com/charliebarmore/LedgerTB/releases/latest">Latest release</a>
+        <a href="changelog.html">Changelog</a>
         <a href="https://github.com/charliebarmore/LedgerTB/issues/new?template=bug_report.yml">Report a bug</a>
         <a href="https://github.com/charliebarmore/LedgerTB/issues/new?template=feature_request.yml">Request a feature</a>
         <a href="terms.html">Terms</a>
