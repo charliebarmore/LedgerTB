@@ -22,7 +22,7 @@ from utils.client_context import (
     set_client_intent,
 )
 from utils.client_selector import render_client_selector
-from utils.unlock import require_unlock
+from utils.unlock import authorized_ui_token, require_unlock
 from utils.dates import display_date, long_date
 from services.preferences import get_date_format
 from utils.ui import (
@@ -117,6 +117,9 @@ def _report_href(report, **values):
         for key, value in values.items()
         if value is not None
     })
+    ui_token = authorized_ui_token()
+    if ui_token:
+        params["t"] = ui_token
     return "?" + urlencode(params)
 
 
@@ -975,6 +978,9 @@ elif selected_report == "General Ledger":
             return_params["end"] = return_route["end"].isoformat()
         if return_route.get("as_of"):
             return_params["as_of"] = return_route["as_of"].isoformat()
+        ui_token = authorized_ui_token()
+        if ui_token:
+            return_params["t"] = ui_token
         st.page_link(
             "pages/5_Reports.py",
             label=f"← Back to {return_route['report']}",
