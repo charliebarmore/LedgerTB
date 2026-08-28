@@ -345,6 +345,36 @@ def test_report_statements_render_with_balance_checks(client_id, accounts, monke
         ), view
 
 
+def test_report_drilldown_preserves_authorized_desktop_token(
+    client_id, accounts, monkeypatch
+):
+    """A report link opens a fresh Streamlit session, so it must carry the
+    desktop launch token that authorized the current session."""
+    from utils import unlock
+
+    _select_client(monkeypatch, client_id)
+    monkeypatch.setenv(unlock.UI_TOKEN_ENV, "launch-secret")
+    post_entry(
+        client_id, date(2026, 1, 15),
+        [(accounts["cash"], 500, 0), (accounts["revenue"], 0, 500)],
+    )
+
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.query_params["t"] = "launch-secret"
+    page.session_state["active_report"] = "Trial Balance"
+    page.run()
+
+    assert not page.exception
+    rendered = "\n".join(
+        str(item.body) for item in page.get("html") if hasattr(item, "body")
+    )
+    assert "report=General+Ledger" in rendered
+    assert "t=launch-secret" in rendered
+    assert "target='_blank'" in rendered
+
+
 def test_cash_flow_report_renders_quality_check_and_export(
     client_id, accounts, monkeypatch
 ):

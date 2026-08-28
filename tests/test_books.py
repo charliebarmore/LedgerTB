@@ -320,6 +320,7 @@ def test_launchers_mint_a_token_and_pass_it_out_of_argv():
         assert "secrets.token_urlsafe" in source, name
         assert "LEDGERTB_UI_TOKEN" in source, name
         assert "window_url" in source, name
+        assert "text_select=True" in source, name
         assert "--ui-token" not in source, name
 
 

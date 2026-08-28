@@ -449,7 +449,9 @@ def main() -> int:
             import webview
             geom = _window_geometry()
             win_x, win_y = geom.pop("x", None), geom.pop("y", None)
-            window = webview.create_window(WINDOW_TITLE, window_url, **geom)
+            window = webview.create_window(
+                WINDOW_TITLE, window_url, text_select=True, **geom
+            )
             # Pin the native backend per platform (macOS WebKit, Windows
             # WebView2) so the build can safely exclude the Qt toolkits.
             webview.start(

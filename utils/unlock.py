@@ -57,6 +57,20 @@ _UI_TOKEN_PARAM = "t"
 _UI_SESSION_FLAG = "_ui_session_authorized"
 
 
+def authorized_ui_token():
+    """Return the desktop launch token only for an authorized UI session.
+
+    Links that create a new Streamlit session (including report drill-downs
+    opened in a new tab) must carry this token through the URL.  Never expose
+    the environment token until the current session has presented it and been
+    authorized by :func:`_require_local_session`.
+    """
+    expected = os.environ.get(UI_TOKEN_ENV)
+    if expected and st.session_state.get(_UI_SESSION_FLAG):
+        return expected
+    return None
+
+
 def _require_local_session():
     """Refuse sessions that did not come from the window this app opened, and
     refuse to serve at all if the server was bound off-loopback."""

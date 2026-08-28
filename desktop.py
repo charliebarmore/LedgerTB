@@ -153,7 +153,9 @@ def main() -> int:
 
     geom = _window_geometry()
     win_x, win_y = geom.pop("x", None), geom.pop("y", None)
-    window = webview.create_window(WINDOW_TITLE, window_url, **geom)
+    window = webview.create_window(
+        WINDOW_TITLE, window_url, text_select=True, **geom
+    )
     webview.start(_place_window, (window, win_x, win_y))  # blocks until the window is closed
 
     stop_streamlit(proc)
