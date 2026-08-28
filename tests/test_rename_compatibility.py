@@ -51,6 +51,19 @@ def test_windows_installer_uses_a_fresh_identity():
     assert "ProBooks.lnk" not in text
 
 
+def test_windows_installer_detects_a_running_desktop_app():
+    root = Path(__file__).parents[1]
+    installer = (root / "scripts" / "ledgertb.iss").read_text()
+    launcher = (root / "run_ledgertb.py").read_text()
+    mutex = "LedgerLabs.LedgerTB.8EE4B706-D4BD-4A9E-97DB-219152E5C235"
+
+    assert f'#define AppMutexName "{mutex}"' in installer
+    assert "AppMutex={#AppMutexName}" in installer
+    assert "CloseApplications=yes" in installer
+    assert "RestartApplications=no" in installer
+    assert f'WINDOWS_APP_MUTEX = "{mutex}"' in launcher
+
+
 def test_release_build_clears_both_signing_aliases_during_packaging():
     script = Path(__file__).parents[1] / "scripts" / "build_release.sh"
     text = script.read_text()

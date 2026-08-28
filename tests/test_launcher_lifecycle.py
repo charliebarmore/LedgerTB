@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 
 import pytest
 
@@ -46,3 +47,82 @@ def test_parent_watch_releases_the_book_before_exiting(monkeypatch):
     assert stopped.value.code == 0
     assert sleeps == [1]
     assert releases == [dbconn.DATABASE_PATH]
+
+
+def test_stop_reaps_child_after_hard_stop_fallback(monkeypatch):
+    class StubbornProcess:
+        def __init__(self):
+            self.calls = []
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.calls.append("terminate")
+
+        def wait(self, timeout):
+            self.calls.append(("wait", timeout))
+            if timeout == 5:
+                raise TimeoutError
+            return 0
+
+        def kill(self):
+            self.calls.append("kill")
+
+    monkeypatch.setattr(run_ledgertb.os, "name", "nt")
+    proc = StubbornProcess()
+    run_ledgertb._stop(proc)
+
+    assert proc.calls == ["terminate", ("wait", 5), "kill", ("wait", 2)]
+
+
+def test_window_close_watchdog_does_not_exit_after_gui_returns(monkeypatch):
+    closed = threading.Event()
+    returned = threading.Event()
+    closed.set()
+    returned.set()
+    exits = []
+    monkeypatch.setattr(run_ledgertb.os, "_exit", exits.append)
+
+    run_ledgertb._force_exit_if_window_loop_stalls(closed, returned, timeout=0)
+
+    assert exits == []
+
+
+def test_window_close_watchdog_ends_stalled_desktop_parent(monkeypatch):
+    closed = threading.Event()
+    returned = threading.Event()
+    closed.set()
+    exits = []
+    monkeypatch.setattr(run_ledgertb.os, "_exit", exits.append)
+
+    run_ledgertb._force_exit_if_window_loop_stalls(closed, returned, timeout=0)
+
+    assert exits == [0]
+
+
+def test_windows_native_close_event_stops_the_server(monkeypatch):
+    class EventHook:
+        handler = None
+
+        def __iadd__(self, handler):
+            self.handler = handler
+            return self
+
+    class Events:
+        closed = EventHook()
+
+    class Window:
+        events = Events()
+
+    monkeypatch.setattr(run_ledgertb.os, "name", "nt")
+    gui_returned = threading.Event()
+    gui_returned.set()
+    stops = []
+
+    run_ledgertb._register_windows_close_handler(
+        Window(), lambda: stops.append(1), gui_returned
+    )
+    Window.events.closed.handler()
+
+    assert stops == [1]

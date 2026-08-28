@@ -65,6 +65,9 @@ def bundle_dir() -> Path:
 
 BUNDLE = bundle_dir()
 WINDOW_TITLE = "LedgerTB"
+WINDOWS_APP_MUTEX = "LedgerLabs.LedgerTB.8EE4B706-D4BD-4A9E-97DB-219152E5C235"
+WINDOWS_CLOSE_GRACE_SECONDS = 8.0
+_windows_app_mutex_handle = None
 
 
 def _app_env(suffix: str, default=None):
@@ -189,11 +192,85 @@ def _stop(proc: subprocess.Popen) -> None:
         else:
             proc.terminate()
         proc.wait(timeout=5)
+        return
     except Exception:
-        try:
-            proc.kill()
-        except Exception:
-            pass
+        pass
+    try:
+        proc.kill()
+        # Reap the process after the hard-stop fallback instead of treating a
+        # kill request as proof that shutdown has actually completed.
+        proc.wait(timeout=2)
+    except Exception:
+        pass
+
+
+def _create_windows_app_mutex() -> None:
+    """Advertise a running desktop instance to the Windows installer.
+
+    Inno Setup checks this named kernel object before replacing application
+    files. Keep the handle for the lifetime of the process; Windows releases
+    it automatically even after an abnormal exit.
+    """
+    global _windows_app_mutex_handle
+
+    if os.name != "nt" or _windows_app_mutex_handle is not None:
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        create_mutex = ctypes.windll.kernel32.CreateMutexW
+        create_mutex.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+        create_mutex.restype = wintypes.HANDLE
+        handle = create_mutex(None, False, WINDOWS_APP_MUTEX)
+        if handle:
+            _windows_app_mutex_handle = handle
+    except Exception:
+        # This guard improves upgrades but is not required to run a book. The
+        # window-close lifecycle below remains the primary shutdown path.
+        pass
+
+
+def _force_exit_if_window_loop_stalls(
+    window_closed: threading.Event,
+    gui_returned: threading.Event,
+    timeout: float = WINDOWS_CLOSE_GRACE_SECONDS,
+) -> None:
+    """Bound a pywebview backend that remains alive after its window closes."""
+    window_closed.wait()
+    if not gui_returned.wait(timeout):
+        os._exit(0)
+
+
+def _register_windows_close_handler(
+    window,
+    stop_child,
+    gui_returned: threading.Event,
+) -> None:
+    """Stop the server at native-window close, independent of GUI teardown.
+
+    pywebview normally returns from ``start`` after its final window closes.
+    WebView2/WinForms teardown can occasionally stall, however, which used to
+    leave both LedgerTB.exe processes visible in Task Manager. The native
+    ``closed`` event starts child cleanup immediately; a daemon watchdog gives
+    the GUI loop time to unwind and then ends the otherwise-empty parent.
+    """
+    if os.name != "nt":
+        return
+
+    window_closed = threading.Event()
+
+    def on_closed() -> None:
+        window_closed.set()
+        stop_child()
+
+    window.events.closed += on_closed
+    threading.Thread(
+        target=_force_exit_if_window_loop_stalls,
+        args=(window_closed, gui_returned),
+        name="ledgertb-window-close-watch",
+        daemon=True,
+    ).start()
 
 
 # --- Windows: mark-of-the-web ------------------------------------------------
@@ -394,6 +471,10 @@ def main() -> int:
         mode = "selfcheck"
     if mode == "selfcheck":
         return _selfcheck()
+    # Every long-lived process holds the same installer mutex. If the desktop
+    # parent dies first, its server child (or an MCP process) still prevents an
+    # upgrade from replacing the executable underneath it.
+    _create_windows_app_mutex()
     if mode == "server":
         return _run_server()
     if mode == "mcp":
@@ -432,6 +513,14 @@ def main() -> int:
         kwargs["stdin"] = subprocess.DEVNULL
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     proc = subprocess.Popen(_child_command(port), **kwargs)
+    stop_lock = threading.Lock()
+
+    def stop_child() -> None:
+        # The pywebview event runs on its own thread and can race the outer
+        # finally block. Serialize the stop so one close request cannot wait
+        # on or kill an already-reaped process from another thread.
+        with stop_lock:
+            _stop(proc)
 
     try:
         if not _wait_until_ready(url):
@@ -452,12 +541,17 @@ def main() -> int:
             window = webview.create_window(
                 WINDOW_TITLE, window_url, text_select=True, **geom
             )
+            gui_returned = threading.Event()
+            _register_windows_close_handler(window, stop_child, gui_returned)
             # Pin the native backend per platform (macOS WebKit, Windows
             # WebView2) so the build can safely exclude the Qt toolkits.
-            webview.start(
-                _place_window, (window, win_x, win_y),
-                gui="cocoa" if sys.platform == "darwin" else "edgechromium",
-            )
+            try:
+                webview.start(
+                    _place_window, (window, win_x, win_y),
+                    gui="cocoa" if sys.platform == "darwin" else "edgechromium",
+                )
+            finally:
+                gui_returned.set()
         except Exception as exc:
             if os.name == "nt" and _looks_like_clr_failure(exc):
                 _show_windows_message(_BLOCKED_MESSAGE)
@@ -465,7 +559,7 @@ def main() -> int:
             raise
         return 0
     finally:
-        _stop(proc)
+        stop_child()
         if server_log is not None:
             server_log.close()
 

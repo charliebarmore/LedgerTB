@@ -86,6 +86,10 @@ jobs:
         # every request.
         run: pwsh scripts/smoke_serve.ps1 -ExePath dist/LedgerTB/LedgerTB.exe
 
+      - name: Smoke test — closing the window stops the app
+        shell: pwsh
+        run: pwsh scripts/smoke_close.ps1 -ExePath dist/LedgerTB/LedgerTB.exe
+
       - name: Bundle sanity
         shell: pwsh
         # The config folder is dot-prefixed and has been lost in transit
