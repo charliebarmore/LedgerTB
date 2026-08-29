@@ -52,6 +52,12 @@ the income statement by construction.
 ## The detection control
 
 The close package Summary carries a tie-out: income-statement net income
-must equal the balance sheet's Current Year Earnings when the package
-covers a full fiscal year. A package whose period is not a full fiscal year
-reports the comparison as not applicable instead of failing.
+must equal the balance sheet's Current Year Earnings for any
+fiscal-year-to-date package (the period starts at the fiscal year and ends
+inside it). Other periods report the comparison as not applicable instead
+of failing.
+
+One rule this depends on: **a reversal keeps the entry type of the entry it
+reverses** (`JournalEntry.reverse`). A Regular-typed reversal of a Closing
+or Beginning Balance entry would land on the ordinary-activity side and
+double-count income instead of netting the pair to zero.

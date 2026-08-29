@@ -252,9 +252,10 @@ def _earnings_tie_out(
     income_statement: Dict, balance_sheet: Dict,
 ) -> str:
     """Income-statement net income must equal the balance sheet's Current
-    Year Earnings line when the package covers a full fiscal year
-    (docs/EARNINGS-ATTRIBUTION.md). A failing tie means the two statements
-    disagree about the period's earnings — never export that silently."""
+    Year Earnings line for any fiscal-year-to-date package — the period
+    starts at the fiscal year and ends inside it (docs/EARNINGS-ATTRIBUTION.md).
+    A failing tie means the two statements disagree about the period's
+    earnings — never export that silently."""
     with get_cursor() as cursor:
         row = cursor.execute(
             "SELECT fiscal_year_end_month FROM clients WHERE id = ?",
@@ -263,8 +264,8 @@ def _earnings_tie_out(
     fye_month = (row["fiscal_year_end_month"]
                  if row and row["fiscal_year_end_month"] else 12)
     fy_start, fy_end = fiscal_year_bounds(period_end, fye_month)
-    if (period_start, period_end) != (fy_start, fy_end):
-        return "Not a full fiscal year - not compared"
+    if period_start != fy_start or period_end > fy_end:
+        return "Not a fiscal year-to-date period - not compared"
     current_year_earnings = sum(
         item["balance"] for item in balance_sheet["equity"]
         if item["name"] == "Current Year Earnings"

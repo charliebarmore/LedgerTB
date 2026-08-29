@@ -688,6 +688,7 @@ def test_pdf_package_contains_every_section(booked_period, accounts):
         assert "240.00" in text          # total revenue
         assert "190.00" in text          # net income
         assert "Balance sheet is in balance." in text
+        assert "Net income ties to balance sheet earnings" in text
         assert "CASH AT BEGINNING OF PERIOD" in text
         assert "TOTALS" in text
         assert len(doc) >= 6
@@ -764,8 +765,7 @@ def test_summary_ties_net_income_to_balance_sheet_earnings(booked_period, accoun
              for i in range(1, summary.max_row + 1)}
     assert cells["Net income ties to balance sheet earnings"] == "YES"
 
-    # A partial-period package reports the comparison as not applicable
-    # rather than failing a tie that only holds for full fiscal years.
+    # Any fiscal-year-to-date period ties: Q1 starts at the fiscal year.
     tb_rows_q1, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
     q1_package = build_close_package(client_id, "Test Co", *Q1, tb_rows_q1)
     q1_summary = openpyxl.load_workbook(BytesIO(q1_package.read()))["Summary"]
@@ -773,5 +773,17 @@ def test_summary_ties_net_income_to_balance_sheet_earnings(booked_period, accoun
         q1_summary.cell(row=i, column=1).value: q1_summary.cell(row=i, column=2).value
         for i in range(1, q1_summary.max_row + 1)
     }
-    assert q1_cells["Net income ties to balance sheet earnings"] == \
-        "Not a full fiscal year - not compared"
+    assert q1_cells["Net income ties to balance sheet earnings"] == "YES"
+
+    # A period that does not start at the fiscal year reports the comparison
+    # as not applicable rather than failing a tie that cannot hold for it.
+    feb_mar = (date(2026, 2, 1), date(2026, 3, 31))
+    tb_rows_fm, _ = ReportGenerator.trial_balance_worksheet(client_id, *feb_mar)
+    fm_package = build_close_package(client_id, "Test Co", *feb_mar, tb_rows_fm)
+    fm_summary = openpyxl.load_workbook(BytesIO(fm_package.read()))["Summary"]
+    fm_cells = {
+        fm_summary.cell(row=i, column=1).value: fm_summary.cell(row=i, column=2).value
+        for i in range(1, fm_summary.max_row + 1)
+    }
+    assert fm_cells["Net income ties to balance sheet earnings"] == \
+        "Not a fiscal year-to-date period - not compared"

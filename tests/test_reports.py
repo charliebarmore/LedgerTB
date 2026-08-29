@@ -702,3 +702,57 @@ def test_earnings_attribution_non_calendar_fiscal_year(db):
     assert income["net_income"] == 400
     assert _synthetic(report, "Current Year Earnings") == 400
     assert _synthetic(report, "Retained Earnings") == 300 + 2000
+
+
+def test_earnings_attribution_survives_reversing_a_closing_entry(client_id, accounts):
+    """Reversing a closing entry restores the pre-closing state exactly: the
+    reversal keeps the Closing type, so the pair nets to zero inside Retained
+    Earnings instead of double-counting income as ordinary activity."""
+    from models.journal_entry import JournalEntry
+
+    retained = Account(client_id=client_id, account_number="3900",
+                       name="Retained Earnings", type="Equity")
+    retained.save()
+    post_entry(client_id, date(2026, 5, 1), [
+        (accounts["cash"], 1000, 0), (accounts["revenue"], 0, 1000),
+    ])
+    closing = post_entry(client_id, date(2026, 12, 31), [
+        (accounts["revenue"], 1000, 0), (retained.id, 0, 1000),
+    ], entry_type="Closing")
+    reversal = JournalEntry.reverse(closing.id, client_id, date(2026, 12, 31))
+    assert reversal.entry_type == "Closing"
+
+    report = ReportGenerator.balance_sheet(client_id, date(2026, 12, 31))
+    income = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    assert income["net_income"] == 1000  # not doubled by the reversal
+    assert _synthetic(report, "Current Year Earnings") == 1000
+    assert _synthetic(report, "Retained Earnings") == 0
+    # The real account netted to zero, so the balance sheet drops the line.
+    assert not [e for e in report["equity"] if e["account_number"] == "3900"]
+    assert report["total_assets"] == report["total_liabilities_equity"] == 1000
+
+
+def test_earnings_attribution_survives_reversing_a_beginning_balance(client_id, accounts):
+    """A Beginning Balance entry and its reversal net to zero everywhere --
+    no phantom negative income in the current year."""
+    from models.journal_entry import JournalEntry
+
+    bb = post_entry(client_id, date(2026, 6, 30), [
+        (accounts["cash"], 5000, 0), (accounts["revenue"], 0, 5000),
+    ], entry_type="Beginning Balance")
+    post_entry(client_id, date(2026, 7, 15), [
+        (accounts["cash"], 1000, 0), (accounts["revenue"], 0, 1000),
+    ])
+    reversal = JournalEntry.reverse(bb.id, client_id, date(2026, 6, 30))
+    assert reversal.entry_type == "Beginning Balance"
+
+    report = ReportGenerator.balance_sheet(client_id, date(2026, 12, 31))
+    income = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    assert income["net_income"] == 1000
+    assert _synthetic(report, "Current Year Earnings") == 1000
+    assert _synthetic(report, "Retained Earnings") == 0
+    assert report["total_assets"] == report["total_liabilities_equity"] == 1000
