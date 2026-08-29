@@ -125,6 +125,7 @@ python -m pytest -q -m "not performance"
 - `DESKTOP.md` — desktop builds, packaging, notarization
 - `docs/MCP.md` — assistant access setup and security model
 - `docs/CLOSE-MAP.md` — account support, review, signoff, and stale-change rules
+- `docs/RECURRING-JOURNAL-ENTRIES.md` — the v1.7.0 template and recurrence contract
 - `docs/LEDGERPDF-PAIRING.md` — books-to-binder workflow with LedgerPDF
 - `docs/FIRM-MODE.md` — shared-drive book files and the in-use lock
 - `docs/WINDOWS-TESTING.md` — the Windows smoke-test checklist
