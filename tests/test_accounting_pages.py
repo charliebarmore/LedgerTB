@@ -1353,6 +1353,21 @@ def test_report_client_route_applies_once_then_selector_wins(
     captions = " ".join(str(item.value) for item in page.caption)
     assert "Second Co" in captions
 
+    # Deliberately switching clients drops the stale route from the URL, so a
+    # refresh cannot resurrect the first client or aim its account filters at
+    # the second client's books.
+    assert "client_id" not in page.query_params
+
+    # Browser Back restores the drill URL: that must read as a new route and
+    # reapply its client, not be treated as already applied.
+    page.query_params["report"] = "Trial Balance"
+    page.query_params["client_id"] = str(client_id)
+    page.run()
+    assert not page.exception
+    assert page.session_state["selected_client_id"] == client_id
+    captions = " ".join(str(item.value) for item in page.caption)
+    assert "Test Co" in captions
+
 
 def test_reversal_posts_cleanly_and_resets_confirmation(
     client_id, accounts, monkeypatch

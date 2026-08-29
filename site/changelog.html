@@ -101,11 +101,14 @@
         <li>After drilling into a report, choosing a different client in the
         sidebar now works. Previously the report link's client kept reapplying
         itself, so the selection silently snapped back.</li>
-        <li>The "open in a new tab" control on report account lines has been
-        removed. It passed the app's private session key to your web browser,
-        where it would remain in browser history. Account lines still open the
-        General Ledger in place, and the browser Back button returns to the
-        report.</li>
+        <li>Report links no longer pass LedgerTB's temporary window launch
+        code to your web browser. That code is what stops other software on
+        your computer from talking to the open LedgerTB window. It is not
+        your passphrase and not your book's encryption key, and no book data
+        was exposed, but it does not belong in your browser's history. The
+        "open in a new tab" control is removed, links inside the app now
+        always stay inside the LedgerTB window, and buttons that lead to the
+        LedgerTB website or GitHub open your normal browser directly.</li>
         <li>Posting a reversal no longer shows an error message after the
         reversal succeeds, and the confirmation checkbox resets so a second
         reversal is a deliberate act.</li>

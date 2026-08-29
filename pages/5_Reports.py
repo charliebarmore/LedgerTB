@@ -17,6 +17,7 @@ from models.reports import CASH_FLOW_STATEMENT_SECTIONS, ReportGenerator
 from database import init_database
 from database import connection as dbconn
 from utils.client_context import (
+    book_scoped_key,
     pop_client_intent,
     scope_page_to_client,
     set_client_intent,
@@ -52,28 +53,41 @@ st.set_page_config(page_title="Reports", page_icon=icons.REPORTS, layout="wide")
 require_unlock()
 init_database()
 
+def _query_value(name):
+    value = st.query_params.get(name)
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
+
+
+# Every URL parameter a report link can carry. One signature over all of them
+# is the "have I applied this URL yet" marker for the client below and for the
+# report route further down, so Back/Forward always count as a new URL.
+_ROUTE_FIELDS = (
+    "report", "client_id", "account_id", "start", "end", "as_of", "return_report",
+    "return_start", "return_end", "return_as_of",
+)
+
 # A new browser tab starts a new Streamlit session. Carry the selected client
 # in report links and validate it against the open book before the sidebar
 # selector renders, so a drill-down cannot silently land on the first client.
-route_client_value = st.query_params.get("client_id")
-if isinstance(route_client_value, list):
-    route_client_value = route_client_value[0] if route_client_value else None
+route_client_value = _query_value("client_id")
 try:
     route_client_id = int(route_client_value) if route_client_value else None
 except (TypeError, ValueError):
     route_client_id = None
 route_client = Client.get_by_id(route_client_id) if route_client_id else None
-# Apply the URL's client once per URL value, mirroring the report-route guard
-# below. Reapplying on every rerun would override the user's own sidebar
-# selection for the rest of the session after a drill-down.
-if (
-    route_client
-    and route_client.is_active
-    and st.session_state.get("_reports_client_route") != route_client_value
-):
-    st.session_state["_reports_client_route"] = route_client_value
-    st.session_state.selected_client_id = route_client_id
-    st.session_state.client_selector = route_client_id
+# Apply the URL's client once per URL, mirroring the report-route guard below.
+# Reapplying on every rerun would override the user's own sidebar selection
+# for the rest of the session after a drill-down. The marker key is
+# book-scoped: the same URL against a different book is a different route.
+_route_marker_key = book_scoped_key("_reports_client_route", dbconn.DATABASE_PATH)
+_route_signature = tuple((name, _query_value(name)) for name in _ROUTE_FIELDS)
+if st.session_state.get(_route_marker_key) != _route_signature:
+    st.session_state[_route_marker_key] = _route_signature
+    if route_client and route_client.is_active:
+        st.session_state.selected_client_id = route_client_id
+        st.session_state.client_selector = route_client_id
 
 client_id = render_client_selector()
 
@@ -83,6 +97,19 @@ if not client_id:
     st.warning("Please create a client first in the Clients page.")
     st.page_link("pages/0_Clients.py", label="Go to Clients →")
     st.stop()
+
+# The user picked a different client than the URL's route: drop the stale
+# route parameters (never the launch token) so a refresh cannot resurrect
+# the old client or aim its account filters at the new client's books.
+if route_client_id and client_id != route_client_id:
+    for _name in _ROUTE_FIELDS:
+        if _name in st.query_params:
+            del st.query_params[_name]
+    # Re-mark against the now-cleared URL, so browser Back to the old drill
+    # URL reads as a new route and reapplies its client.
+    st.session_state[_route_marker_key] = tuple(
+        (name, _query_value(name)) for name in _ROUTE_FIELDS
+    )
 
 report_scope = scope_page_to_client(
     st.session_state, "reports", client_id, dbconn.DATABASE_PATH
@@ -101,13 +128,6 @@ st.caption(f"Viewing: **{client.name}**")
 today = date.today()
 current_fy_start, _ = fiscal_year_bounds(today, client.fiscal_year_end_month)
 date_format = get_date_format()
-
-
-def _query_value(name):
-    value = st.query_params.get(name)
-    if isinstance(value, list):
-        return value[0] if value else None
-    return value
 
 
 def _query_date(name):
@@ -254,11 +274,7 @@ if isinstance(report_intent, dict):
 # and Command/Ctrl-click into a new tab. Apply a URL route only once per URL;
 # otherwise its original account and dates would overwrite deliberate changes
 # to the General Ledger filters on every Streamlit rerun.
-route_fields = (
-    "report", "client_id", "account_id", "start", "end", "as_of", "return_report",
-    "return_start", "return_end", "return_as_of",
-)
-route_signature = tuple((name, _query_value(name)) for name in route_fields)
+route_signature = tuple((name, _query_value(name)) for name in _ROUTE_FIELDS)
 route_key = report_key("query_route")
 if st.session_state.get(route_key) != route_signature:
     st.session_state[route_key] = route_signature

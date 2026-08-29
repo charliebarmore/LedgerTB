@@ -3,6 +3,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 from streamlit.testing.v1 import AppTest
 
 from tests.conftest import page_path
@@ -93,8 +94,11 @@ def test_every_local_legal_page_asset_and_link_exists():
 
 
 def test_in_app_legal_page_requires_no_book(monkeypatch):
+    # Patch the class, never the st.sidebar instance: monkeypatch's undo of an
+    # instance patch pins a bound method of the ORIGINAL function onto the
+    # module-level singleton, and later tests' class patches stop reaching it.
     monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
-    monkeypatch.setattr(st.sidebar, "page_link", lambda *args, **kwargs: None)
+    monkeypatch.setattr(DeltaGenerator, "page_link", lambda self, *a, **k: None)
     at = AppTest.from_file(page_path("pages/15_Legal.py"), default_timeout=30).run()
 
     assert not at.exception
