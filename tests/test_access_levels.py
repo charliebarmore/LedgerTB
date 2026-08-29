@@ -247,21 +247,46 @@ def test_assistant_cannot_write_recurring_setup_or_occurrences(
 ):
     """v1.7 recurring setup remains human-only at every assistant level."""
     statements = (
-        "INSERT INTO journal_entry_templates "
-        "(client_id, name, description, entry_type, created_by, updated_by) "
-        "VALUES (?, 'Bypass', 'Bypass', 'Regular', 'AI', 'AI')",
-        "INSERT INTO recurring_occurrences "
-        "(schedule_id, period_name, period_type, period_start, period_end, "
-        "scheduled_entry_date, disposition, generated_at, generated_by) "
-        "VALUES (999, 'FY 2026 - Jan', 'Month', '2026-01-01', '2026-01-31', "
-        "'2026-01-31', 'Generated', datetime('now'), 'AI')",
+        (
+            "INSERT INTO journal_entry_templates "
+            "(client_id, name, description, entry_type, created_by, updated_by) "
+            "VALUES (?, 'Bypass', 'Bypass', 'Regular', 'AI', 'AI')",
+            (client_id,),
+        ),
+        (
+            "INSERT INTO journal_entry_template_lines "
+            "(template_id, account_id, debit_cents, credit_cents, sort_order) "
+            "VALUES (999, 999, 100, 0, 0)",
+            (),
+        ),
+        (
+            "INSERT INTO recurring_schedules "
+            "(template_id, frequency, date_rule, starts_on, reversal_rule, "
+            "is_active, created_by, updated_by) VALUES "
+            "(999, 'Monthly', 'PeriodEnd', '2026-01-01', 'None', 1, 'AI', 'AI')",
+            (),
+        ),
+        (
+            "INSERT INTO recurring_occurrences "
+            "(schedule_id, period_name, period_type, period_start, period_end, "
+            "scheduled_entry_date, disposition, generated_at, generated_by) "
+            "VALUES (999, 'FY 2026 - Jan', 'Month', '2026-01-01', '2026-01-31', "
+            "'2026-01-31', 'Generated', datetime('now'), 'AI')",
+            (),
+        ),
+        (
+            "INSERT INTO recurring_occurrence_drafts "
+            "(occurrence_id, draft_entry_id, role, generation_number) "
+            "VALUES (999, 999, 'Primary', 1)",
+            (),
+        ),
     )
     for level in ("read", "propose", "post"):
         monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", level)
-        for statement in statements:
+        for statement, params in statements:
             with pytest.raises(Exception):
                 with get_cursor(commit=True) as cursor:
-                    cursor.execute(statement, (client_id,))
+                    cursor.execute(statement, params)
 
 
 def test_external_book_caps_assistant_at_read(client_id, monkeypatch):

@@ -363,6 +363,7 @@ def _selfcheck() -> int:
             "portalocker",
             "mcp", "mcp.server", "mcp.server.stdio",
             "config", "constants", "money", "models.journal_entry", "models.reconciliation",
+            "models.recurring_entry", "services.recurring_entries",
             "services.categorization", "services.document_import", "pypdfium2", "PIL",
             "keyring", "version"]
     failed = []

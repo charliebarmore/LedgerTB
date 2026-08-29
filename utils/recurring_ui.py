@@ -1,6 +1,6 @@
 """Streamlit rendering for journal-entry templates and recurring schedules."""
 
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -18,6 +18,7 @@ from services.recurring_entries import (
     generate_selected,
     occurrence_history,
     preview_due,
+    rejected_recoveries,
     regenerate_occurrence,
     skip_occurrence,
     undo_skip,
@@ -240,6 +241,10 @@ def _render_schedule_editor(
                 label_visibility="collapsed" if not has_end else "visible",
             )
         reversal_key = _key(f"recurring_reversal_{suffix}")
+        if reversal_key not in st.session_state:
+            st.session_state[reversal_key] = bool(
+                schedule and schedule.reversal_rule == "NextDay"
+            )
         if date_rule != "PeriodEnd":
             # Clear before widget instantiation; a keyed checkbox otherwise
             # keeps its old True value while disabled and makes the transition
@@ -247,7 +252,6 @@ def _render_schedule_editor(
             st.session_state[reversal_key] = False
         reversal = st.checkbox(
             "Create a reversal draft after the period-end entry posts",
-            value=bool(schedule and schedule.reversal_rule == "NextDay"),
             key=reversal_key,
             disabled=date_rule != "PeriodEnd",
         )
@@ -297,6 +301,7 @@ def _render_due(client, date_format: str) -> None:
     st.subheader("Due recurring entries")
     through = st.date_input(
         "Generate through", value=date.today(), format=date_format,
+        max_value=date.today() + timedelta(days=3660),
         key=_key("recurring_through_date"),
         help="Choose a future date only when you intentionally want to prepare ahead.",
     )
@@ -417,28 +422,35 @@ def _render_due(client, date_format: str) -> None:
                             st.session_state.recurring_result = "Skip undone."
                             st.rerun()
 
-    rejected = [item for item in handled if item.draft_status == "rejected"]
+    rejected = rejected_recoveries(client.id)
     if rejected:
         with st.expander(f"Rejected drafts available to regenerate ({len(rejected)})"):
             for item in rejected:
+                role = item["role"]
                 left, right = st.columns([4, 1])
                 left.caption(
-                    f"{item.template_name} · {item.period_name} · "
-                    f"draft #{item.draft_id} rejected"
+                    f"{item['template_name']} · {item['period_name']} · "
+                    f"{role.lower()} draft #{item['draft_id']} rejected"
                 )
                 with right:
                     if st.button(
-                        "Regenerate",
-                        key=_key(f"recurring_regenerate_{item.occurrence_id}"),
+                        f"Regenerate {role.lower()}",
+                        key=_key(
+                            f"recurring_regenerate_{role.lower()}_"
+                            f"{item['occurrence_id']}"
+                        ),
                         disabled=dbconn.READ_ONLY,
                     ):
                         try:
-                            regenerate_occurrence(client.id, item.occurrence_id)
+                            regenerate_occurrence(
+                                client.id, item["occurrence_id"], role=role
+                            )
                         except Exception as exc:
                             st.error(str(exc))
                         else:
                             st.session_state.recurring_result = (
-                                f"Created a replacement draft for {item.template_name}."
+                                f"Created a replacement {role.lower()} draft for "
+                                f"{item['template_name']}."
                             )
                             st.rerun()
 

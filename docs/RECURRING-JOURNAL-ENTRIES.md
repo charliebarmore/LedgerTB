@@ -29,6 +29,10 @@ release.
 4. **One scheduled occurrence per accounting period.** Database uniqueness,
    not a UI check, prevents a rerun or concurrent click from creating a second
    occurrence.
+   If a later frequency change calculates different period boundaries,
+   LedgerTB blocks every candidate that overlaps an existing occurrence for
+   that schedule. Changing Monthly to Quarterly (or the reverse) never reopens
+   dates that were already generated or skipped.
 5. **Generated drafts are snapshots.** Later template or schedule edits affect
    future generation only. They never rewrite a pending, rejected, or approved
    draft.
@@ -90,11 +94,17 @@ errored. Rerunning the same selection is safe.
 - Approval revalidates the accounts, cents, balance, client ownership, and
   closed-period rule, then posts through `JournalEntry.save` in the same
   transaction used to claim the pending draft.
-- An Adjusting draft receives the next fiscal-year AJE reference at approval.
+- Every Adjusting draft receives the next fiscal-year AJE reference at human
+  approval, whether it came from a recurring schedule, an assistant proposal,
+  or another draft workflow. Filing a draft does not reserve a number.
 - Rejection keeps the draft and occurrence visible in history.
 - A rejected occurrence may be regenerated only through an explicit
   **Regenerate** action. It creates a new draft generation; it does not revive
   or edit the rejected row.
+- A rejected reversal has the same explicit recovery path. Its replacement is
+  copied from the rejected reversal snapshot—not the template's current
+  values—because the reversal must continue to invert the primary that
+  actually posted.
 
 ### Skip or pause
 
@@ -122,6 +132,10 @@ The service treats periods with identical type, start date, and end date as
 one accounting period even if an old book contains duplicate calendar rows.
 Occurrence uniqueness uses the period boundaries rather than a mutable period
 row ID, so deleting and rebuilding a calendar cannot create a duplicate.
+Before showing a newly calculated period as Due, the service also checks it
+against every existing occurrence for that schedule. Any boundary overlap is
+Blocked with an explanation. This is the idempotency rule when a schedule's
+frequency changes after it has history.
 
 Date rules are deterministic:
 
@@ -161,6 +175,12 @@ The reversal:
   source reference;
 - remains a pending draft requiring a separate human approval; and
 - is generated once even if the approval response is retried.
+
+Rejecting a reversal does not remove the obligation to reverse the posted
+primary. The recurring workspace therefore surfaces rejected reversal drafts
+separately and allows an explicit regeneration. The new generation preserves
+the rejected reversal's date, type, lines, cents, and primary relationship;
+the rejected row remains in history.
 
 If the reversal date has already passed when the primary is approved, the new
 draft is shown as overdue; LedgerTB does not silently change its date.
@@ -325,12 +345,14 @@ assistant access level.
 
 - Repeated and concurrent Generate actions produce one occurrence for a
   schedule and period.
+- Frequency changes cannot produce a candidate whose dates overlap any
+  existing occurrence for the schedule.
 - Repeated primary approval cannot create a second reversal draft.
 - Monthly, quarterly, annual, non-December fiscal year, leap-year, day-31,
   historical catch-up, future-through-date, duplicate-period-row, missing
   calendar, and closed-year cases have regression tests.
-- A rejected occurrence can be regenerated; a pending or approved occurrence
-  cannot be duplicated.
+- A rejected primary or reversal can be regenerated; a pending or approved
+  generation cannot be duplicated.
 - Skip requires a reason and prevents repeated due reminders until explicitly
   undone.
 

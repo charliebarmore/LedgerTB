@@ -42,6 +42,9 @@ class OccurrencePreview:
     draft_id: Optional[int] = None
     draft_status: str = ""
     generation_number: Optional[int] = None
+    reversal_draft_id: Optional[int] = None
+    reversal_draft_status: str = ""
+    reversal_generation_number: Optional[int] = None
 
     def key(self) -> tuple[int, str, str]:
         return self.schedule_id, self.period_start.isoformat(), self.period_end.isoformat()
@@ -101,14 +104,28 @@ def _closed_year_for(cursor, client_id: int, entry_date: date):
     ).fetchone()
 
 
-def _latest_primary(cursor, occurrence_id: int):
+def _latest_draft(cursor, occurrence_id: int, role: str):
     return cursor.execute(
         """SELECT rod.generation_number, d.id draft_id, d.status draft_status
            FROM recurring_occurrence_drafts rod
            JOIN draft_entries d ON d.id = rod.draft_entry_id
-           WHERE rod.occurrence_id = ? AND rod.role = 'Primary'
+           WHERE rod.occurrence_id = ? AND rod.role = ?
            ORDER BY rod.generation_number DESC LIMIT 1""",
-        (occurrence_id,),
+        (occurrence_id, role),
+    ).fetchone()
+
+
+def _overlapping_occurrence(
+    cursor, schedule_id: int, period_start: date, period_end: date
+):
+    """An already-accounted period whose boundaries intersect a candidate."""
+    return cursor.execute(
+        """SELECT id, period_name, period_start, period_end, disposition
+           FROM recurring_occurrences
+           WHERE schedule_id = ?
+             AND period_start <= ? AND period_end >= ?
+           ORDER BY period_start, id LIMIT 1""",
+        (schedule_id, period_end.isoformat(), period_start.isoformat()),
     ).fetchone()
 
 
@@ -174,7 +191,7 @@ def _preview_schedule(
                     occurrence_id=occurrence["id"],
                 ))
                 continue
-            primary = _latest_primary(cursor, occurrence["id"])
+            primary = _latest_draft(cursor, occurrence["id"], "Primary")
             if not primary:
                 previews.append(OccurrencePreview(
                     **base, state="Blocked",
@@ -182,12 +199,35 @@ def _preview_schedule(
                     occurrence_id=occurrence["id"],
                 ))
             else:
+                reversal = _latest_draft(cursor, occurrence["id"], "Reversal")
                 previews.append(OccurrencePreview(
                     **base, state="Handled", occurrence_id=occurrence["id"],
                     draft_id=primary["draft_id"],
                     draft_status=primary["draft_status"],
                     generation_number=primary["generation_number"],
+                    reversal_draft_id=(
+                        reversal["draft_id"] if reversal else None
+                    ),
+                    reversal_draft_status=(
+                        reversal["draft_status"] if reversal else ""
+                    ),
+                    reversal_generation_number=(
+                        reversal["generation_number"] if reversal else None
+                    ),
                 ))
+            continue
+        overlap = _overlapping_occurrence(
+            cursor, schedule.id, period.start_date, period.end_date
+        )
+        if overlap:
+            previews.append(OccurrencePreview(
+                **base, state="Blocked",
+                reason=(
+                    f"{period.period_name} overlaps the already handled "
+                    f"{overlap['period_name']} occurrence. Changing a schedule's "
+                    "frequency never reopens previously accounted dates."
+                ),
+            ))
             continue
         if key not in stored_keys:
             previews.append(OccurrencePreview(
@@ -387,7 +427,7 @@ def generate_occurrence(
                     return {
                         "result": "skipped", "occurrence_id": existing["id"],
                     }
-                primary = _latest_primary(cursor, existing["id"])
+                primary = _latest_draft(cursor, existing["id"], "Primary")
                 return {
                     "result": "already_generated",
                     "occurrence_id": existing["id"],
@@ -536,7 +576,12 @@ def undo_skip(client_id: int, occurrence_id: int) -> None:
         conn.close()
 
 
-def regenerate_occurrence(client_id: int, occurrence_id: int) -> dict:
+def regenerate_occurrence(
+    client_id: int, occurrence_id: int, role: str = "Primary"
+) -> dict:
+    role = str(role or "").strip().title()
+    if role not in ("Primary", "Reversal"):
+        raise ValueError("Recurring draft role must be Primary or Reversal.")
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -551,42 +596,90 @@ def regenerate_occurrence(client_id: int, occurrence_id: int) -> dict:
         ).fetchone()
         if not row:
             raise ValueError("Generated occurrence not found for the selected client.")
-        if not row["is_active"]:
-            raise ValueError("Reactivate the schedule before regenerating this draft.")
-        latest = _latest_primary(cursor, occurrence_id)
+        latest = _latest_draft(cursor, occurrence_id, role)
         if not latest or latest["draft_status"] != "rejected":
-            raise ValueError("Only a rejected recurring draft can be regenerated.")
-        scheduled = date.fromisoformat(row["scheduled_entry_date"])
+            raise ValueError(
+                f"Only a rejected {role.lower()} draft can be regenerated."
+            )
+
+        if role == "Primary":
+            if not row["is_active"]:
+                raise ValueError(
+                    "Reactivate the schedule before regenerating this draft."
+                )
+            scheduled = date.fromisoformat(row["scheduled_entry_date"])
+            template = JournalEntryTemplate.get_by_id(row["template_id"], client_id)
+            if not template or template.archived_at:
+                raise ValueError("Restore the template before regenerating this draft.")
+            draft = _draft_from_template(cursor, template, scheduled)
+        else:
+            primary = cursor.execute(
+                """SELECT d.id draft_id, d.posted_entry_id
+                   FROM recurring_occurrence_drafts rod
+                   JOIN draft_entries d ON d.id = rod.draft_entry_id
+                   WHERE rod.occurrence_id = ? AND rod.role = 'Primary'
+                     AND d.status = 'approved' AND d.posted_entry_id IS NOT NULL
+                   ORDER BY rod.generation_number DESC LIMIT 1""",
+                (occurrence_id,),
+            ).fetchone()
+            if not primary:
+                raise ValueError(
+                    "The recurring primary must be posted before regenerating "
+                    "its reversal."
+                )
+            rejected = cursor.execute(
+                "SELECT * FROM draft_entries WHERE id = ? AND client_id = ?",
+                (latest["draft_id"], client_id),
+            ).fetchone()
+            if not rejected:
+                raise ValueError("Rejected reversal draft not found.")
+            source = DraftEntry._from_row(rejected)
+            scheduled = date.fromisoformat(source.entry_date)
+            draft = DraftEntry(
+                client_id=client_id,
+                proposed_by=source.proposed_by,
+                entry_date=source.entry_date,
+                entry_type=source.entry_type,
+                description=source.description,
+                rationale=source.rationale,
+                lines=[
+                    DraftLine(
+                        account_number=line.account_number,
+                        debit_cents=line.debit_cents,
+                        credit_cents=line.credit_cents,
+                        memo=line.memo,
+                    )
+                    for line in source.lines
+                ],
+            )
+
         closed = _closed_year_for(cursor, client_id, scheduled)
         if closed:
             raise ValueError(
                 f"{closed['period_name']} is closed. Reopen it before regenerating."
             )
-        template = JournalEntryTemplate.get_by_id(row["template_id"], client_id)
-        if not template or template.archived_at:
-            raise ValueError("Restore the template before regenerating this draft.")
-        draft = _draft_from_template(cursor, template, scheduled)
         draft.save(conn=conn)
         generation = int(latest["generation_number"]) + 1
         cursor.execute(
             """INSERT INTO recurring_occurrence_drafts
                (occurrence_id, draft_entry_id, role, generation_number)
-               VALUES (?, ?, 'Primary', ?)""",
-            (occurrence_id, draft.id, generation),
+               VALUES (?, ?, ?, ?)""",
+            (occurrence_id, draft.id, role, generation),
         )
         link_id = cursor.lastrowid
         AuditLog.write(
             cursor, client_id, "recurring_occurrence_drafts", link_id, "INSERT",
             new_values={
                 "occurrence_id": occurrence_id, "draft_entry_id": draft.id,
-                "role": "Primary", "generation_number": generation,
+                "role": role, "generation_number": generation,
                 "regenerated_from_draft_id": latest["draft_id"],
             },
         )
         conn.commit()
         return {
             "result": "regenerated", "occurrence_id": occurrence_id,
-            "draft_id": draft.id, "generation_number": generation,
+            "draft_id": draft.id, "role": role,
+            "generation_number": generation,
         }
     except Exception:
         conn.rollback()
@@ -674,6 +767,37 @@ def occurrence_history(client_id: int, limit: int = 100) -> List[dict]:
             )
             item["drafts"] = [dict(row) for row in cursor.fetchall()]
     return occurrences
+
+
+def rejected_recoveries(client_id: int) -> List[dict]:
+    """Latest rejected primary/reversal generations that can be recovered.
+
+    This query deliberately does not depend on the schedule's current
+    frequency, active state, or the template's archive state. A posted
+    primary's rejected reversal remains an accounting obligation even after
+    somebody reorganizes or archives the schedule that created it.
+    """
+    with get_cursor() as cursor:
+        cursor.execute(
+            """SELECT ro.id occurrence_id, ro.period_name, ro.period_start,
+                      ro.period_end, t.name template_name, rod.role,
+                      rod.generation_number, d.id draft_id, d.entry_date
+               FROM recurring_occurrence_drafts rod
+               JOIN recurring_occurrences ro ON ro.id = rod.occurrence_id
+               JOIN recurring_schedules rs ON rs.id = ro.schedule_id
+               JOIN journal_entry_templates t ON t.id = rs.template_id
+               JOIN draft_entries d ON d.id = rod.draft_entry_id
+               WHERE t.client_id = ? AND d.status = 'rejected'
+                 AND rod.generation_number = (
+                     SELECT MAX(latest.generation_number)
+                     FROM recurring_occurrence_drafts latest
+                     WHERE latest.occurrence_id = rod.occurrence_id
+                       AND latest.role = rod.role
+                 )
+               ORDER BY ro.period_end, t.name COLLATE NOCASE, rod.role""",
+            (client_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
 
 def create_reversal_after_primary_approval(

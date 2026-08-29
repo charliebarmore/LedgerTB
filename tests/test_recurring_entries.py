@@ -16,6 +16,7 @@ from services.recurring_entries import (
     generate_selected,
     generate_occurrence,
     preview_due,
+    rejected_recoveries,
     regenerate_occurrence,
     skip_occurrence,
     undo_skip,
@@ -209,6 +210,65 @@ def test_preview_and_generation_are_period_idempotent(client_id, accounts):
     assert results["requested_count"] == results["accounted_count"] == 2
     assert len(results["already_generated"]) == 1
     assert len(results["generated"]) == 1
+
+
+def test_frequency_change_blocks_periods_overlapping_existing_occurrences(
+    client_id, accounts
+):
+    _periods(client_id)
+    template = _template(client_id, accounts)
+    template.save()
+    schedule = RecurringSchedule(
+        template_id=template.id,
+        frequency="Monthly",
+        starts_on=date(2026, 1, 1),
+    )
+    schedule.save()
+
+    monthly = preview_due(client_id, through_date=date(2026, 3, 31))
+    for item in monthly:
+        generated = generate_occurrence(
+            client_id, schedule.id, item.period_start, item.period_end
+        )
+        DraftEntry.get_by_id(generated["draft_id"], client_id).approve()
+
+    schedule.frequency = "Quarterly"
+    schedule.save()
+    quarterly = preview_due(client_id, through_date=date(2026, 3, 31))
+    assert len(quarterly) == 1
+    assert quarterly[0].period_name == "FY 2026 - Q1"
+    assert quarterly[0].state == "Blocked"
+    assert "overlaps" in quarterly[0].reason
+    with pytest.raises(ValueError, match="overlaps"):
+        generate_occurrence(
+            client_id, schedule.id,
+            quarterly[0].period_start, quarterly[0].period_end,
+        )
+
+
+def test_frequency_change_blocks_smaller_periods_inside_existing_occurrence(
+    client_id, accounts
+):
+    _periods(client_id)
+    template = _template(client_id, accounts)
+    template.save()
+    schedule = RecurringSchedule(
+        template_id=template.id,
+        frequency="Quarterly",
+        starts_on=date(2026, 1, 1),
+    )
+    schedule.save()
+    quarter = preview_due(client_id, through_date=date(2026, 3, 31))[0]
+    generated = generate_occurrence(
+        client_id, schedule.id, quarter.period_start, quarter.period_end
+    )
+    DraftEntry.get_by_id(generated["draft_id"], client_id).approve()
+
+    schedule.frequency = "Monthly"
+    schedule.save()
+    monthly = preview_due(client_id, through_date=date(2026, 3, 31))
+    assert [item.state for item in monthly] == ["Blocked", "Blocked", "Blocked"]
+    assert all("FY 2026 - Q1" in item.reason for item in monthly)
 
 
 def test_day_31_clamps_and_noncalendar_fiscal_year_works(client_id, accounts):
@@ -474,6 +534,59 @@ def test_adjusting_approval_posts_with_aje_and_creates_one_reversal(
     assert reversal_entry.source_reference.startswith(
         f"Scheduled reversal of JE #{entry_id}"
     )
+
+
+def test_rejected_reversal_can_be_regenerated_without_reversing_new_template_values(
+    client_id, accounts
+):
+    _periods(client_id)
+    template = _template(client_id, accounts)
+    template.save()
+    schedule = RecurringSchedule(
+        template_id=template.id,
+        starts_on=date(2026, 1, 1),
+        reversal_rule="NextDay",
+    )
+    schedule.save()
+    january = preview_due(client_id, through_date=date(2026, 1, 31))[0]
+    generated = generate_occurrence(
+        client_id, schedule.id, january.period_start, january.period_end
+    )
+    DraftEntry.get_by_id(generated["draft_id"], client_id).approve()
+    rejected = DraftEntry.get_pending(client_id)[0]
+    rejected.reject()
+
+    template.lines[0].debit_cents = 99_999
+    template.lines[1].credit_cents = 99_999
+    template.save()
+    handled = preview_due(client_id, through_date=date(2026, 1, 31))[0]
+    assert handled.state == "Handled"
+    assert handled.draft_status == "approved"
+    assert handled.reversal_draft_id == rejected.id
+    assert handled.reversal_draft_status == "rejected"
+
+    template.archive()
+    recoveries = rejected_recoveries(client_id)
+    assert [(item["role"], item["draft_id"]) for item in recoveries] == [
+        ("Reversal", rejected.id)
+    ]
+
+    replacement = regenerate_occurrence(
+        client_id, generated["occurrence_id"], role="Reversal"
+    )
+    assert replacement["role"] == "Reversal"
+    assert replacement["generation_number"] == 2
+    restored = DraftEntry.get_by_id(replacement["draft_id"], client_id)
+    assert restored.status == "pending"
+    assert restored.entry_date == rejected.entry_date == "2026-02-01"
+    assert [line.__dict__ for line in restored.lines] == [
+        line.__dict__ for line in rejected.lines
+    ]
+    assert restored.lines[0].credit_cents == 12_345
+    with pytest.raises(ValueError, match="rejected reversal"):
+        regenerate_occurrence(
+            client_id, generated["occurrence_id"], role="Reversal"
+        )
 
 
 def test_reversal_creation_failure_rolls_back_primary_approval(

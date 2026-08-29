@@ -1468,6 +1468,55 @@ def test_recurring_view_generates_draft_and_template_loads_form(
     assert load_page.session_state["je_lines"][0]["debit"] == 125.0
 
 
+def test_recurring_view_surfaces_rejected_reversal_regeneration(
+    client_id, accounts, monkeypatch
+):
+    from services.recurring_entries import generate_occurrence, preview_due
+
+    _select_client(monkeypatch, client_id)
+    FiscalPeriod.ensure_periods_exist(client_id, 2026, 12)
+    template = JournalEntryTemplate(
+        client_id=client_id,
+        name="Reversal recovery",
+        description="Accrual with reversal",
+        entry_type="Adjusting",
+        lines=[
+            TemplateLine(accounts["expense"], debit_cents=25_000),
+            TemplateLine(accounts["cash"], credit_cents=25_000),
+        ],
+    )
+    template.save()
+    schedule = RecurringSchedule(
+        template_id=template.id,
+        starts_on=date(2026, 1, 1),
+        reversal_rule="NextDay",
+    )
+    schedule.save()
+    january = preview_due(client_id, through_date=date(2026, 1, 31))[0]
+    generated = generate_occurrence(
+        client_id, schedule.id, january.period_start, january.period_end
+    )
+    DraftEntry.get_by_id(generated["draft_id"], client_id).approve()
+    rejected = DraftEntry.get_pending(client_id)[0]
+    rejected.reject()
+
+    page = AppTest.from_file(
+        page_path("pages/2_Journal_Entries.py"), default_timeout=30
+    )
+    page.session_state["journal_active_tab"] = "Templates & recurring"
+    page.run()
+    key = f"recurring_regenerate_reversal_{generated['occurrence_id']}_rg0"
+    button = page.button(key=key)
+    assert button.label == "Regenerate reversal"
+    button.click().run()
+
+    assert not page.exception
+    pending = DraftEntry.get_pending(client_id)
+    assert len(pending) == 1
+    assert pending[0].id != rejected.id
+    assert pending[0].entry_date == rejected.entry_date
+
+
 def test_new_entry_can_be_saved_as_template(client_id, accounts, monkeypatch):
     _select_client(monkeypatch, client_id)
     page = AppTest.from_file(

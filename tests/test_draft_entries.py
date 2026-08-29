@@ -166,6 +166,32 @@ def test_stale_draft_objects_cannot_double_post(client_id, accounts):
     assert DraftEntry.get_by_id(draft.id, client_id).posted_entry_id == first.posted_entry_id
 
 
+def test_every_adjusting_draft_receives_next_aje_reference_on_approval(
+    client_id, accounts
+):
+    cash_no, rev_no = _numbers(client_id, accounts)
+    references = []
+    for proposed_by in ("Assistant (MCP)", "Human-filed draft"):
+        draft = DraftEntry(
+            client_id=client_id,
+            proposed_by=proposed_by,
+            entry_date="2026-07-31",
+            entry_type="Adjusting",
+            description="Number this adjustment",
+            lines=[
+                DraftLine(cash_no, debit_cents=100),
+                DraftLine(rev_no, credit_cents=100),
+            ],
+        )
+        draft.save()
+        entry_id = draft.approve()
+        references.append(
+            JournalEntry.get_by_id(entry_id, client_id=client_id).aje_reference
+        )
+
+    assert references == ["AJE-001", "AJE-002"]
+
+
 def test_approval_rolls_back_entry_and_claim_when_draft_audit_fails(
     client_id, accounts, monkeypatch
 ):
