@@ -280,6 +280,12 @@ class Account:
             )
             if close_map:
                 blockers["close-map records"] = close_map
+            templates = count(
+                "SELECT COUNT(*) FROM journal_entry_template_lines WHERE account_id = ?",
+                account_id,
+            )
+            if templates:
+                blockers["journal-entry templates"] = templates
             return blockers
         finally:
             if owns_conn:

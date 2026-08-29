@@ -9,6 +9,12 @@ from models.account import Account
 from models.client import Client
 from models.draft_entry import DraftEntry
 from models.journal_entry import JournalEntry
+from models.recurring_entry import (
+    JournalEntryTemplate,
+    RecurringSchedule,
+    TemplateLine,
+)
+from models.fiscal_period import FiscalPeriod
 from models.transaction import ImportedTransaction
 from services.posting import post_transaction
 from services import mcp_tools
@@ -827,6 +833,9 @@ def test_journal_discards_unsaved_state_for_same_client_id_in_another_book(
     journal.session_state["journal_active_tab"] = "View Entries"
     journal.session_state["filter_search"] = "FIRST BOOK"
     journal.session_state["journal_page"] = 4
+    journal.session_state["recurring_through_date"] = date(2026, 12, 31)
+    journal.session_state["recurring_editor_id"] = 999
+    journal.session_state["recurring_select_999_2026-01-01_rg0"] = True
     journal.run()
 
     assert not journal.exception
@@ -835,6 +844,10 @@ def test_journal_discards_unsaved_state_for_same_client_id_in_another_book(
     assert journal.session_state["editing_entry_id"] is None
     assert "correct_import_entry_id" not in journal.session_state
     assert "filter_search" not in journal.session_state
+    assert "recurring_through_date" not in journal.session_state
+    assert "recurring_editor_id" not in journal.session_state
+    assert "recurring_select_999_2026-01-01_rg0" not in journal.session_state
+    assert journal.session_state["recurring_widget_gen"] == 1
     assert journal.selectbox(key="account_0_g1").value is None
     assert journal.number_input(key="debit_0_g1").value == 0.0
     assert journal.text_input(key="je_hdr_desc_g1").value == ""
@@ -1399,6 +1412,83 @@ def test_reversal_posts_cleanly_and_resets_confirmation(
         e.source_reference == f"Reversal of JE #{entry.id}"
         for e in reversed_entries
     )
+
+
+def test_recurring_view_generates_draft_and_template_loads_form(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    FiscalPeriod.ensure_periods_exist(client_id, 2026, 12)
+    template = JournalEntryTemplate(
+        client_id=client_id,
+        name="Monthly test schedule",
+        description="Monthly recurring test",
+        entry_type="Adjusting",
+        source_reference="Test schedule",
+        lines=[
+            TemplateLine(accounts["expense"], debit_cents=12_500),
+            TemplateLine(accounts["cash"], credit_cents=12_500),
+        ],
+    )
+    template.save()
+    schedule = RecurringSchedule(
+        template_id=template.id,
+        starts_on=date(2026, 1, 1),
+    )
+    schedule.save()
+
+    page = AppTest.from_file(
+        page_path("pages/2_Journal_Entries.py"), default_timeout=30
+    )
+    page.session_state["journal_active_tab"] = "Templates & recurring"
+    page.run()
+    assert not page.exception
+    page.date_input(key="recurring_through_date_rg0").set_value(date(2026, 1, 31)).run()
+    selection_key = f"recurring_select_{schedule.id}_2026-01-01_rg0"
+    page.checkbox(key=selection_key).check().run()
+    page.button(key="recurring_generate_selected_rg0").click().run()
+    assert not page.exception
+    drafts = DraftEntry.get_pending(client_id)
+    assert len(drafts) == 1
+    assert drafts[0].description == "Monthly recurring test"
+
+    page.session_state["journal_active_tab"] = "Drafts"
+    page.run()
+    recurring_notice = " ".join(str(item.value) for item in page.info)
+    assert "Recurring primary" in recurring_notice
+    assert "Monthly test schedule" in recurring_notice
+
+    load_page = AppTest.from_file(
+        page_path("pages/2_Journal_Entries.py"), default_timeout=30
+    ).run()
+    load_page.selectbox(key="je_use_template__journal_entries_g0").select(template.id).run()
+    load_page.button(key="je_load_template__journal_entries_g0").click().run()
+    assert not load_page.exception
+    assert load_page.session_state["je_description"] == "Monthly recurring test"
+    assert load_page.session_state["je_lines"][0]["debit"] == 125.0
+
+
+def test_new_entry_can_be_saved_as_template(client_id, accounts, monkeypatch):
+    _select_client(monkeypatch, client_id)
+    page = AppTest.from_file(
+        page_path("pages/2_Journal_Entries.py"), default_timeout=30
+    ).run()
+    page.text_input(key="je_hdr_desc_g0").set_value("Monthly rent").run()
+    page.selectbox(key="account_0_g0").set_value(accounts["expense"]).run()
+    page.number_input(key="debit_0_g0").set_value(1500.0).run()
+    page.selectbox(key="account_1_g0").set_value(accounts["cash"]).run()
+    page.number_input(key="credit_1_g0").set_value(1500.0).run()
+    page.text_input(
+        key="je_new_template_name_g0__journal_entries_g0"
+    ).set_value("Rent template").run()
+    page.button(key="je_save_template__journal_entries_g0").click().run()
+
+    assert not page.exception
+    stored = JournalEntryTemplate.get_all(client_id)
+    assert len(stored) == 1
+    assert stored[0].name == "Rent template"
+    assert stored[0].lines[0].debit_cents == 150_000
+    assert JournalEntry.count(client_id) == 0
 
 
 def test_firm_settings_date_format_widget_is_book_scoped(db, monkeypatch):

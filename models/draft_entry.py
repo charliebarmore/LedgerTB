@@ -58,9 +58,7 @@ class DraftEntry:
         }
 
     # ---------------------------------------------------------------- checks
-    def validate(self) -> None:
-        from models.account import Account
-
+    def validate(self, conn=None) -> None:
         if not self.description.strip():
             raise ValueError("A draft needs a description.")
         try:
@@ -70,8 +68,12 @@ class DraftEntry:
         if self.entry_type not in EntryType.ALL:
             raise ValueError(
                 "entry_type must be one of: " + ", ".join(EntryType.ALL) + ".")
-        if self.original_entry_id is not None:
-            with get_cursor() as cursor:
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            if self.original_entry_id is not None:
                 cursor.execute(
                     "SELECT id FROM journal_entries WHERE id = ? AND client_id = ?",
                     (self.original_entry_id, self.client_id),
@@ -80,31 +82,42 @@ class DraftEntry:
                     raise ValueError(
                         "The original journal entry must belong to the selected client."
                     )
-        if len(self.lines) < 2:
-            raise ValueError("A draft needs at least two lines.")
-        debits = credits = 0
-        numbers = {a.account_number for a in Account.get_all(self.client_id, active_only=False)}
-        for line in self.lines:
-            if line.debit_cents < 0 or line.credit_cents < 0:
-                raise ValueError("Line amounts cannot be negative.")
-            if bool(line.debit_cents) == bool(line.credit_cents):
-                raise ValueError("Each line needs a debit or a credit, not both.")
-            if str(line.account_number) not in numbers:
-                raise ValueError(f"No account numbered {line.account_number} for this client.")
-            debits += line.debit_cents
-            credits += line.credit_cents
-        if debits != credits or debits == 0:
-            raise ValueError(
-                f"Draft does not balance: debits {to_dollars(debits):,.2f} vs "
-                f"credits {to_dollars(credits):,.2f}."
+            if len(self.lines) < 2:
+                raise ValueError("A draft needs at least two lines.")
+            debits = credits = 0
+            cursor.execute(
+                "SELECT account_number FROM accounts WHERE client_id = ?",
+                (self.client_id,),
             )
+            numbers = {row["account_number"] for row in cursor.fetchall()}
+            for line in self.lines:
+                if line.debit_cents < 0 or line.credit_cents < 0:
+                    raise ValueError("Line amounts cannot be negative.")
+                if bool(line.debit_cents) == bool(line.credit_cents):
+                    raise ValueError("Each line needs a debit or a credit, not both.")
+                if str(line.account_number) not in numbers:
+                    raise ValueError(f"No account numbered {line.account_number} for this client.")
+                debits += line.debit_cents
+                credits += line.credit_cents
+            if debits != credits or debits == 0:
+                raise ValueError(
+                    f"Draft does not balance: debits {to_dollars(debits):,.2f} vs "
+                    f"credits {to_dollars(credits):,.2f}."
+                )
+        finally:
+            if owns_conn:
+                conn.close()
 
     # ---------------------------------------------------------------- io
-    def save(self) -> int:
+    def save(self, conn=None) -> int:
         from models.audit_log import AuditLog
 
-        self.validate()
-        with get_cursor(commit=True) as cursor:
+        self.validate(conn=conn)
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
+        try:
+            cursor = conn.cursor()
             cursor.execute(
                 """INSERT INTO draft_entries
                    (client_id, proposed_by, entry_date, entry_type,
@@ -126,7 +139,16 @@ class DraftEntry:
                 cursor, self.client_id, "draft_entries", self.id, "INSERT",
                 new_values=self._audit_values(),
             )
-        return self.id
+            if owns_conn:
+                conn.commit()
+            return self.id
+        except Exception:
+            if owns_conn:
+                conn.rollback()
+            raise
+        finally:
+            if owns_conn:
+                conn.close()
 
     @staticmethod
     def _from_row(row) -> "DraftEntry":
@@ -218,41 +240,17 @@ class DraftEntry:
     def approve(self) -> int:
         """Post the draft as a real journal entry (normal validation, audit,
         actor) and mark it approved. Returns the new journal entry id."""
-        from models.account import Account
         from models.audit_log import AuditLog
         from models.journal_entry import JournalEntry, JournalEntryLine
         from utils.actor import current_actor
 
-        self.validate()  # accounts may have changed since it was filed
-        by_number = {a.account_number: a.id
-                     for a in Account.get_all(self.client_id, active_only=False)}
         from datetime import date as _date
-
-        if self.original_entry_id is not None:
-            source_reference = (
-                f"Correction of JE #{self.original_entry_id} · Draft #{self.id} · "
-                f"proposed by {self.proposed_by}"
-            )
-        else:
-            source_reference = f"Draft #{self.id} · proposed by {self.proposed_by}"
-
-        entry = JournalEntry(
-            client_id=self.client_id,
-            entry_date=_date.fromisoformat(self.entry_date),
-            description=self.description,
-            entry_type=self.entry_type,
-            source_reference=source_reference,
-            lines=[JournalEntryLine(
-                account_id=by_number[str(l.account_number)],
-                debit=to_dollars(l.debit_cents),
-                credit=to_dollars(l.credit_cents),
-                memo=l.memo or None,
-            ) for l in self.lines],
-        )
+        from utils.fiscal_dates import fiscal_year_bounds
         actor = current_actor()
         conn = get_connection()
         cursor = conn.cursor()
         try:
+            self.validate(conn=conn)  # accounts may have changed since filing
             # The conditional update is the claim.  It is deliberately the
             # first write in this transaction: concurrent/stale DraftEntry
             # objects cannot both claim the same pending row.
@@ -267,6 +265,72 @@ class DraftEntry:
             if cursor.rowcount != 1:
                 raise ValueError("Only a pending draft can be approved.")
 
+            from services.recurring_entries import recurring_draft_context
+            recurring = recurring_draft_context(conn, self.id, self.client_id)
+            if recurring and recurring["role"] == "Primary":
+                source_reference = (
+                    f"Recurring · {recurring['template_name']} · "
+                    f"{recurring['period_name']} · Draft #{self.id}"
+                )
+                template_reference = (
+                    recurring.get("template_source_reference") or ""
+                ).strip()
+                if template_reference:
+                    source_reference += f" · {template_reference}"
+            elif recurring and recurring["role"] == "Reversal":
+                primary_entry_id = recurring.get("primary_posted_entry_id")
+                if not primary_entry_id:
+                    raise ValueError(
+                        "The scheduled primary entry must post before its reversal."
+                    )
+                source_reference = (
+                    f"Scheduled reversal of JE #{primary_entry_id} · "
+                    f"{recurring['template_name']} · Draft #{self.id}"
+                )
+            elif self.original_entry_id is not None:
+                source_reference = (
+                    f"Correction of JE #{self.original_entry_id} · Draft #{self.id} · "
+                    f"proposed by {self.proposed_by}"
+                )
+            else:
+                source_reference = f"Draft #{self.id} · proposed by {self.proposed_by}"
+
+            cursor.execute(
+                "SELECT account_number, id FROM accounts WHERE client_id = ?",
+                (self.client_id,),
+            )
+            by_number = {row["account_number"]: row["id"] for row in cursor.fetchall()}
+            entry_date = _date.fromisoformat(self.entry_date)
+            aje_reference = None
+            if self.entry_type == "Adjusting":
+                cursor.execute(
+                    "SELECT fiscal_year_end_month FROM clients WHERE id = ?",
+                    (self.client_id,),
+                )
+                client = cursor.fetchone()
+                if not client:
+                    raise ValueError("Client not found for this draft.")
+                fy_start, fy_end = fiscal_year_bounds(
+                    entry_date, client["fiscal_year_end_month"]
+                )
+                aje_reference = JournalEntry.get_next_aje_reference(
+                    self.client_id, fy_start, fy_end, conn=conn
+                )
+
+            entry = JournalEntry(
+                client_id=self.client_id,
+                entry_date=entry_date,
+                description=self.description,
+                entry_type=self.entry_type,
+                source_reference=source_reference,
+                aje_reference=aje_reference,
+                lines=[JournalEntryLine(
+                    account_id=by_number[str(line.account_number)],
+                    debit=to_dollars(line.debit_cents),
+                    credit=to_dollars(line.credit_cents),
+                    memo=line.memo or None,
+                ) for line in self.lines],
+            )
             entry_id = entry.save(conn=conn)
             cursor.execute(
                 """UPDATE draft_entries SET posted_entry_id = ?
@@ -292,6 +356,13 @@ class DraftEntry:
                 cursor, self.client_id, "draft_entries", self.id, "UPDATE",
                 old_values=old_values, new_values=new_values,
             )
+            if recurring and recurring["role"] == "Primary":
+                from services.recurring_entries import (
+                    create_reversal_after_primary_approval,
+                )
+                create_reversal_after_primary_approval(
+                    conn, self, entry_id, context=recurring
+                )
             conn.commit()
         except Exception:
             conn.rollback()

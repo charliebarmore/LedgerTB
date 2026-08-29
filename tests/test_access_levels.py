@@ -242,6 +242,28 @@ def test_assistant_cannot_update_a_filed_draft(client_id, accounts, monkeypatch)
             )
 
 
+def test_assistant_cannot_write_recurring_setup_or_occurrences(
+    client_id, monkeypatch
+):
+    """v1.7 recurring setup remains human-only at every assistant level."""
+    statements = (
+        "INSERT INTO journal_entry_templates "
+        "(client_id, name, description, entry_type, created_by, updated_by) "
+        "VALUES (?, 'Bypass', 'Bypass', 'Regular', 'AI', 'AI')",
+        "INSERT INTO recurring_occurrences "
+        "(schedule_id, period_name, period_type, period_start, period_end, "
+        "scheduled_entry_date, disposition, generated_at, generated_by) "
+        "VALUES (999, 'FY 2026 - Jan', 'Month', '2026-01-01', '2026-01-31', "
+        "'2026-01-31', 'Generated', datetime('now'), 'AI')",
+    )
+    for level in ("read", "propose", "post"):
+        monkeypatch.setattr(dbconn, "ASSISTANT_ACCESS_LEVEL", level)
+        for statement in statements:
+            with pytest.raises(Exception):
+                with get_cursor(commit=True) as cursor:
+                    cursor.execute(statement, (client_id,))
+
+
 def test_external_book_caps_assistant_at_read(client_id, monkeypatch):
     import mcp_server
     from utils import books
