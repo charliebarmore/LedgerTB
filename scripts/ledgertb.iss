@@ -29,6 +29,7 @@
 #define AppPublisher "Ledger Labs LLC"
 #define AppURL "https://ledgertb.com"
 #define AppExeName "LedgerTB.exe"
+#define AppMutexName "LedgerLabs.LedgerTB.8EE4B706-D4BD-4A9E-97DB-219152E5C235"
 
 [Setup]
 ; Stable AppId — never change it, or upgrades install alongside the old copy
@@ -64,6 +65,13 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
+
+; Every long-lived LedgerTB process holds this mutex. Setup and Uninstall
+; therefore stop with a clear "LedgerTB is currently running" prompt instead
+; of trying to replace an executable left open in Task Manager.
+AppMutex={#AppMutexName}
+CloseApplications=yes
+RestartApplications=no
 
 ; The app bundles its own Python; 64-bit Windows 10 or later.
 MinVersion=10.0

@@ -84,6 +84,13 @@ jobs:
         # HTTP 500 on every request.
         run: pwsh scripts/smoke_serve.ps1 -ExePath dist/LedgerTB/LedgerTB.exe
 
+      - name: "Signal 5: closing the window stops the app"
+        id: close
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: pwsh scripts/smoke_close.ps1 -ExePath dist/LedgerTB/LedgerTB.exe
+
       - name: Read app version
         id: ver
         if: steps.build.outcome == 'success'
@@ -92,7 +99,7 @@ jobs:
           $v = python -c "from version import APP_VERSION; print(APP_VERSION)"
           "value=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: "Signal 5: Inno Setup installer"
+      - name: "Signal 6: Inno Setup installer"
         id: installer
         if: steps.build.outcome == 'success'
         continue-on-error: true
@@ -118,7 +125,7 @@ jobs:
         if: steps.installer.outcome == 'success'
         # Uploads are a convenience, not a signal: the free plan's artifact
         # quota can block them (recalculated slowly after deletions), and
-        # that must not mask six green signals or skip the scorecard.
+        # that must not mask seven green signals or skip the scorecard.
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -147,6 +154,7 @@ jobs:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
           SELFCHECK_OUTCOME: ${{ steps.selfcheck.outcome }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          CLOSE_OUTCOME: ${{ steps.close.outcome }}
           INSTALLER_OUTCOME: ${{ steps.installer.outcome }}
           UPLOAD_INSTALLER_OUTCOME: ${{ steps.upload_installer.outcome }}
           UPLOAD_BUNDLE_OUTCOME: ${{ steps.upload_bundle.outcome }}
@@ -162,6 +170,7 @@ jobs:
           Write-Host "pyinstaller:       $env:BUILD_OUTCOME"
           Write-Host "selfcheck:         $env:SELFCHECK_OUTCOME"
           Write-Host "serves a page:     $env:SMOKE_OUTCOME"
+          Write-Host "window shutdown:   $env:CLOSE_OUTCOME"
           Write-Host "installer:         $env:INSTALLER_OUTCOME"
           Write-Host "artifact uploads:  installer=$env:UPLOAD_INSTALLER_OUTCOME bundle=$env:UPLOAD_BUNDLE_OUTCOME (informational)"
           if ($env:UPLOAD_INSTALLER_OUTCOME -eq "failure" -or $env:UPLOAD_BUNDLE_OUTCOME -eq "failure") {
@@ -169,6 +178,7 @@ jobs:
           }
           $bad = @($env:SQLCIPHER_OUTCOME, $env:TESTS_OUTCOME,
                    $env:BUILD_OUTCOME, $env:SELFCHECK_OUTCOME,
-                   $env:SMOKE_OUTCOME, $env:INSTALLER_OUTCOME) |
+                   $env:SMOKE_OUTCOME, $env:CLOSE_OUTCOME,
+                   $env:INSTALLER_OUTCOME) |
                  Where-Object { $_ -eq "failure" }
           if ($bad) { Write-Error "one or more signals failed"; exit 1 }

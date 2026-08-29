@@ -102,7 +102,7 @@ The app runs fully without any API key. To turn on AI categorization, either set
 ## Desktop builds
 
 - **macOS**: download the signed and notarized Apple Silicon `LedgerTB.app` from the latest release. To build it yourself, create a clean Python 3.12 environment, install `requirements-macos-arm64.lock`, and run `./scripts/build_release.sh`. The build verifies the lock before packaging. Signing is configured via a local `scripts/signing.env`.
-- **Windows**: an Inno Setup installer built by CI (`.github/workflows/release.yml`, tag-triggered) from `scripts/ledgertb.iss`. The release pipeline refuses to ship a build whose encryption is unavailable, installs the pinned set in `requirements-windows.lock`, and will not publish a build that cannot serve a page (`scripts/smoke_serve.ps1`).
+- **Windows**: an Inno Setup installer built by CI (`.github/workflows/release.yml`, tag-triggered) from `scripts/ledgertb.iss`. The release pipeline refuses to ship a build whose encryption is unavailable, installs the pinned set in `requirements-windows.lock`, and will not publish a build that cannot serve a page (`scripts/smoke_serve.ps1`) or fully exit after its native window closes (`scripts/smoke_close.ps1`).
 
 ## The posture
 
