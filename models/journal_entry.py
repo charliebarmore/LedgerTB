@@ -712,7 +712,12 @@ class JournalEntry:
             conn.close()
 
     @staticmethod
-    def get_next_aje_reference(client_id: int, period_start: date, period_end: date) -> str:
+    def get_next_aje_reference(
+        client_id: int,
+        period_start: date,
+        period_end: date,
+        conn=None,
+    ) -> str:
         """
         Generate the next AJE reference number for a client/period.
         Format: AJE-001, AJE-002, etc.
@@ -726,7 +731,11 @@ class JournalEntry:
             Next available AJE reference (e.g., "AJE-001")
         """
         require_valid_range(period_start, period_end, "AJE period")
-        with get_cursor() as cursor:
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
+        try:
+            cursor = conn.cursor()
             cursor.execute("""
                 SELECT aje_reference FROM journal_entries
                 WHERE client_id = ?
@@ -737,6 +746,9 @@ class JournalEntry:
                 LIMIT 1
             """, (client_id, period_start.isoformat(), period_end.isoformat()))
             row = cursor.fetchone()
+        finally:
+            if owns_conn:
+                conn.close()
 
         if row and row['aje_reference']:
             # Extract number from AJE-XXX format
