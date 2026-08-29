@@ -1418,3 +1418,24 @@ def test_firm_settings_date_format_widget_is_book_scoped(db, monkeypatch):
     ).run()
     assert not firm.exception
     assert firm.selectbox(key=key).value
+
+
+def test_chart_of_accounts_warns_about_unresolved_subtypes(
+    client_id, accounts, monkeypatch
+):
+    """A legacy subtype that no longer resolves (e.g. bare Equity "Capital"
+    after the 1.6.0 vocabulary change) must be announced with a visible
+    warning, not only inside the collapsed review expander."""
+    _select_client(monkeypatch, client_id)
+    legacy = Account(client_id=client_id, account_number="3100",
+                     name="Owner's Capital", type="Equity", subtype="Capital")
+    legacy.save()
+
+    page = AppTest.from_file(
+        page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30
+    ).run()
+    assert not page.exception
+    warnings = " ".join(str(item.value) for item in page.warning)
+    assert "need a statement grouping" in warnings or \
+        "needs a statement grouping" in warnings
+    assert "3100 Owner's Capital" in warnings

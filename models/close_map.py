@@ -377,7 +377,20 @@ def _fingerprint_with_cursor(cursor, client_id: int, period_id: int,
             "resolved_at, resolution FROM account_review_notes WHERE review_id = ? "
             "ORDER BY id", (review["id"],),
         ).fetchall()
-    raw_balance = sum(int(row["debit"] or 0) - int(row["credit"] or 0) for row in lines)
+    # The signed balance must be the figure the Close Map row shows: period
+    # ordinary activity for income-statement accounts, life-to-date for
+    # balance-sheet accounts (docs/EARNINGS-ATTRIBUTION.md). The ledger_lines
+    # payload keeps the full history for context either way.
+    if account["type"] in ("Revenue", "Expense"):
+        raw_balance = sum(
+            int(row["debit"] or 0) - int(row["credit"] or 0) for row in lines
+            if period["start_date"] <= row["entry_date"] <= period["end_date"]
+            and row["entry_type"] not in ("Beginning Balance", "Closing")
+        )
+    else:
+        raw_balance = sum(
+            int(row["debit"] or 0) - int(row["credit"] or 0) for row in lines
+        )
     aje_raw = sum(
         int(row["debit"] or 0) - int(row["credit"] or 0) for row in lines
         if row["entry_type"] == "Adjusting"
@@ -485,20 +498,39 @@ def _readiness_with_cursor(cursor, client_id: int, period_id: int) -> dict:
     """Build the period Close Map using one caller-owned connection."""
     period = _period(cursor, client_id, period_id)
     prior_end = prior_year_date(date.fromisoformat(period["end_date"])).isoformat()
+    prior_start = prior_year_date(date.fromisoformat(period["start_date"])).isoformat()
+    # Balance-sheet accounts carry life-to-date balances through each period
+    # end. Revenue and expense accounts report the fiscal period's ordinary
+    # activity instead — the same figure the income statement publishes
+    # (docs/EARNINGS-ATTRIBUTION.md) — never a life-to-date accumulation.
     accounts = cursor.execute(
         "SELECT a.*, COALESCE(SUM(CASE WHEN je.entry_date <= ? "
         "THEN jel.debit - jel.credit ELSE 0 END), 0) current_raw, "
         "COALESCE(SUM(CASE WHEN je.entry_date <= ? "
-        "THEN jel.debit - jel.credit ELSE 0 END), 0) prior_raw "
+        "THEN jel.debit - jel.credit ELSE 0 END), 0) prior_raw, "
+        "COALESCE(SUM(CASE WHEN je.entry_date >= ? AND je.entry_date <= ? "
+        "AND je.entry_type NOT IN ('Beginning Balance', 'Closing') "
+        "THEN jel.debit - jel.credit ELSE 0 END), 0) current_period_raw, "
+        "COALESCE(SUM(CASE WHEN je.entry_date >= ? AND je.entry_date <= ? "
+        "AND je.entry_type NOT IN ('Beginning Balance', 'Closing') "
+        "THEN jel.debit - jel.credit ELSE 0 END), 0) prior_period_raw "
         "FROM accounts a LEFT JOIN journal_entry_lines jel ON jel.account_id = a.id "
         "LEFT JOIN journal_entries je ON je.id = jel.journal_entry_id "
         "WHERE a.client_id = ? GROUP BY a.id ORDER BY a.account_number",
-        (period["end_date"], prior_end, client_id),
+        (period["end_date"], prior_end,
+         period["start_date"], period["end_date"],
+         prior_start, prior_end, client_id),
     ).fetchall()
     rows = []
     for account in accounts:
-        current_cents = _normal_balance(account["type"], int(account["current_raw"] or 0))
-        prior_cents = _normal_balance(account["type"], int(account["prior_raw"] or 0))
+        if account["type"] in ("Revenue", "Expense"):
+            current_cents = _normal_balance(
+                account["type"], int(account["current_period_raw"] or 0))
+            prior_cents = _normal_balance(
+                account["type"], int(account["prior_period_raw"] or 0))
+        else:
+            current_cents = _normal_balance(account["type"], int(account["current_raw"] or 0))
+            prior_cents = _normal_balance(account["type"], int(account["prior_raw"] or 0))
         if current_cents == 0 and prior_cents == 0:
             continue
         mapping = cursor.execute(

@@ -609,6 +609,17 @@ class JournalEntry:
                     )
 
                 cursor.execute(
+                    "SELECT 1 FROM imported_transactions "
+                    "WHERE reversal_journal_entry_id = ? LIMIT 1",
+                    (entry_id,),
+                )
+                if cursor.fetchone():
+                    raise ValueError(
+                        "This entry reversed an imported batch, and the import "
+                        "history points to it. It must stay in the books."
+                    )
+
+                cursor.execute(
                     "SELECT id FROM draft_entries "
                     "WHERE original_entry_id = ? ORDER BY id LIMIT 1",
                     (entry_id,),

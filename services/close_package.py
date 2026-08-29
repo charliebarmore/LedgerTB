@@ -48,6 +48,7 @@ from services.branding import (
     get_client_branding,
 )
 from utils.dates import long_date, long_datetime
+from utils.fiscal_dates import fiscal_year_bounds
 from utils.export import set_excel_literal
 
 _HEADER_FONT = Font(bold=True)
@@ -243,6 +244,38 @@ def load_close_package_snapshot(
         client_branding=get_client_branding(client_id),
         branding=get_branding(),
         generated_at=datetime.now(),
+    )
+
+
+def _earnings_tie_out(
+    client_id: int, period_start: date, period_end: date,
+    income_statement: Dict, balance_sheet: Dict,
+) -> str:
+    """Income-statement net income must equal the balance sheet's Current
+    Year Earnings line when the package covers a full fiscal year
+    (docs/EARNINGS-ATTRIBUTION.md). A failing tie means the two statements
+    disagree about the period's earnings — never export that silently."""
+    with get_cursor() as cursor:
+        row = cursor.execute(
+            "SELECT fiscal_year_end_month FROM clients WHERE id = ?",
+            (client_id,),
+        ).fetchone()
+    fye_month = (row["fiscal_year_end_month"]
+                 if row and row["fiscal_year_end_month"] else 12)
+    fy_start, fy_end = fiscal_year_bounds(period_end, fye_month)
+    if (period_start, period_end) != (fy_start, fy_end):
+        return "Not a full fiscal year - not compared"
+    current_year_earnings = sum(
+        item["balance"] for item in balance_sheet["equity"]
+        if item["name"] == "Current Year Earnings"
+        and not item["account_number"]
+    )
+    if abs(income_statement["net_income"] - current_year_earnings) < 0.01:
+        return "YES"
+    return (
+        "OUT OF BALANCE - net income "
+        f"{income_statement['net_income']:,.2f} vs current year earnings "
+        f"{current_year_earnings:,.2f}"
     )
 
 
@@ -522,6 +555,9 @@ def build_close_package(
          "YES" if abs(balance_sheet["total_assets"] -
                       balance_sheet["total_liabilities_equity"]) < 0.01
          else "OUT OF BALANCE"),
+        ("Net income ties to balance sheet earnings",
+         _earnings_tie_out(client_id, period_start, period_end,
+                           income_statement, balance_sheet)),
         ("Cash flow status",
          "READY" if cash_flow["ready"] else "REVIEW WARNINGS"),
         ("Cash flow - net change in cash", cash_flow["computed_cash_change"]),
@@ -1152,6 +1188,9 @@ def build_close_package_pdf(
                 ["Final trial balance - total debits", _money(total_dr)],
                 ["Final trial balance - total credits", _money(total_cr)],
                 ["In balance", "Yes" if balanced else "OUT OF BALANCE"],
+                ["Net income ties to balance sheet earnings",
+                 _earnings_tie_out(client_id, period_start, period_end,
+                                   income_statement, balance_sheet)],
                 ["Journal lines in period", str(len(transactions))],
                 ["Adjusting entry lines", str(len(ajes))],
                 ["Close Map",

@@ -342,3 +342,34 @@ def test_close_map_resolution_input_is_owned_by_book_and_client(
     assert resolution.value in ("", None)
     rendered = " ".join(str(item.value) for item in at.text_input)
     assert "FIRST BOOK DRAFT RESOLUTION" not in rendered
+
+
+def test_close_map_scopes_income_statement_accounts_to_the_period(client_id, accounts):
+    """Revenue and expense balances on the Close Map are the fiscal period's
+    activity -- the figure the income statement publishes -- never a
+    life-to-date accumulation. Balance-sheet accounts stay life-to-date."""
+    _post(client_id, date(2025, 6, 1), accounts["cash"], accounts["revenue"], 3000)
+    _post(client_id, date(2026, 6, 1), accounts["cash"], accounts["revenue"], 4000)
+    period = _period(client_id, year=2026)
+
+    summary = close_map.readiness(client_id, period.id)
+    revenue_row = _row(summary, accounts["revenue"])
+    assert revenue_row.current_balance == 4000  # FY2026 activity, not 7000
+    assert revenue_row.prior_balance == 3000    # FY2025 activity
+    cash_row = _row(summary, accounts["cash"])
+    assert cash_row.current_balance == 7000     # balance sheet: life-to-date
+    assert cash_row.prior_balance == 3000
+
+    # The signed-off balance must be the same period-scoped figure the row
+    # shows, and a P&L sign-off must stay valid (fingerprints agree).
+    close_map.save_explanation(
+        client_id, period.id, accounts["revenue"], "Agrees to the revenue detail."
+    )
+    close_map.add_evidence(
+        client_id, period.id, accounts["revenue"], "workpaper", "R-1",
+        "Revenue tie-out",
+    )
+    close_map.signoff(client_id, period.id, accounts["revenue"], "preparer")
+    signed = _row(close_map.readiness(client_id, period.id), accounts["revenue"])
+    assert signed.status == close_map.PREPARED
+    assert signed.current_balance == 4000

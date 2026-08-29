@@ -744,3 +744,34 @@ def test_pdf_and_excel_can_share_one_captured_snapshot(
     )
     assert xlsx.read().startswith(b"PK")
     assert pdf.read().startswith(b"%PDF")
+
+
+def test_summary_ties_net_income_to_balance_sheet_earnings(booked_period, accounts):
+    """Full-fiscal-year packages assert income-statement net income equals the
+    balance sheet's Current Year Earnings (docs/EARNINGS-ATTRIBUTION.md) --
+    including with a mid-year conversion Beginning Balance in the book."""
+    client_id = booked_period
+    post_entry(client_id, date(2026, 6, 30), [
+        (accounts["cash"], 5000, 0), (accounts["revenue"], 0, 5000),
+    ], entry_type="Beginning Balance")
+    full_year = (date(2026, 1, 1), date(2026, 12, 31))
+
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *full_year)
+    package = build_close_package(client_id, "Test Co", *full_year, tb_rows)
+    wb = openpyxl.load_workbook(BytesIO(package.read()))
+    summary = wb["Summary"]
+    cells = {summary.cell(row=i, column=1).value: summary.cell(row=i, column=2).value
+             for i in range(1, summary.max_row + 1)}
+    assert cells["Net income ties to balance sheet earnings"] == "YES"
+
+    # A partial-period package reports the comparison as not applicable
+    # rather than failing a tie that only holds for full fiscal years.
+    tb_rows_q1, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+    q1_package = build_close_package(client_id, "Test Co", *Q1, tb_rows_q1)
+    q1_summary = openpyxl.load_workbook(BytesIO(q1_package.read()))["Summary"]
+    q1_cells = {
+        q1_summary.cell(row=i, column=1).value: q1_summary.cell(row=i, column=2).value
+        for i in range(1, q1_summary.max_row + 1)
+    }
+    assert q1_cells["Net income ties to balance sheet earnings"] == \
+        "Not a full fiscal year - not compared"

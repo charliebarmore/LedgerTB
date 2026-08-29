@@ -992,11 +992,14 @@ class ReportGenerator:
             # Revenue/expense activity isn't reflected anywhere in Equity until a
             # closing entry sweeps it there. Compute the un-closed net income as of
             # as_of_date and surface it as two synthetic equity lines:
-            #   - Current Year Earnings: activity within the fiscal year as_of_date falls in
-            #   - Retained Earnings: activity from all *prior* fiscal years
-            # A posted Closing entry zeroes the revenue/expense accounts it covers, so
-            # any year that has actually been closed contributes $0 here automatically
-            # (its earnings already live in a real Equity account instead).
+            #   - Current Year Earnings: ordinary activity within the fiscal year
+            #     as_of_date falls in — always equal to the income statement
+            #   - Retained Earnings: ordinary activity from all *prior* fiscal
+            #     years, plus every Beginning Balance and Closing P&L leg
+            # A posted Closing entry cancels the year it closes inside the
+            # Retained Earnings line, so closed years contribute $0 here (their
+            # earnings live in the real Equity account the close credited).
+            # The full convention: docs/EARNINGS-ATTRIBUTION.md.
             cursor.execute("SELECT fiscal_year_end_month FROM clients WHERE id = ?", (client_id,))
             client_row = cursor.fetchone()
             fye_month = (client_row['fiscal_year_end_month'] if client_row and client_row['fiscal_year_end_month'] else 12)
@@ -1014,9 +1017,25 @@ class ReportGenerator:
                 """, [client_id] + params)
                 return cursor.fetchone()['net_income'] or 0.0
 
-            retained_earnings = _net_income("je.entry_date < ?", [fy_start.isoformat()])
+            # Attribution convention (docs/EARNINGS-ATTRIBUTION.md): Current
+            # Year Earnings is ordinary activity only, so it always equals the
+            # income statement's net income; Beginning Balance and Closing
+            # entries' P&L legs feed Retained Earnings whatever date they
+            # carry — a conversion's opening income is prior equity, and a
+            # closing entry posted after year-end must cancel the year it
+            # closes, not distort the year it lands in.
+            retained_earnings = _net_income(
+                "je.entry_date < ? "
+                "AND je.entry_type NOT IN ('Beginning Balance', 'Closing')",
+                [fy_start.isoformat()],
+            ) + _net_income(
+                "je.entry_date <= ? "
+                "AND je.entry_type IN ('Beginning Balance', 'Closing')",
+                [as_of_date.isoformat()],
+            )
             current_year_earnings = _net_income(
-                "je.entry_date >= ? AND je.entry_date <= ?",
+                "je.entry_date >= ? AND je.entry_date <= ? "
+                "AND je.entry_type NOT IN ('Beginning Balance', 'Closing')",
                 [fy_start.isoformat(), as_of_date.isoformat()]
             )
 
