@@ -8,6 +8,7 @@ is the browser-visible reset Streamlit requires; deleting session-state values
 alone does not prevent the frontend from restoring an old widget value.
 """
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, MutableMapping
@@ -30,6 +31,17 @@ def _book_identity(book_path) -> str:
 def client_context_identity(book_path, client_id: int) -> tuple[str, int]:
     """Build the canonical identity for client-owned UI state."""
     return (_book_identity(book_path), int(client_id))
+
+
+def book_scoped_key(prefix: str, book_path) -> str:
+    """Widget key owned by one book, for book-level (not client-level) state.
+
+    A bare key survives a book switch in the same session, so a widget would
+    keep showing the previous book's value and a save would write it into the
+    newly opened book.
+    """
+    digest = hashlib.sha256(_book_identity(book_path).encode()).hexdigest()[:12]
+    return f"{prefix}_{digest}"
 
 
 def sync_active_client_context(

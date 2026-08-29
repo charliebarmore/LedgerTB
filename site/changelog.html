@@ -88,9 +88,45 @@
   person doing the accounting work.</p>
 
   <article class="changelog">
+    <section class="release" id="v1-6-2">
+      <div class="release-head">
+        <h2>LedgerTB v1.6.2 <span class="release-label">Latest</span></h2>
+        <span class="release-date">August 29, 2026</span>
+      </div>
+      <p>This hotfix corrects four problems found in review of the v1.6.0 and
+      v1.6.1 report workflow, and completes the Windows shutdown fix. It does
+      not change book data or require a database migration.</p>
+      <h3>Report and workflow fixes</h3>
+      <ul>
+        <li>After drilling into a report, choosing a different client in the
+        sidebar now works. Previously the report link's client kept reapplying
+        itself, so the selection silently snapped back.</li>
+        <li>The "open in a new tab" control on report account lines has been
+        removed. It passed the app's private session key to your web browser,
+        where it would remain in browser history. Account lines still open the
+        General Ledger in place, and the browser Back button returns to the
+        report.</li>
+        <li>Posting a reversal no longer shows an error message after the
+        reversal succeeds, and the confirmation checkbox resets so a second
+        reversal is a deliberate act.</li>
+        <li>The date-format preference screen now always shows the setting of
+        the book you have open. Previously, after switching books, it could
+        display and save the previous book's format.</li>
+      </ul>
+      <h3>Windows</h3>
+      <ul>
+        <li>Closing the window now shuts the app down cleanly, and the
+        installer can identify any still-running LedgerTB process before
+        replacing files. The first upgrade from an older build can still
+        require ending a leftover process once.</li>
+      </ul>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.6.2">Detailed release notes</a> ·
+      <a href="https://github.com/charliebarmore/LedgerTB/compare/v1.6.1...v1.6.2">Source comparison</a></p>
+    </section>
+
     <section class="release" id="v1-6-1">
       <div class="release-head">
-        <h2>LedgerTB v1.6.1 <span class="release-label">Latest</span></h2>
+        <h2>LedgerTB v1.6.1</h2>
         <span class="release-date">August 28, 2026</span>
       </div>
       <p>This desktop hotfix restores two report interactions that did not work

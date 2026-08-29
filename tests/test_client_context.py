@@ -67,3 +67,19 @@ def test_client_intent_rejects_other_clients_and_same_id_in_other_book(tmp_path)
 
     set_client_intent(state, "journal", {"entry_id": 11}, 1, first_book)
     assert pop_client_intent(state, "journal", 1, second_book) is None
+
+
+def test_book_scoped_key_tracks_the_book(tmp_path):
+    from utils.client_context import book_scoped_key
+
+    first = tmp_path / "first.db"
+    second = tmp_path / "second.db"
+
+    assert book_scoped_key("firm_date_format", first) == \
+        book_scoped_key("firm_date_format", first)
+    assert book_scoped_key("firm_date_format", first) != \
+        book_scoped_key("firm_date_format", second)
+    # Path spelling must not matter — the same book is the same key.
+    assert book_scoped_key("firm_date_format", first) == \
+        book_scoped_key("firm_date_format", tmp_path / "sub" / ".." / "first.db")
+    assert book_scoped_key("firm_date_format", first).startswith("firm_date_format_")

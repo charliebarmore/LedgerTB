@@ -372,7 +372,11 @@ def test_report_drilldown_preserves_authorized_desktop_token(
     )
     assert "report=General+Ledger" in rendered
     assert "t=launch-secret" in rendered
-    assert "target='_blank'" in rendered
+    # No new-tab variant: the desktop shell hands target='_blank' navigations
+    # to the system browser, which would write the launch token into that
+    # browser's history and hand it an authorized session to the open book.
+    assert "target='_blank'" not in rendered
+    assert "pb-new-tab" not in rendered
 
 
 def test_cash_flow_report_renders_quality_check_and_export(
@@ -1315,3 +1319,87 @@ def test_transactions_filters_reset_for_same_client_id_in_another_book(
     switched_text = " ".join(str(item.value) for item in page.text)
     assert "SECOND BOOK ROW" in switched_text
     assert "FIRST BOOK ROW" not in switched_text
+
+
+def test_report_client_route_applies_once_then_selector_wins(
+    client_id, accounts, monkeypatch
+):
+    """A drill-down URL selects its client once. After that the user's own
+    sidebar choice must stick — the route used to reapply itself on every
+    rerun, silently snapping the selection back for the rest of the session."""
+    from streamlit.delta_generator import DeltaGenerator
+
+    monkeypatch.setattr(DeltaGenerator, "page_link", lambda self, *a, **k: None)
+    second = Client(name="Second Co").save(seed_accounts=False)
+    Account(client_id=second, account_number="1010", name="Second Cash",
+            type="Asset").save()
+    post_entry(client_id, date(2026, 1, 15),
+               [(accounts["cash"], 500, 0), (accounts["revenue"], 0, 500)])
+
+    page = AppTest.from_file(page_path("pages/5_Reports.py"), default_timeout=60)
+    page.query_params["report"] = "Trial Balance"
+    page.query_params["client_id"] = str(client_id)
+    page.run()
+    assert not page.exception
+
+    selector = next(
+        s for s in page.sidebar.selectbox if s.label == "Select Client"
+    )
+    assert selector.value == client_id  # the URL still applies on first load
+
+    selector.set_value(second).run()
+    assert not page.exception
+    assert page.session_state["selected_client_id"] == second
+    captions = " ".join(str(item.value) for item in page.caption)
+    assert "Second Co" in captions
+
+
+def test_reversal_posts_cleanly_and_resets_confirmation(
+    client_id, accounts, monkeypatch
+):
+    """Posting a reversal must not raise after succeeding (it used to write the
+    confirm checkbox's own key mid-render) and must reset the confirmation."""
+    _select_client(monkeypatch, client_id)
+    entry = post_entry(
+        client_id, date(2026, 2, 1),
+        [(accounts["cash"], 250, 0), (accounts["revenue"], 0, 250)],
+    )
+
+    page = AppTest.from_file(
+        page_path("pages/2_Journal_Entries.py"), default_timeout=30
+    )
+    page.session_state["journal_active_tab"] = "Reverse Entry"
+    page.run()
+    page.number_input(key="reversal_entry_id").set_value(entry.id).run()
+    page.checkbox(key="confirm_reversal_0").check().run()
+    page.button(key="post_reversal").click().run()
+
+    assert not page.exception, page.exception
+    success = " ".join(str(item.value) for item in page.success)
+    assert "Reversal posted as JE #" in success
+    assert page.checkbox(key="confirm_reversal_1").value is False
+
+    reversed_entries = JournalEntry.get_all(client_id)
+    assert any(
+        e.source_reference == f"Reversal of JE #{entry.id}"
+        for e in reversed_entries
+    )
+
+
+def test_firm_settings_date_format_widget_is_book_scoped(db, monkeypatch):
+    """The date-format widget key must belong to the open book: a bare key
+    survives a book switch and would save book A's format into book B."""
+    from database import connection as dbconn
+    from streamlit.delta_generator import DeltaGenerator
+    from utils.client_context import book_scoped_key
+
+    monkeypatch.setattr(DeltaGenerator, "page_link", lambda self, *a, **k: None)
+    key = book_scoped_key("firm_date_format", dbconn.DATABASE_PATH)
+    assert key != "firm_date_format"
+    assert key != book_scoped_key("firm_date_format", "/elsewhere/other.probooks")
+
+    firm = AppTest.from_file(
+        page_path("pages/12_Firm_Settings.py"), default_timeout=30
+    ).run()
+    assert not firm.exception
+    assert firm.selectbox(key=key).value

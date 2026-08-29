@@ -125,12 +125,6 @@ table.pb-statement a.pb-drill {
     text-underline-offset: 0.16rem;
 }
 table.pb-statement a.pb-drill:hover { color: #1f3a5f; }
-table.pb-statement a.pb-new-tab {
-    color: #6b7280;
-    font-size: 0.78em;
-    margin-left: 0.35rem;
-    text-decoration: none;
-}
 table.pb-statement td.note-cell { color: #6b7280; font-size: 0.85em; }
 table.pb-statement span.muted { color: #6b7280; font-size: 0.85em; margin-left: 0.5rem; }
 table.pb-statement tr.head td {
@@ -201,11 +195,12 @@ def financial_statement(rows, headers=None, formats=None):
         if href:
             safe_href = _html.escape(str(href), quote=True)
             safe_label = label_html
+            # Same-tab link only. A target='_blank' variant is not safe here:
+            # the desktop shell hands new-window navigations to the system
+            # browser, which would put the launch token in that browser's
+            # history and give it an authorized session to the open book.
             label_html = (
                 f"<a class='pb-drill' href='{safe_href}'>{safe_label}</a>"
-                f"<a class='pb-new-tab' href='{safe_href}' target='_blank' "
-                "rel='noopener noreferrer' aria-label='Open in a new tab' "
-                "title='Open in a new tab'>↗</a>"
             )
         if note:
             label_html += f"<span class='muted'>{_html.escape(str(note))}</span>"

@@ -63,7 +63,15 @@ try:
 except (TypeError, ValueError):
     route_client_id = None
 route_client = Client.get_by_id(route_client_id) if route_client_id else None
-if route_client and route_client.is_active:
+# Apply the URL's client once per URL value, mirroring the report-route guard
+# below. Reapplying on every rerun would override the user's own sidebar
+# selection for the rest of the session after a drill-down.
+if (
+    route_client
+    and route_client.is_active
+    and st.session_state.get("_reports_client_route") != route_client_value
+):
+    st.session_state["_reports_client_route"] = route_client_value
     st.session_state.selected_client_id = route_client_id
     st.session_state.client_selector = route_client_id
 
@@ -355,8 +363,8 @@ if selected_report == "Trial Balance":
 
         st.markdown(f"**As of {long_date(as_of_date)}**")
         st.caption(
-            "Click an account to open its ledger. Use ↗ to keep this report "
-            "open in a new tab."
+            "Click an account to open its ledger. Use your browser's Back "
+            "button to return to this report."
         )
         if compare_py:
             statement_rows = [
@@ -481,8 +489,8 @@ elif selected_report == "Income Statement":
         f"**{long_date(is_start)} to {long_date(is_end)}**"
     )
     st.caption(
-        "Click an account to open its ledger. Use ↗ to keep this report "
-        "open in a new tab."
+        "Click an account to open its ledger. Use your browser's Back "
+        "button to return to this report."
     )
 
     def _amounts(item):
@@ -636,8 +644,8 @@ elif selected_report == "Balance Sheet":
 
     st.markdown(f"**As of {long_date(bs_date)}**")
     st.caption(
-        "Click an account to open its ledger. Use ↗ to keep this report "
-        "open in a new tab."
+        "Click an account to open its ledger. Use your browser's Back "
+        "button to return to this report."
     )
     bs_gl_start = fiscal_year_bounds(
         bs_date, client.fiscal_year_end_month
@@ -781,8 +789,8 @@ elif selected_report == "Cash Flow":
 
     st.markdown(f"**{long_date(cf_start)} to {long_date(cf_end)}**")
     st.caption(
-        "Click a single-account line to open its ledger. Use ↗ to keep this "
-        "report open in a new tab."
+        "Click a single-account line to open its ledger. Use your browser's "
+        "Back button to return to this report."
     )
     accounts = Account.get_all(client_id, active_only=False)
     account_by_id = {account.id: account for account in accounts}
