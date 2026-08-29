@@ -557,3 +557,202 @@ def test_worksheet_does_not_leak_across_clients(client_id, accounts):
     by_num = {r.account_number: r for r in rows}
     assert by_num["1000"].adjusted_dr == 500  # not 500 + 9999
     assert sum(r.adjusted_dr for r in rows) == 500
+
+
+# ---- Earnings attribution (docs/EARNINGS-ATTRIBUTION.md) ----
+# Current Year Earnings must always equal the income statement's net income;
+# Beginning Balance and Closing P&L legs always feed Retained Earnings.
+
+
+def _synthetic(report, name):
+    """Balance of a synthetic equity line (0 when suppressed)."""
+    return sum(
+        e["balance"] for e in report["equity"]
+        if e["name"] == name and not e["account_number"]
+    )
+
+
+def test_earnings_attribution_clean_year_ties(client_id, accounts):
+    post_entry(client_id, date(2025, 3, 1), [
+        (accounts["cash"], 700, 0), (accounts["revenue"], 0, 700),
+    ])
+    post_entry(client_id, date(2026, 4, 1), [
+        (accounts["cash"], 1000, 0), (accounts["revenue"], 0, 1000),
+    ])
+
+    report = ReportGenerator.balance_sheet(client_id, date(2026, 12, 31))
+    income = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    assert report["total_assets"] == report["total_liabilities_equity"]
+    assert _synthetic(report, "Current Year Earnings") == income["net_income"] == 1000
+    assert _synthetic(report, "Retained Earnings") == 700
+
+
+def test_earnings_attribution_midyear_conversion(client_id, accounts):
+    """A conversion's Beginning Balance P&L legs are opening equity: they land
+    in Retained Earnings, and Current Year Earnings still ties to the income
+    statement (which excludes Beginning Balance entries)."""
+    post_entry(client_id, date(2026, 6, 30), [
+        (accounts["cash"], 5000, 0), (accounts["revenue"], 0, 5000),
+    ], entry_type="Beginning Balance")
+    post_entry(client_id, date(2026, 7, 15), [
+        (accounts["cash"], 1000, 0), (accounts["revenue"], 0, 1000),
+    ])
+
+    report = ReportGenerator.balance_sheet(client_id, date(2026, 12, 31))
+    income = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    assert report["total_assets"] == report["total_liabilities_equity"] == 6000
+    assert income["net_income"] == 1000
+    assert _synthetic(report, "Current Year Earnings") == 1000
+    assert _synthetic(report, "Retained Earnings") == 5000
+
+
+def test_earnings_attribution_closing_dated_after_year_end(client_id, accounts):
+    """A closing entry posted once the return is done (dated in the next year)
+    cancels the year it closes -- no duplicated Retained Earnings line, no
+    negative Current Year Earnings."""
+    retained = Account(client_id=client_id, account_number="3900",
+                       name="Retained Earnings", type="Equity")
+    retained.save()
+    post_entry(client_id, date(2026, 5, 1), [
+        (accounts["cash"], 1000, 0), (accounts["revenue"], 0, 1000),
+    ])
+    post_entry(client_id, date(2027, 1, 1), [
+        (accounts["revenue"], 1000, 0), (retained.id, 0, 1000),
+    ], entry_type="Closing")
+    post_entry(client_id, date(2027, 8, 1), [
+        (accounts["cash"], 500, 0), (accounts["revenue"], 0, 500),
+    ])
+
+    report = ReportGenerator.balance_sheet(client_id, date(2027, 12, 31))
+    income = ReportGenerator.income_statement(
+        client_id, date(2027, 1, 1), date(2027, 12, 31)
+    )
+    assert report["total_assets"] == report["total_liabilities_equity"] == 1500
+    assert income["net_income"] == 500
+    assert _synthetic(report, "Current Year Earnings") == 500
+    assert _synthetic(report, "Retained Earnings") == 0  # closed year cancels
+    real_re = next(e for e in report["equity"] if e["account_number"] == "3900")
+    assert real_re["balance"] == 1000
+    # Exactly one visible Retained Earnings line: the real account.
+    visible = [e for e in report["equity"] if e["name"] == "Retained Earnings"]
+    assert len(visible) == 1 and visible[0]["account_number"] == "3900"
+
+
+def test_earnings_attribution_closing_dated_in_year(client_id, accounts):
+    """Statements stay pre-closing-style within the open year: Current Year
+    Earnings shows the full year and the synthetic Retained Earnings line
+    carries the close's offset beside the real equity account."""
+    retained = Account(client_id=client_id, account_number="3900",
+                       name="Retained Earnings", type="Equity")
+    retained.save()
+    post_entry(client_id, date(2026, 5, 1), [
+        (accounts["cash"], 1000, 0), (accounts["revenue"], 0, 1000),
+    ])
+    post_entry(client_id, date(2026, 12, 31), [
+        (accounts["revenue"], 1000, 0), (retained.id, 0, 1000),
+    ], entry_type="Closing")
+
+    report = ReportGenerator.balance_sheet(client_id, date(2026, 12, 31))
+    income = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    assert report["total_assets"] == report["total_liabilities_equity"] == 1000
+    assert income["net_income"] == 1000
+    assert _synthetic(report, "Current Year Earnings") == 1000
+    assert _synthetic(report, "Retained Earnings") == -1000
+    real_re = next(e for e in report["equity"] if e["account_number"] == "3900")
+    assert real_re["balance"] == 1000
+
+
+def test_earnings_attribution_non_calendar_fiscal_year(db):
+    """June fiscal year end: the fiscal-year window, not the calendar year,
+    splits Retained Earnings from Current Year Earnings."""
+    from models.client import Client
+
+    june_client = Client(
+        name="June FYE Co", entity_type="S-Corp", fiscal_year_end_month=6
+    ).save(seed_accounts=False)
+    cash = Account(client_id=june_client, account_number="1000",
+                   name="Cash", type="Asset")
+    cash.save()
+    revenue = Account(client_id=june_client, account_number="4000",
+                      name="Revenue", type="Revenue")
+    revenue.save()
+
+    # FY ending 2026-06-30 (prior year), conversion BB, and FY2027 activity.
+    post_entry(june_client, date(2026, 5, 1), [
+        (cash.id, 300, 0), (revenue.id, 0, 300),
+    ])
+    post_entry(june_client, date(2026, 9, 30), [
+        (cash.id, 2000, 0), (revenue.id, 0, 2000),
+    ], entry_type="Beginning Balance")
+    post_entry(june_client, date(2026, 10, 15), [
+        (cash.id, 400, 0), (revenue.id, 0, 400),
+    ])
+
+    report = ReportGenerator.balance_sheet(june_client, date(2027, 6, 30))
+    income = ReportGenerator.income_statement(
+        june_client, date(2026, 7, 1), date(2027, 6, 30)
+    )
+    assert report["total_assets"] == report["total_liabilities_equity"] == 2700
+    assert income["net_income"] == 400
+    assert _synthetic(report, "Current Year Earnings") == 400
+    assert _synthetic(report, "Retained Earnings") == 300 + 2000
+
+
+def test_earnings_attribution_survives_reversing_a_closing_entry(client_id, accounts):
+    """Reversing a closing entry restores the pre-closing state exactly: the
+    reversal keeps the Closing type, so the pair nets to zero inside Retained
+    Earnings instead of double-counting income as ordinary activity."""
+    from models.journal_entry import JournalEntry
+
+    retained = Account(client_id=client_id, account_number="3900",
+                       name="Retained Earnings", type="Equity")
+    retained.save()
+    post_entry(client_id, date(2026, 5, 1), [
+        (accounts["cash"], 1000, 0), (accounts["revenue"], 0, 1000),
+    ])
+    closing = post_entry(client_id, date(2026, 12, 31), [
+        (accounts["revenue"], 1000, 0), (retained.id, 0, 1000),
+    ], entry_type="Closing")
+    reversal = JournalEntry.reverse(closing.id, client_id, date(2026, 12, 31))
+    assert reversal.entry_type == "Closing"
+
+    report = ReportGenerator.balance_sheet(client_id, date(2026, 12, 31))
+    income = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    assert income["net_income"] == 1000  # not doubled by the reversal
+    assert _synthetic(report, "Current Year Earnings") == 1000
+    assert _synthetic(report, "Retained Earnings") == 0
+    # The real account netted to zero, so the balance sheet drops the line.
+    assert not [e for e in report["equity"] if e["account_number"] == "3900"]
+    assert report["total_assets"] == report["total_liabilities_equity"] == 1000
+
+
+def test_earnings_attribution_survives_reversing_a_beginning_balance(client_id, accounts):
+    """A Beginning Balance entry and its reversal net to zero everywhere --
+    no phantom negative income in the current year."""
+    from models.journal_entry import JournalEntry
+
+    bb = post_entry(client_id, date(2026, 6, 30), [
+        (accounts["cash"], 5000, 0), (accounts["revenue"], 0, 5000),
+    ], entry_type="Beginning Balance")
+    post_entry(client_id, date(2026, 7, 15), [
+        (accounts["cash"], 1000, 0), (accounts["revenue"], 0, 1000),
+    ])
+    reversal = JournalEntry.reverse(bb.id, client_id, date(2026, 6, 30))
+    assert reversal.entry_type == "Beginning Balance"
+
+    report = ReportGenerator.balance_sheet(client_id, date(2026, 12, 31))
+    income = ReportGenerator.income_statement(
+        client_id, date(2026, 1, 1), date(2026, 12, 31)
+    )
+    assert income["net_income"] == 1000
+    assert _synthetic(report, "Current Year Earnings") == 1000
+    assert _synthetic(report, "Retained Earnings") == 0
+    assert report["total_assets"] == report["total_liabilities_equity"] == 1000

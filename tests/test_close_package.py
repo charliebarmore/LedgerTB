@@ -688,6 +688,7 @@ def test_pdf_package_contains_every_section(booked_period, accounts):
         assert "240.00" in text          # total revenue
         assert "190.00" in text          # net income
         assert "Balance sheet is in balance." in text
+        assert "Net income ties to balance sheet earnings" in text
         assert "CASH AT BEGINNING OF PERIOD" in text
         assert "TOTALS" in text
         assert len(doc) >= 6
@@ -744,3 +745,45 @@ def test_pdf_and_excel_can_share_one_captured_snapshot(
     )
     assert xlsx.read().startswith(b"PK")
     assert pdf.read().startswith(b"%PDF")
+
+
+def test_summary_ties_net_income_to_balance_sheet_earnings(booked_period, accounts):
+    """Full-fiscal-year packages assert income-statement net income equals the
+    balance sheet's Current Year Earnings (docs/EARNINGS-ATTRIBUTION.md) --
+    including with a mid-year conversion Beginning Balance in the book."""
+    client_id = booked_period
+    post_entry(client_id, date(2026, 6, 30), [
+        (accounts["cash"], 5000, 0), (accounts["revenue"], 0, 5000),
+    ], entry_type="Beginning Balance")
+    full_year = (date(2026, 1, 1), date(2026, 12, 31))
+
+    tb_rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *full_year)
+    package = build_close_package(client_id, "Test Co", *full_year, tb_rows)
+    wb = openpyxl.load_workbook(BytesIO(package.read()))
+    summary = wb["Summary"]
+    cells = {summary.cell(row=i, column=1).value: summary.cell(row=i, column=2).value
+             for i in range(1, summary.max_row + 1)}
+    assert cells["Net income ties to balance sheet earnings"] == "YES"
+
+    # Any fiscal-year-to-date period ties: Q1 starts at the fiscal year.
+    tb_rows_q1, _ = ReportGenerator.trial_balance_worksheet(client_id, *Q1)
+    q1_package = build_close_package(client_id, "Test Co", *Q1, tb_rows_q1)
+    q1_summary = openpyxl.load_workbook(BytesIO(q1_package.read()))["Summary"]
+    q1_cells = {
+        q1_summary.cell(row=i, column=1).value: q1_summary.cell(row=i, column=2).value
+        for i in range(1, q1_summary.max_row + 1)
+    }
+    assert q1_cells["Net income ties to balance sheet earnings"] == "YES"
+
+    # A period that does not start at the fiscal year reports the comparison
+    # as not applicable rather than failing a tie that cannot hold for it.
+    feb_mar = (date(2026, 2, 1), date(2026, 3, 31))
+    tb_rows_fm, _ = ReportGenerator.trial_balance_worksheet(client_id, *feb_mar)
+    fm_package = build_close_package(client_id, "Test Co", *feb_mar, tb_rows_fm)
+    fm_summary = openpyxl.load_workbook(BytesIO(fm_package.read()))["Summary"]
+    fm_cells = {
+        fm_summary.cell(row=i, column=1).value: fm_summary.cell(row=i, column=2).value
+        for i in range(1, fm_summary.max_row + 1)
+    }
+    assert fm_cells["Net income ties to balance sheet earnings"] == \
+        "Not a fiscal year-to-date period - not compared"

@@ -316,15 +316,16 @@ def reverse_import_batch(
             )
             if cursor.rowcount != 1:
                 raise ValueError("An import row changed during reversal. Nothing was changed.")
+            # Record only the columns the UPDATE actually set: the stored
+            # status column is untouched — "Reversed" is derived from
+            # superseded_by_batch at read time (models/transaction.py).
             AuditLog.write(
                 cursor, client_id, "imported_transactions", row["id"], "UPDATE",
                 old_values={
-                    "status": row["status"],
                     "superseded_by_batch": None,
                     "reversal_journal_entry_id": None,
                 },
                 new_values={
-                    "status": "Reversed",
                     "superseded_by_batch": replacement_batch,
                     "reversal_journal_entry_id": reversal_entry_id,
                     "reason": reason,

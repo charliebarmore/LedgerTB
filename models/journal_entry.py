@@ -609,6 +609,17 @@ class JournalEntry:
                     )
 
                 cursor.execute(
+                    "SELECT 1 FROM imported_transactions "
+                    "WHERE reversal_journal_entry_id = ? LIMIT 1",
+                    (entry_id,),
+                )
+                if cursor.fetchone():
+                    raise ValueError(
+                        "This entry reversed an imported batch, and the import "
+                        "history points to it. It must stay in the books."
+                    )
+
+                cursor.execute(
                     "SELECT id FROM draft_entries "
                     "WHERE original_entry_id = ? ORDER BY id LIMIT 1",
                     (entry_id,),
@@ -660,12 +671,18 @@ class JournalEntry:
                 (entry_id,),
             )
             source_lines = cursor.fetchall()
+            # The reversal keeps the source entry's accounting type. Statements
+            # bucket Beginning Balance and Closing entries specially
+            # (docs/EARNINGS-ATTRIBUTION.md), so a Regular-typed reversal would
+            # land on the wrong side and double-count income instead of
+            # netting the pair to zero; an Adjusting reversal likewise belongs
+            # in the worksheet's AJE columns with the entry it reverses.
             reversal = JournalEntry(
                 client_id=client_id,
                 entry_date=reversal_date,
                 description=f"Reversal: {row['description'] or f'Journal Entry #{entry_id}'}"[:200],
                 source_reference=reference,
-                entry_type="Regular",
+                entry_type=row["entry_type"] or "Regular",
                 lines=[
                     JournalEntryLine(
                         account_id=line["account_id"],

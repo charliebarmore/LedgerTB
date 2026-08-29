@@ -88,9 +88,52 @@
   person doing the accounting work.</p>
 
   <article class="changelog">
+    <section class="release" id="v1-6-3">
+      <div class="release-head">
+        <h2>LedgerTB v1.6.3 <span class="release-label">Latest</span></h2>
+        <span class="release-date">August 29, 2026</span>
+      </div>
+      <p>This release makes the balance sheet, income statement, Close Map,
+      and close package agree with each other in every case, including books
+      converted mid-year and books with posted closing entries. It does not
+      change posted entries or require a database migration.</p>
+      <h3>Statements that always agree</h3>
+      <ul>
+        <li>Current Year Earnings on the balance sheet now always equals the
+        income statement's net income. Before this release, a mid-year
+        conversion whose opening balances included income, or a closing entry
+        posted after year end, could make the two statements disagree while
+        the balance check still passed.</li>
+        <li>Opening-balance income now appears in Retained Earnings, where
+        prior-period earnings belong. A closing entry posted after year end
+        no longer produces a duplicated Retained Earnings line or a negative
+        Current Year Earnings.</li>
+        <li>Close Map revenue and expense balances now show the fiscal
+        year's activity, the same figure the income statement reports,
+        instead of a running total across all years. Balance-sheet accounts
+        still show their full balance. A revenue or expense balance signed
+        off before this release may show as changed; the new figure is the
+        corrected one, so re-review it.</li>
+        <li>The close package Summary now includes a tie-out line confirming
+        that net income agrees with the balance sheet's earnings, in both the
+        Excel and PDF versions.</li>
+      </ul>
+      <h3>Smaller fixes</h3>
+      <ul>
+        <li>Chart of Accounts now shows a visible notice when accounts need a
+        statement grouping, naming them, instead of only a collapsed review
+        section. This matters after upgrading older books whose equity
+        accounts used the retired generic "Capital" grouping.</li>
+        <li>Deleting a journal entry that reversed an imported batch is now
+        refused with a plain explanation instead of a technical error.</li>
+      </ul>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.6.3">Detailed release notes</a> ·
+      <a href="https://github.com/charliebarmore/LedgerTB/compare/v1.6.2...v1.6.3">Source comparison</a></p>
+    </section>
+
     <section class="release" id="v1-6-2">
       <div class="release-head">
-        <h2>LedgerTB v1.6.2 <span class="release-label">Latest</span></h2>
+        <h2>LedgerTB v1.6.2</h2>
         <span class="release-date">August 29, 2026</span>
       </div>
       <p>This hotfix corrects four problems found in review of the v1.6.0 and

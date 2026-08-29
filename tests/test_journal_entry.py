@@ -113,3 +113,39 @@ def test_entry_list_filters_by_search_and_account(client_id, accounts):
     )
     assert summary["total_count"] == 1
     assert summary["total_debits"] == 1200.0
+
+
+def test_delete_reversal_entry_referenced_by_import_history_is_blocked(client_id, accounts):
+    """A reversal the import history points to must refuse deletion with a
+    plain-language message, not surface a raw foreign-key IntegrityError."""
+    original = post_entry(client_id, date(2025, 5, 1), [
+        (accounts["cash"], 100, 0),
+        (accounts["revenue"], 0, 100),
+    ])
+    reversal = post_entry(client_id, date(2025, 6, 1), [
+        (accounts["revenue"], 100, 0),
+        (accounts["cash"], 0, 100),
+    ])
+    txn = ImportedTransaction(
+        client_id=client_id,
+        transaction_date=date(2025, 5, 1),
+        description="ACME DEPOSIT",
+        amount=100.0,
+        bank_account_id=accounts["cash"],
+        status="Posted",
+        journal_entry_id=original.id,
+    )
+    txn.save()
+    from database.connection import get_connection
+
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE imported_transactions SET reversal_journal_entry_id = ? WHERE id = ?",
+            (reversal.id, txn.id),
+        )
+        conn.commit()
+
+    with pytest.raises(ValueError, match="must stay in the books"):
+        JournalEntry.delete(reversal.id)
+
+    assert JournalEntry.get_by_id(reversal.id) is not None
