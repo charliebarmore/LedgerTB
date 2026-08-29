@@ -60,7 +60,7 @@ def test_report_date_presets_cover_fiscal_and_calendar_periods():
     )
 
 
-def test_financial_statement_renders_safe_inline_and_new_tab_links(monkeypatch):
+def test_financial_statement_renders_safe_same_tab_links_only(monkeypatch):
     from utils import ui
 
     rendered = []
@@ -78,7 +78,11 @@ def test_financial_statement_renders_safe_inline_and_new_tab_links(monkeypatch):
 
     html = rendered[0]
     assert "class='pb-drill'" in html
-    assert "target='_blank'" in html
+    # Never a new-tab variant: the desktop shell hands target='_blank'
+    # navigations to the system browser, which would record the launch token
+    # in that browser's history and give it an authorized session.
+    assert "target='_blank'" not in html
+    assert "pb-new-tab" not in html
     assert "user-select: text" in html
     assert "Cash &lt;Operating&gt;" in html
     assert "account_id=7" in html

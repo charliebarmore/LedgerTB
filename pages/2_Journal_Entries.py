@@ -117,7 +117,7 @@ if journal_scope.changed:
         "journal_page",
         "reversal_entry_id",
         "reversal_date",
-        "confirm_reversal",
+        "reversal_result",
         "draft_result",
         "journal_return_report",
     ):
@@ -131,6 +131,11 @@ if journal_scope.changed:
             "cancel_correction_",
         )):
             del st.session_state[key]
+    # A new key generation is the only checkbox reset the frontend honors;
+    # popping the keyed value would let the browser re-impose it.
+    st.session_state["reversal_confirm_gen"] = (
+        st.session_state.get("reversal_confirm_gen", 0) + 1
+    )
 
 journal_intent = pop_client_intent(
     st.session_state, "journal", client_id, dbconn.DATABASE_PATH
@@ -894,6 +899,10 @@ elif active_view == "Reverse Entry":
         "so the accounting history and audit trail are preserved."
     )
 
+    _reversal_msg = st.session_state.pop("reversal_result", None)
+    if _reversal_msg:
+        st.success(_reversal_msg)
+
     reversal_entry_id = st.number_input(
         "Original journal entry #", min_value=1, value=1, step=1,
         key="reversal_entry_id",
@@ -932,9 +941,13 @@ elif active_view == "Reverse Entry":
             "Reversal date", value=date.today(), key="reversal_date",
             format=date_format,
         )
+        # The confirm checkbox key carries a generation nonce: a fresh key is
+        # the only reset the frontend honors, and writing the widget's own key
+        # after instantiation raises mid-render.
+        confirm_gen = st.session_state.get("reversal_confirm_gen", 0)
         confirmed = st.checkbox(
             "I understand this posts a new entry and does not delete the original.",
-            key="confirm_reversal",
+            key=f"confirm_reversal_{confirm_gen}",
         )
         if st.button(
             "Post reversal", type="primary",
@@ -943,8 +956,11 @@ elif active_view == "Reverse Entry":
         ):
             try:
                 reversal = JournalEntry.reverse(original.id, client_id, reversal_date)
-                st.success(f"Reversal posted as JE #{reversal.id}.")
-                st.session_state.confirm_reversal = False
+                st.session_state["reversal_confirm_gen"] = confirm_gen + 1
+                st.session_state["reversal_result"] = (
+                    f"Reversal posted as JE #{reversal.id}."
+                )
+                st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
 

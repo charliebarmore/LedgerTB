@@ -22,6 +22,8 @@ from services.preferences import (
     get_preferences,
     save_date_format,
 )
+from database import connection as dbconn
+from utils.client_context import book_scoped_key
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
@@ -47,7 +49,7 @@ date_format = st.selectbox(
     options=date_format_options,
     index=date_format_options.index(preferences.date_format),
     format_func=lambda value: DATE_FORMAT_LABELS[value],
-    key="firm_date_format",
+    key=book_scoped_key("firm_date_format", dbconn.DATABASE_PATH),
 )
 if st.button("Save display preferences", key="save_display_preferences"):
     save_date_format(date_format)
