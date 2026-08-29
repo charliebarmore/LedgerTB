@@ -4,6 +4,7 @@ import streamlit as st
 from config import APP_VERSION
 from utils.client_selector import apply_sidebar_style
 from utils import icons
+from utils.ui import external_link_button
 
 
 st.set_page_config(
@@ -78,19 +79,19 @@ st.markdown(
 st.divider()
 links = st.columns(3)
 with links[0]:
-    st.link_button(
+    external_link_button(
         "Read the full Disclaimer",
         "https://ledgertb.com/disclaimer.html",
         width="stretch",
     )
 with links[1]:
-    st.link_button(
+    external_link_button(
         "Privacy & Data Practices",
         "https://ledgertb.com/privacy.html",
         width="stretch",
     )
 with links[2]:
-    st.link_button(
+    external_link_button(
         "Website and Distribution Terms",
         "https://ledgertb.com/terms.html",
         width="stretch",

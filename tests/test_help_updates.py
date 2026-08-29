@@ -4,6 +4,7 @@ import ast
 from pathlib import Path
 
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 from streamlit.testing.v1 import AppTest
 
 from tests.conftest import page_path
@@ -15,8 +16,11 @@ PAGE = ROOT / "pages" / "16_Help_and_Updates.py"
 
 
 def test_help_page_requires_no_book_and_shows_local_version(monkeypatch):
+    # Patch the class, never the st.sidebar instance: monkeypatch's undo of an
+    # instance patch pins a bound method of the ORIGINAL function onto the
+    # module-level singleton, and later tests' class patches stop reaching it.
     monkeypatch.setattr(st, "page_link", lambda *args, **kwargs: None)
-    monkeypatch.setattr(st.sidebar, "page_link", lambda *args, **kwargs: None)
+    monkeypatch.setattr(DeltaGenerator, "page_link", lambda self, *a, **k: None)
     at = AppTest.from_file(page_path(PAGE.relative_to(ROOT)), default_timeout=30).run()
 
     assert not at.exception
@@ -42,7 +46,10 @@ def test_help_page_uses_links_without_network_client_imports():
     )
 
     assert imported_roots.isdisjoint({"requests", "httpx", "urllib", "socket"})
-    assert "st.link_button" in source
+    # External links open the system browser server-side; a rendered link
+    # would route through the desktop webview (see utils.ui.external_link_button).
+    assert "external_link_button" in source
+    assert "st.link_button" not in source
     assert "releases/latest" in source
     assert "template=bug_report.yml" in source
     assert "template=feature_request.yml" in source

@@ -92,6 +92,22 @@ def view_switcher(options, key, label="View"):
 _PARKING_HINTS = ("ask my accountant", "uncategorized", "suspense")
 
 
+def external_link_button(label, url, *, key=None, **button_kwargs):
+    """A button that opens an external site in the system default browser.
+
+    In the desktop shell, a rendered link (st.link_button, target='_blank')
+    would route through the embedded webview, which never hands navigations
+    to the system browser — the app's own URLs carry the launch token, so
+    that door stays closed (see desktop.py). LedgerTB's server runs on the
+    user's own machine, so opening the browser server-side reaches the same
+    screen without the URL ever entering the webview's navigation path.
+    """
+    if st.button(label, key=key, **button_kwargs):
+        import webbrowser
+
+        webbrowser.open(url)
+
+
 def is_parking_account(label):
     """Whether an account label is a park-it-for-review bucket rather than a
     real category — "Ask My Accountant", "Uncategorized", "Suspense". A row

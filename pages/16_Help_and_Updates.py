@@ -5,6 +5,7 @@ import streamlit as st
 from config import APP_VERSION
 from utils.client_selector import apply_sidebar_style
 from utils import icons
+from utils.ui import external_link_button
 
 
 RELEASE_URL = "https://github.com/charliebarmore/LedgerTB/releases/latest"
@@ -42,7 +43,7 @@ st.markdown(
     "Open the latest release page to compare its version with the installed "
     "version shown above."
 )
-st.link_button(
+external_link_button(
     "View latest release",
     RELEASE_URL,
     type="primary",
@@ -68,14 +69,14 @@ st.markdown(
 
 feedback_columns = st.columns(2)
 with feedback_columns[0]:
-    st.link_button(
+    external_link_button(
         "Report a bug",
         BUG_URL,
         icon=":material/bug_report:",
         width="stretch",
     )
 with feedback_columns[1]:
-    st.link_button(
+    external_link_button(
         "Request a feature",
         FEATURE_URL,
         icon=":material/lightbulb:",
@@ -88,7 +89,7 @@ st.warning(
     "the problem with synthetic data. Do not report a suspected security "
     "vulnerability in a public issue."
 )
-st.link_button(
+external_link_button(
     "Private security-report instructions",
     SECURITY_URL,
     icon=":material/security:",

@@ -151,6 +151,12 @@ def main() -> int:
     # present -- lets the server-start logic be smoke-tested headlessly.
     import webview
 
+    # Never hand a navigation to the system browser: app URLs carry the launch
+    # token, and a new-window request (a modifier-click on any in-app link)
+    # would land that token in the browser's history. External links in the
+    # app open the browser server-side instead (utils.ui.external_link_button).
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
+
     geom = _window_geometry()
     win_x, win_y = geom.pop("x", None), geom.pop("y", None)
     window = webview.create_window(
