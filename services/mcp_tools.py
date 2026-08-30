@@ -751,8 +751,8 @@ def propose_correction(client_id: int, original_entry_id: int,
 
 
 def list_drafts(client_id: int, status: str = "pending") -> list:
-    """Draft entries and their review status ('pending', or any status via
-    'all')."""
+    """Draft entries, accounting type, and review status ('pending', or any
+    status via 'all')."""
     from database.connection import get_cursor
 
     _require_client(client_id)
@@ -770,6 +770,7 @@ def list_drafts(client_id: int, status: str = "pending") -> list:
             "draft_id": r["id"],
             "status": r["status"],
             "entry_date": r["entry_date"],
+            "entry_type": r["entry_type"],
             "description": r["description"],
             "rationale": r["rationale"] or "",
             "original_entry_id": r["original_entry_id"],

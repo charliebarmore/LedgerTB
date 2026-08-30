@@ -290,6 +290,8 @@ def test_beginning_balance_draft_round_trips(db, client_id, accounts):
                DraftLine(account_number="3000", credit_cents=500_00)],
     )
     draft_id = draft.save()
+    listed = mcp_tools.list_drafts(client_id)
+    assert listed[0]["entry_type"] == "Beginning Balance"
     entry_id = DraftEntry.get_by_id(draft_id, client_id).approve()
     assert JournalEntry.get_by_id(entry_id).entry_type == "Beginning Balance"
 

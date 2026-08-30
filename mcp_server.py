@@ -406,7 +406,8 @@ def propose_correction(client_id: int, original_entry_id: int,
 @server.tool()
 def list_drafts(client_id: int, status: str = "pending") -> list:
     """Draft entries this server has filed and their review status
-    ("pending", "approved", "rejected", or "all")."""
+    ("pending", "approved", "rejected", or "all"). Each result includes the
+    stored entry_type; clients must not guess a missing accounting type."""
     _require_level("read")
     return mcp_tools.list_drafts(client_id, status)
 
