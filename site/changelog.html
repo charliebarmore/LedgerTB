@@ -88,9 +88,51 @@
   person doing the accounting work.</p>
 
   <article class="changelog">
+    <section class="release" id="v1-7-0">
+      <div class="release-head">
+        <h2>LedgerTB v1.7.0 <span class="release-label">Latest</span></h2>
+        <span class="release-date">August 30, 2026</span>
+      </div>
+      <p>This release adds reusable journal-entry templates and a recurring
+      workflow for fixed monthly, quarterly, and annual entries. Scheduled
+      entries are always prepared as drafts for human review; LedgerTB never
+      posts them automatically.</p>
+      <h3>Templates and schedules</h3>
+      <ul>
+        <li>Save a balanced New Entry form as a reusable template, or create
+        and maintain templates in Journal Entries under Templates &amp;
+        recurring. Using a template fills the normal entry form without
+        limiting changes before posting.</li>
+        <li>Add a monthly, quarterly, or annual schedule with start and end
+        dates and a period-start, period-end, or monthly day-of-month posting
+        rule. Schedules can be paused without losing their history.</li>
+        <li>Review what is due through a selected date, choose the periods to
+        prepare, and generate them into the existing Drafts inbox. Nothing
+        runs in the background or bypasses approval.</li>
+      </ul>
+      <h3>Review, reversals, and safeguards</h3>
+      <ul>
+        <li>A period-end schedule can prepare a next-day reversal draft after
+        its primary entry is approved. The reversal requires its own approval
+        and preserves the original entry type.</li>
+        <li>Rejected primary and reversal drafts can be regenerated explicitly
+        while their earlier generations remain in history. Periods can also be
+        skipped with a reason and restored with Undo skip while the fiscal year
+        remains open.</li>
+        <li>Generating the same period again is safe. Changing a schedule's
+        frequency cannot reopen dates already handled under the old frequency,
+        and closed periods or inactive accounts remain blocked.</li>
+        <li>Every Adjusting draft receives the next fiscal-year AJE reference
+        when a person approves it, whether it came from a recurring schedule,
+        an assistant proposal, or another draft workflow.</li>
+      </ul>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.7.0">Detailed release notes</a> ·
+      <a href="https://github.com/charliebarmore/LedgerTB/compare/v1.6.3...v1.7.0">Source comparison</a></p>
+    </section>
+
     <section class="release" id="v1-6-3">
       <div class="release-head">
-        <h2>LedgerTB v1.6.3 <span class="release-label">Latest</span></h2>
+        <h2>LedgerTB v1.6.3</h2>
         <span class="release-date">August 29, 2026</span>
       </div>
       <p>This release makes the balance sheet, income statement, Close Map,
