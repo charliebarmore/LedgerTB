@@ -412,6 +412,11 @@ def require_unlock():
     # and the server must not be reachable from the network.
     _require_local_session()
     if not dbconn.ENCRYPTION_AVAILABLE:
+        from config import UNENCRYPTED_REFUSAL_MESSAGE, allow_unencrypted
+
+        if not allow_unencrypted():
+            st.error(UNENCRYPTED_REFUSAL_MESSAGE)
+            st.stop()
         if database_state(dbconn.DATABASE_PATH) == "encrypted":
             st.markdown(f"## 🔒 {APP_NAME}")
             st.error(

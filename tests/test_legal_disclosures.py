@@ -45,7 +45,7 @@ def test_repository_disclosures_cover_the_product_risks():
 
     for phrase in (
         "no Ledger Labs cloud account or hosted bookkeeping database",
-        "source build without SQLCipher warns",
+        "source build without SQLCipher refuses",
         "does not include product analytics",
         "MCP client you connect",
         "static site hosted by Cloudflare Pages",

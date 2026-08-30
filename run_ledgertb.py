@@ -349,6 +349,12 @@ def _selfcheck() -> int:
     bundle didn't drop anything the app needs. Run: LEDGERTB_MODE=selfcheck <bin>"""
     os.chdir(BUNDLE)
     sys.path.insert(0, str(BUNDLE))
+    from config import UNENCRYPTED_REFUSAL_MESSAGE, allow_unencrypted
+    from database import connection as dbconn
+
+    if not dbconn.ENCRYPTION_AVAILABLE and not allow_unencrypted():
+        print(UNENCRYPTED_REFUSAL_MESSAGE)
+        return 1
     # Import database.connection before config to mirror app.py's real cold-start
     # path and catch package-level circular imports in the frozen bundle.
     # NB: submodules must be listed explicitly — importing a package does NOT

@@ -522,6 +522,11 @@ def integrity_sweep(client_id: int, start: str, end: str) -> dict:
 
 
 def main() -> int:
+    from config import UNENCRYPTED_REFUSAL_MESSAGE, allow_unencrypted
+
+    if not dbconn.ENCRYPTION_AVAILABLE and not allow_unencrypted():
+        print(UNENCRYPTED_REFUSAL_MESSAGE, file=sys.stderr)
+        return 1
     if not _unlock_from_vault():
         print(
             "LedgerTB MCP: assistant access is not enabled. Open LedgerTB -> "

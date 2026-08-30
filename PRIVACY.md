@@ -10,8 +10,9 @@ by Ledger Labs LLC. It does not govern third-party websites or services.
 
 - LedgerTB has no Ledger Labs cloud account or hosted bookkeeping database.
 - Official release builds store books in a SQLCipher-encrypted database at a
-  location you choose. A source build without SQLCipher warns that it is
-  operating unencrypted and should not be used for real books.
+  location you choose. A source build without SQLCipher refuses to open books
+  unless `LEDGERTB_ALLOW_UNENCRYPTED=1` explicitly enables an unencrypted demo
+  book, which should not be used for real books.
 - Ledger Labs LLC does not receive your book merely because you use LedgerTB.
 - LedgerTB does not include product analytics, advertising trackers, or usage
   telemetry controlled by Ledger Labs LLC.
