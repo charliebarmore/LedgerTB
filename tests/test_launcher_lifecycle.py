@@ -1,10 +1,17 @@
 import os
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 
 import run_ledgertb
+
+
+def test_desktop_shell_allows_downloads():
+    source = (Path(__file__).parents[1] / "desktop.py").read_text()
+
+    assert 'webview.settings["ALLOW_DOWNLOADS"] = True' in source
 
 
 def test_command_line_selfcheck_cannot_launch_a_second_app(monkeypatch):

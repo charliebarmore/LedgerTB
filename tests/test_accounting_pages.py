@@ -749,6 +749,49 @@ def test_report_url_drilldown_and_browser_back_restore_source(
     assert page.date_input(key="is_end__reports_g0").value == date(2026, 2, 28)
 
 
+def test_report_tab_clears_stale_drilldown_route(
+    client_id, accounts, monkeypatch
+):
+    _select_client(monkeypatch, client_id)
+    route = {
+        "t": "launch-secret",
+        "report": "General Ledger",
+        "client_id": str(client_id),
+        "account_id": str(accounts["cash"]),
+        "return_report": "Income Statement",
+    }
+    page = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    page.query_params.update(route)
+    page.run()
+
+    assert not page.exception
+    assert page.session_state["active_report"] == "General Ledger"
+    return_key = "return_route__reports_g0"
+    assert page.session_state[return_key]["report"] == "Income Statement"
+
+    page.session_state["active_report"] = "Income Statement"
+    page.run()
+
+    assert not page.exception
+    assert page.session_state["active_report"] == "Income Statement"
+    assert "report" not in page.query_params
+    assert "account_id" not in page.query_params
+    assert page.query_params["t"] == ["launch-secret"]
+    assert return_key not in page.session_state
+
+    reloaded = AppTest.from_file(
+        page_path("pages/5_Reports.py"), default_timeout=30
+    )
+    reloaded.query_params.update(dict(page.query_params))
+    reloaded.session_state["active_report"] = "Income Statement"
+    reloaded.run()
+
+    assert not reloaded.exception
+    assert reloaded.session_state["active_report"] == "Income Statement"
+
+
 def test_year_close_checklist_page_renders(client_id, accounts, monkeypatch):
     _select_client(monkeypatch, client_id)
     worksheet = AppTest.from_file(page_path("pages/1_Trial_Balance_Worksheet.py"), default_timeout=30

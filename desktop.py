@@ -156,6 +156,9 @@ def main() -> int:
     # would land that token in the browser's history. External links in the
     # app open the browser server-side instead (utils.ui.external_link_button).
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
+    # Otherwise downloads become cancelled navigations in the embedded view,
+    # disturbing the Streamlit session instead of saving the requested file.
+    webview.settings["ALLOW_DOWNLOADS"] = True
 
     geom = _window_geometry()
     win_x, win_y = geom.pop("x", None), geom.pop("y", None)
