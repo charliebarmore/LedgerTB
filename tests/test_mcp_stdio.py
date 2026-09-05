@@ -83,11 +83,17 @@ def test_stdio_draft_types_permissions_reconnect_and_revocation(client_id, accou
                         (json.loads(block.text) for block in result.content)} == {
                     ("Adjusting", "approved"), ("Regular", "rejected"), ("Beginning Balance", "pending"),
                 }
+                report = await session.call_tool("trial_balance", {"client_id": client_id})
+                assert not report.is_error
                 config["key"] = None
                 save_config()
                 denied = await session.call_tool("trial_balance", {"client_id": client_id})
                 assert denied.is_error
-                assert "not enabled" in denied.content[0].text
+                # SDK versions differ in whether they expose or mask internal
+                # exception wording. The same working tool must deny access
+                # immediately after revocation without returning its report.
+                assert denied.structured_content is None
+                assert denied.content != report.content
 
     asyncio.run(asyncio.wait_for(exercise(), timeout=60))
     proposals = [log for log in AuditLog.get_all(client_id)

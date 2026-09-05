@@ -136,11 +136,21 @@ def main():
                 wait("Recurring schedule")
                 settled()
                 command("find", "text", "Recurring schedule", "click")
-                command("uncheck", ref("checkbox", "Create a reversal draft after the period-end entry posts"))
+                reversal_label = "Create a reversal draft after the period-end entry posts"
+                command("wait", "--fn", "Array.from(document.querySelectorAll('input[type=checkbox]')).some(el => "
+                        "el.closest('label')?.innerText.includes('Create a reversal draft after the period-end entry posts') "
+                        "&& el.checked)")
+                click("checkbox", reversal_label)
                 command("wait", "--fn", "Array.from(document.querySelectorAll('input[type=checkbox]')).some(el => "
                         "el.closest('label')?.innerText.includes('Create a reversal draft after the period-end entry posts') "
                         "&& !el.checked)")
                 settled()
+                # Date inputs can restore focus and open their calendar during
+                # a rerun. Dismiss it as a user would before clicking Save;
+                # never force a click through an overlapping calendar.
+                command("press", "Escape")
+                command("wait", "--fn", "!Array.from(document.querySelectorAll('[role=heading], h2')).some(el => "
+                        "el.textContent.startsWith('Choose date,'))")
                 click("button", "Save schedule")
                 wait("Schedule for Monthly rent accrual saved.")
                 click("radio", "Drafts")
