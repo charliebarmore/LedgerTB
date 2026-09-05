@@ -1132,6 +1132,10 @@ if active_view == "Drafts":
                            f"{d.proposed_by}"
                            + (f" · {d.proposed_at}" if d.proposed_at else ""))
                 recurring_context = _recurring_contexts.get(d.id)
+                approval_blocked = (
+                    recurring_context["approval_blocked_reason"]
+                    if recurring_context else ""
+                )
                 if recurring_context:
                     role = recurring_context["role"].lower()
                     st.info(
@@ -1139,6 +1143,13 @@ if active_view == "Drafts":
                         f"{recurring_context['period_name']} · generation "
                         f"{recurring_context['generation_number']}"
                     )
+                    if approval_blocked:
+                        st.warning(approval_blocked)
+                    if recurring_context["template_source_reference"]:
+                        st.caption(
+                            "Source reference: "
+                            + recurring_context["template_source_reference"]
+                        )
                     if (
                         recurring_context["role"] == "Primary"
                         and recurring_context["reversal_rule"] == "NextDay"
@@ -1200,7 +1211,7 @@ if active_view == "Drafts":
                 with _a1:
                     if st.button("Approve & post", type="primary",
                                  key=f"draft_approve_{d.id}",
-                                 disabled=dbconn.READ_ONLY):
+                                 disabled=dbconn.READ_ONLY or bool(approval_blocked)):
                         try:
                             _entry_id = d.approve()
                         except Exception as exc:

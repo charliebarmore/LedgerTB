@@ -38,6 +38,8 @@ data/
 .pytest_cache/
 .coverage
 htmlcov/
+test-results/
+node_modules/
 
 # Test/sample data
 *.csv

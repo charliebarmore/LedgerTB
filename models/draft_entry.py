@@ -267,6 +267,8 @@ class DraftEntry:
 
             from services.recurring_entries import recurring_draft_context
             recurring = recurring_draft_context(conn, self.id, self.client_id)
+            if recurring and recurring["approval_blocked_reason"]:
+                raise ValueError(recurring["approval_blocked_reason"])
             if recurring and recurring["role"] == "Primary":
                 source_reference = (
                     f"Recurring · {recurring['template_name']} · "

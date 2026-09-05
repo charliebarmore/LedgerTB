@@ -339,6 +339,38 @@ def _draft_from_template(
     )
 
 
+def _generation_snapshot(template: JournalEntryTemplate, reversal_rule: str) -> dict:
+    return {
+        "reversal_rule": reversal_rule,
+        "template_name": template.name,
+        "template_source_reference": template.source_reference or "",
+    }
+
+
+def _link_draft(cursor, client_id, occurrence_id, draft_id, role, generation,
+                snapshot, **lineage) -> None:
+    """Persist the instructions and their audit record in the draft transaction."""
+    cursor.execute(
+        """INSERT INTO recurring_occurrence_drafts
+           (occurrence_id, draft_entry_id, role, generation_number,
+            snapshot_reversal_rule, snapshot_template_name, snapshot_source_reference)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (occurrence_id, draft_id, role, generation, snapshot["reversal_rule"],
+         snapshot["template_name"], snapshot["template_source_reference"]),
+    )
+    AuditLog.write(
+        cursor, client_id, "recurring_occurrence_drafts", cursor.lastrowid, "INSERT",
+        new_values={
+            "occurrence_id": occurrence_id, "draft_entry_id": draft_id,
+            "role": role, "generation_number": generation,
+            "snapshot": {key: snapshot[key] for key in (
+                "reversal_rule", "template_name", "template_source_reference",
+            )},
+            **lineage,
+        },
+    )
+
+
 def generate_occurrence(
     client_id: int,
     schedule_id: int,
@@ -359,6 +391,9 @@ def generate_occurrence(
 
     conn = get_connection()
     try:
+        # Keep template, schedule, and generation-time instructions consistent
+        # while reading them and writing the resulting draft.
+        conn.execute("BEGIN IMMEDIATE")
         cursor = conn.cursor()
         template = JournalEntryTemplate.get_by_id(preview.template_id, client_id)
         schedule = RecurringSchedule.get_by_id(schedule_id, client_id)
@@ -395,19 +430,9 @@ def generate_occurrence(
             },
         )
         draft.save(conn=conn)
-        cursor.execute(
-            """INSERT INTO recurring_occurrence_drafts
-               (occurrence_id, draft_entry_id, role, generation_number)
-               VALUES (?, ?, 'Primary', 1)""",
-            (occurrence_id, draft.id),
-        )
-        link_id = cursor.lastrowid
-        AuditLog.write(
-            cursor, client_id, "recurring_occurrence_drafts", link_id, "INSERT",
-            new_values={
-                "occurrence_id": occurrence_id, "draft_entry_id": draft.id,
-                "role": "Primary", "generation_number": 1,
-            },
+        _link_draft(
+            cursor, client_id, occurrence_id, draft.id, "Primary", 1,
+            _generation_snapshot(template, schedule.reversal_rule),
         )
         conn.commit()
         return {
@@ -584,9 +609,10 @@ def regenerate_occurrence(
         raise ValueError("Recurring draft role must be Primary or Reversal.")
     conn = get_connection()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         cursor = conn.cursor()
         row = cursor.execute(
-            """SELECT ro.*, rs.is_active, t.id template_id
+            """SELECT ro.*, rs.is_active, rs.reversal_rule, t.id template_id
                FROM recurring_occurrences ro
                JOIN recurring_schedules rs ON rs.id = ro.schedule_id
                JOIN journal_entry_templates t ON t.id = rs.template_id
@@ -612,6 +638,7 @@ def regenerate_occurrence(
             if not template or template.archived_at:
                 raise ValueError("Restore the template before regenerating this draft.")
             draft = _draft_from_template(cursor, template, scheduled)
+            snapshot = _generation_snapshot(template, row["reversal_rule"])
         else:
             primary = cursor.execute(
                 """SELECT d.id draft_id, d.posted_entry_id
@@ -634,6 +661,7 @@ def regenerate_occurrence(
             if not rejected:
                 raise ValueError("Rejected reversal draft not found.")
             source = DraftEntry._from_row(rejected)
+            snapshot = recurring_draft_context(conn, source.id, client_id)
             scheduled = date.fromisoformat(source.entry_date)
             draft = DraftEntry(
                 client_id=client_id,
@@ -660,20 +688,9 @@ def regenerate_occurrence(
             )
         draft.save(conn=conn)
         generation = int(latest["generation_number"]) + 1
-        cursor.execute(
-            """INSERT INTO recurring_occurrence_drafts
-               (occurrence_id, draft_entry_id, role, generation_number)
-               VALUES (?, ?, ?, ?)""",
-            (occurrence_id, draft.id, role, generation),
-        )
-        link_id = cursor.lastrowid
-        AuditLog.write(
-            cursor, client_id, "recurring_occurrence_drafts", link_id, "INSERT",
-            new_values={
-                "occurrence_id": occurrence_id, "draft_entry_id": draft.id,
-                "role": role, "generation_number": generation,
-                "regenerated_from_draft_id": latest["draft_id"],
-            },
+        _link_draft(
+            cursor, client_id, occurrence_id, draft.id, role, generation,
+            snapshot, regenerated_from_draft_id=latest["draft_id"],
         )
         conn.commit()
         return {
@@ -695,19 +712,43 @@ def recurring_draft_context(conn, draft_id: int, client_id: int) -> Optional[dic
         """SELECT rod.id link_id, rod.role, rod.generation_number,
                   ro.id occurrence_id, ro.period_name, ro.period_start,
                   ro.period_end, ro.scheduled_entry_date,
-                  rs.id schedule_id, rs.reversal_rule,
-                  t.id template_id, t.name template_name,
-                  t.source_reference template_source_reference
+                  rs.id schedule_id, t.id template_id,
+                  rod.snapshot_reversal_rule reversal_rule,
+                  rod.snapshot_template_name template_name,
+                  rod.snapshot_source_reference template_source_reference,
+                  d.proposed_by
            FROM recurring_occurrence_drafts rod
            JOIN recurring_occurrences ro ON ro.id = rod.occurrence_id
            JOIN recurring_schedules rs ON rs.id = ro.schedule_id
            JOIN journal_entry_templates t ON t.id = rs.template_id
+           JOIN draft_entries d ON d.id = rod.draft_entry_id
            WHERE rod.draft_entry_id = ? AND t.client_id = ?""",
         (draft_id, client_id),
     ).fetchone()
     if not row:
         return None
     context = dict(row)
+    context["snapshot_available"] = all(context[key] is not None for key in (
+        "reversal_rule", "template_name", "template_source_reference",
+    ))
+    context["approval_blocked_reason"] = ""
+    if not context["snapshot_available"]:
+        # Old drafts retain their stored attribution. Never substitute a live
+        # template name/reference and imply it was captured at generation.
+        context["template_name"] = row["proposed_by"].removeprefix(
+            "Recurring schedule: "
+        )
+        context["template_source_reference"] = ""
+        if row["role"] == "Primary":
+            context["approval_blocked_reason"] = (
+                "This draft was created before recurring instructions were saved. "
+                "Reject it, review the template and reversal setting, then regenerate "
+                "the period in Templates & recurring before approving."
+            )
+        else:
+            # A reversal already contains the opposite amounts and its date;
+            # its posted-primary link is sufficient to approve/regenerate it.
+            context["reversal_rule"] = "NextDay"
     if row["role"] == "Reversal":
         primary = cursor.execute(
             """SELECT d.id draft_id, d.posted_entry_id
@@ -848,21 +889,9 @@ def create_reversal_after_primary_approval(
         ],
     )
     reversal.save(conn=conn)
-    cursor.execute(
-        """INSERT INTO recurring_occurrence_drafts
-           (occurrence_id, draft_entry_id, role, generation_number)
-           VALUES (?, ?, 'Reversal', 1)""",
-        (context["occurrence_id"], reversal.id),
-    )
-    link_id = cursor.lastrowid
-    AuditLog.write(
-        cursor, primary_draft.client_id, "recurring_occurrence_drafts",
-        link_id, "INSERT", new_values={
-            "occurrence_id": context["occurrence_id"],
-            "draft_entry_id": reversal.id,
-            "role": "Reversal", "generation_number": 1,
-            "primary_draft_id": primary_draft.id,
-            "primary_posted_entry_id": primary_entry_id,
-        },
+    _link_draft(
+        cursor, primary_draft.client_id, context["occurrence_id"], reversal.id,
+        "Reversal", 1, context, primary_draft_id=primary_draft.id,
+        primary_posted_entry_id=primary_entry_id,
     )
     return reversal.id

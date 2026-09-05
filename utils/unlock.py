@@ -89,7 +89,14 @@ def _require_local_session():
         st.stop()
 
     expected = os.environ.get(UI_TOKEN_ENV)
-    if not expected or st.session_state.get(_UI_SESSION_FLAG):
+    if not expected:
+        return
+    if st.session_state.get(_UI_SESSION_FLAG):
+        # Streamlit clears query parameters during internal page navigation.
+        # Restore the launch token only for an already-authorized session so
+        # refreshing that window can authorize its replacement session too.
+        if st.query_params.get(_UI_TOKEN_PARAM) != expected:
+            st.query_params[_UI_TOKEN_PARAM] = expected
         return
     if st.query_params.get(_UI_TOKEN_PARAM) == expected:
         st.session_state[_UI_SESSION_FLAG] = True

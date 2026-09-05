@@ -36,6 +36,9 @@ release.
 5. **Generated drafts are snapshots.** Later template or schedule edits affect
    future generation only. They never rewrite a pending, rejected, or approved
    draft.
+   Each draft generation also retains the template name, source/workpaper
+   reference, and reversal instruction used when it was generated. Approval
+   uses those saved values, including when the schedule has since changed.
 6. **v1 amounts are fixed integer cents.** Formulas, percentages, allocations,
    imported variables, and changing amounts are outside this release.
 7. **Only Regular and Adjusting templates are supported.** Beginning Balance
@@ -48,6 +51,22 @@ release.
    this feature does not require another audit CHECK rebuild.
 
 ## User workflows
+
+### Upgrading drafts created in v1.7.0
+
+Migration 025 adds the saved instructions without rewriting historical rows.
+Older primary drafts did not store their original reversal choice or workpaper
+reference, so LedgerTB cannot safely infer them from the current template.
+Their approval button is disabled with recovery instructions: reject the old
+draft, review the template and schedule, then explicitly regenerate the period
+in Templates & recurring. Reactivate or restore the schedule/template first if
+needed. The new generation captures the reviewed settings and retains the
+rejected draft in history.
+
+Existing posted entries are unchanged. Older reversal drafts can still be
+approved or rejected/regenerated: their date, opposite amounts, stored
+attribution, and posted-primary relationship already establish what they
+reverse. Regeneration preserves those saved values.
 
 ### Save and use an unscheduled template
 

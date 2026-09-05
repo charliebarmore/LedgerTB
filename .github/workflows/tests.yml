@@ -48,4 +48,49 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements-dev.txt
       - name: Run tests
-        run: python -m pytest -q -m "not performance"
+        run: python -m pytest -q -ra -m "not performance" --junitxml=test-results/pytest.xml
+      - name: Retain test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pytest-results
+          path: test-results/
+          retention-days: 14
+
+  browser:
+    name: Browser acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlcipher-dev
+          python -m pip install -r requirements-dev.txt
+          npm ci --prefix tests/browser-tools --no-audit --no-fund
+          tests/browser-tools/node_modules/.bin/agent-browser install --with-deps
+      - name: Exercise the real browser and verify durable postings
+        run: |
+          python scripts/check_browser_fixture.py \
+            --agent-browser "$PWD/tests/browser-tools/node_modules/.bin/agent-browser" \
+            --output test-results/browser
+      - name: Retain browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-acceptance
+          path: test-results/browser/
+          retention-days: 14
