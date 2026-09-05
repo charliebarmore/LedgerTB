@@ -148,6 +148,30 @@ def test_assistant_export_folder_can_be_chosen_natively(db, monkeypatch, tmp_pat
     assert "Windows build" in captions
 
 
+def test_non_local_book_explains_disabled_post_access(db, monkeypatch):
+    from utils import books
+
+    _patched(monkeypatch)
+    monkeypatch.setattr(books, "is_local_book", lambda _path: False)
+    at = AppTest.from_file(
+        page_path("pages/9_Data_Safety.py"), default_timeout=30
+    ).run()
+
+    at.radio(key="mcp_level_pick").set_value("post").run()
+    button = next(
+        b for b in at.button if b.label == "Enable assistant access"
+    )
+    assert button.disabled
+    expected = (
+        "Post access is available only for books stored in the app's data "
+        "folder. Move or copy this book there, or choose read access."
+    )
+    assert expected in [caption.value for caption in at.caption]
+
+    at.radio(key="mcp_level_pick").set_value("read").run()
+    assert expected not in [caption.value for caption in at.caption]
+
+
 def test_passphrase_can_be_changed_from_data_safety(db, monkeypatch):
     """The rotation the app exists to offer, driven through the page."""
     from database import connection as dbconn

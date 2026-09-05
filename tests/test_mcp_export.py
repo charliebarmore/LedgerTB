@@ -169,12 +169,31 @@ def test_export_refuses_to_write_through_a_planted_symlink(client_id, accounts,
     client = Client.get_by_id(client_id)
     stem = f"{client.name} close package 2026-01-01 to 2026-03-31"
     elsewhere = tmp_path / "colleague-copy.pdf"
-    (root / f"{stem}.pdf").symlink_to(elsewhere)
+    try:
+        (root / f"{stem}.pdf").symlink_to(elsewhere)
+    except (OSError, NotImplementedError):
+        pytest.skip(
+            "symlink creation not permitted on this platform without elevation"
+        )
 
     with pytest.raises(ValueError, match="symbolic link"):
         mcp_tools.export_close_package(
             client_id, "2026-01-01", "2026-03-31", str(root))
     assert not elsewhere.exists(), "export was written through the symlink"
+
+
+def test_symlink_export_check_skips_when_creation_is_not_permitted(
+    client_id, accounts, tmp_path, monkeypatch
+):
+    def refuse_symlink(*args, **kwargs):
+        raise OSError("symlink privilege not held")
+
+    monkeypatch.setattr(os, "symlink", refuse_symlink)
+
+    with pytest.raises(pytest.skip.Exception, match="without elevation"):
+        test_export_refuses_to_write_through_a_planted_symlink(
+            client_id, accounts, tmp_path, monkeypatch
+        )
 
 
 @pytest.mark.skipif(os.name == "nt",
