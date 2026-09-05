@@ -170,7 +170,7 @@ def main():
 
                 # Check durable state independently of the browser's success text.
                 fixture = json.loads((book_dir / "fixture.json").read_text())
-                os.environ["ANTHROPIC_API_KEY"] = "test-key-never-used"
+                os.environ["ANTHROPIC_API_KEY"] = "test-key-never-used"  # pragma: allowlist secret -- synthetic fixture, never sent
                 os.environ["LEDGERTB_DB_PATH"] = fixture["book"]
                 from database import connection as dbc
                 from database.crypto import derive_key

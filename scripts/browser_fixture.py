@@ -24,7 +24,7 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     if any(root.iterdir()):
         parser.error("The browser fixture requires an empty disposable directory.")
-    os.environ["ANTHROPIC_API_KEY"] = "test-key-never-used"
+    os.environ["ANTHROPIC_API_KEY"] = "test-key-never-used"  # pragma: allowlist secret -- synthetic fixture, never sent
     os.environ["LEDGERTB_DB_PATH"] = str(root / "cedar.ledgertb")
     os.environ["LEDGERTB_BACKUP_DIR"] = str(root / "backups")
     os.environ["LEDGERTB_UI_TOKEN"] = "cedar-browser-test"
