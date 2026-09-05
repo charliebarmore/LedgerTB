@@ -53,8 +53,9 @@ jobs:
       - name: "Signal 2: test suite"
         id: tests
         continue-on-error: true
+        timeout-minutes: 10
         shell: pwsh
-        run: python -m pytest -q -m "not performance"
+        run: python -m pytest -q -m "not performance" -o faulthandler_timeout=120
 
       - name: "Signal 3: PyInstaller build"
         id: build
