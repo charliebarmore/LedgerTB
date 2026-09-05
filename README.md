@@ -110,12 +110,15 @@ This tool follows the same rule we teach in the Lab: AI drafts, the professional
 
 ## Tests
 
+See `docs/TESTING.md` for complete accounting workflows, upgrade/recovery
+checks, real MCP transport tests, and repeatable browser acceptance.
+
 ```bash
 python -m pytest -q -m "not performance"
 ```
 
 (Dropping the marker filter also runs the slower volume baselines described in
-`PERFORMANCE.md`.) More than 430 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the Close Map and assistant review checkpoints, firm-mode locking, and export hardening. They pass on macOS and Windows, and on both pandas 2.2 and pandas 3.0.
+`PERFORMANCE.md`.) More than 700 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the Close Map and assistant review checkpoints, firm-mode locking, and export hardening. The release suite has been exercised on macOS and Windows, and on both pandas 2.2 and pandas 3.0; CI records results for proposed changes.
 
 ## More documentation
 

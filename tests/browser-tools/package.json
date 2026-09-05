@@ -1,0 +1,8 @@
+{
+  "name": "ledgertb-browser-tests",
+  "private": true,
+  "version": "1.0.0",
+  "devDependencies": {
+    "agent-browser": "0.36.0"
+  }
+}

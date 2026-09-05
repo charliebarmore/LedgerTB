@@ -83,7 +83,8 @@ def test_plaintext_migration_copy_can_be_removed_from_data_safety(db, monkeypatc
 
     at.text_input(key="plaintext_backup_delete_confirm").input(
         "DELETE PLAINTEXT"
-    )
+    ).run()
+    assert not at.button(key="delete_plaintext_migration_backup").disabled
     at.button(key="delete_plaintext_migration_backup").click().run()
 
     assert not at.exception
