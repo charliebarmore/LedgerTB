@@ -17,7 +17,7 @@ A **Ledger Labs LLC** product — the software studio of [Charlie Barmore, CPA](
 - **Assistant Review**: one page gathering everything the assistant has done — proposals waiting on you, plus every AI-attributed action since your last sign-off, with an append-only, audit-logged "reviewed through here" checkpoint. Agent-proposed corrections carry a structured link to the original journal entry and present the original and proposed lines together. Approval retains the original → draft → posted-correction chain; rejection remains in the review history. The sidebar badges what's unreviewed; nothing the assistant does can look pre-approved.
 - **Firm mode**: book files can live on a shared drive, ProSystem-style — the app installs locally, each book has its own passphrase, and an in-use lock keeps two writers out of one book. See `docs/FIRM-MODE.md`.
 - **Audit trail**: every change is logged, with the OS account name as the actor — and assistant actions stamped **"(AI)"**, so automated work is never presented as yours. Bookkeeping without an audit trail is just a spreadsheet with opinions.
-- **Data safety**: the database is encrypted at rest behind a launch passphrase (SQLCipher), verified backups are built in, and a production-readiness checklist gates real use. If SQLCipher isn't installed, the app still runs, unencrypted, and says so on every page.
+- **Data safety**: the database is encrypted at rest behind a launch passphrase (SQLCipher), verified backups are built in, and a production-readiness checklist gates real use. Release builds refuse to ship without SQLCipher. A source build without it refuses to open books unless you set `LEDGERTB_ALLOW_UNENCRYPTED=1`, and then says so on every page.
 
 ## Download
 
@@ -95,7 +95,7 @@ LedgerTB's dependencies into everything else you run.
 
 Verified on a clean macOS install (Python 3.12.7, fresh venv, nothing preinstalled): `pip install -r requirements.txt` pulls a prebuilt `sqlcipher3` wheel and needs no Homebrew step. The same is true on Windows x64.
 
-If your platform has no wheel and the `sqlcipher3` build fails, you need the SQLCipher system library (macOS: `brew install sqlcipher`, Debian/Ubuntu: `libsqlcipher-dev`) — or drop that line from `requirements.txt` and run anyway. The app falls back to an unencrypted database and says so on every page. Fine for evaluating with sample data; put SQLCipher back before keeping real books.
+If your platform has no wheel and the `sqlcipher3` build fails, you need the SQLCipher system library (macOS: `brew install sqlcipher`, Debian/Ubuntu: `libsqlcipher-dev`) — or drop that line from `requirements.txt` and set `LEDGERTB_ALLOW_UNENCRYPTED=1` to run anyway. Without that variable the app, the frozen selfcheck, and the MCP server all refuse to start and say why. With it, the database is unencrypted and every page says so. Fine for evaluating with sample data; put SQLCipher back before keeping real books.
 
 The app runs fully without any API key. To turn on AI categorization, either set `ANTHROPIC_API_KEY` in a `.env` file or save a key on the **Firm Settings** page (stored in your system credential vault, not in a file).
 
