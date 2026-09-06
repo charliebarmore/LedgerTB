@@ -171,10 +171,16 @@ def test_export_refuses_to_write_through_a_planted_symlink(client_id, accounts,
     elsewhere = tmp_path / "colleague-copy.pdf"
     try:
         (root / f"{stem}.pdf").symlink_to(elsewhere)
-    except (OSError, NotImplementedError):
-        pytest.skip(
-            "symlink creation not permitted on this platform without elevation"
-        )
+    except NotImplementedError:
+        pytest.skip("symlink creation is not supported on this platform")
+    except OSError as exc:
+        # Windows refuses symlink creation without elevation (ERROR_PRIVILEGE_NOT_HELD).
+        # Any other failure is a real problem with the fixture and must fail.
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip(
+                "symlink creation not permitted on Windows without elevation"
+            )
+        raise
 
     with pytest.raises(ValueError, match="symbolic link"):
         mcp_tools.export_close_package(
@@ -186,11 +192,27 @@ def test_symlink_export_check_skips_when_creation_is_not_permitted(
     client_id, accounts, tmp_path, monkeypatch
 ):
     def refuse_symlink(*args, **kwargs):
-        raise OSError("symlink privilege not held")
+        exc = OSError("A required privilege is not held by the client")
+        exc.winerror = 1314
+        raise exc
 
     monkeypatch.setattr(os, "symlink", refuse_symlink)
 
     with pytest.raises(pytest.skip.Exception, match="without elevation"):
+        test_export_refuses_to_write_through_a_planted_symlink(
+            client_id, accounts, tmp_path, monkeypatch
+        )
+
+
+def test_symlink_export_check_still_fails_on_other_errors(
+    client_id, accounts, tmp_path, monkeypatch
+):
+    def broken_symlink(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "symlink", broken_symlink)
+
+    with pytest.raises(OSError, match="disk full"):
         test_export_refuses_to_write_through_a_planted_symlink(
             client_id, accounts, tmp_path, monkeypatch
         )
