@@ -1,6 +1,6 @@
 # LedgerTB v1.7.1
 
-Release candidate. Publication is pending release acceptance.
+Released September 5, 2026.
 
 This update fixes recurring-entry approval so a prepared draft keeps the
 instructions and supporting reference it had when it was generated.
@@ -50,6 +50,6 @@ selfcheck, gzip-requested HTTP routes, graceful server shutdown, signature
 verification, and Gatekeeper assessment passed. The Windows build passed
 encryption, frozen selfcheck, startup/shutdown, and installer packaging checks.
 
-Native installation and upgrade acceptance remain separate from these
-automated checks. See [Testing](TESTING.md) and
+This release proceeds on the completed automated verification. Hands-on native
+installation and upgrade checks were not completed. See [Testing](TESTING.md) and
 [Windows testing](WINDOWS-TESTING.md).
