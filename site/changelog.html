@@ -88,9 +88,40 @@
   person doing the accounting work.</p>
 
   <article class="changelog">
+    <section class="release" id="v1-7-1">
+      <div class="release-head">
+        <h2>LedgerTB v1.7.1 <span class="release-label">Latest</span></h2>
+        <span class="release-date">September 5, 2026</span>
+      </div>
+      <p>This update fixes recurring-entry approval so a prepared draft keeps
+      the instructions and supporting reference it had when it was generated.</p>
+      <ul>
+        <li>Changing a schedule's reversal setting no longer changes whether
+        an existing draft creates a reversal when approved. New drafts use the
+        updated setting.</li>
+        <li>Renaming a template or changing its workpaper reference no longer
+        changes the name and reference used when an existing draft posts.</li>
+        <li>Refreshing an authorized window after navigating between pages
+        keeps it authorized. Windows without the launch token remain blocked.</li>
+        <li>Assistant integrations can read each draft's entry type, including
+        Adjusting and Beginning Balance.</li>
+      </ul>
+      <h3>Upgrading existing recurring drafts</h3>
+      <p>Create a verified backup and close LedgerTB before installing the
+      update. Older pending recurring primary drafts must be rejected and
+      regenerated because they lack the stored instructions needed for
+      reliable approval. Review the template and schedule settings before
+      regenerating, then review the replacement before approving it.</p>
+      <p>Older pending reversal drafts remain reviewable and approvable.
+      Posted entries stay unchanged; the update does not automatically repair
+      entries already approved under v1.7.0.</p>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.7.1">Detailed release notes</a> ·
+      <a href="https://github.com/charliebarmore/LedgerTB/compare/v1.7.0...v1.7.1">Source comparison</a></p>
+    </section>
+
     <section class="release" id="v1-7-0">
       <div class="release-head">
-        <h2>LedgerTB v1.7.0 <span class="release-label">Latest</span></h2>
+        <h2>LedgerTB v1.7.0</h2>
         <span class="release-date">August 30, 2026</span>
       </div>
       <p>This release adds reusable journal-entry templates and a recurring

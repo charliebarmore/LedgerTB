@@ -39,9 +39,17 @@ prior-schema upgrades, an accounting workflow, abrupt process termination, and
 the real MCP transport. Browser acceptance exercises unlock, client switching,
 schedule edits, approval, reversal, and refresh, then checks the saved postings.
 
-Local validation before release preparation: 721 passed, 5 Windows-specific
-tests skipped, including both performance tests; browser acceptance passed
-twice. The non-performance suite contains 719 tests on that platform.
+The pinned Mac suite passed 721 tests with 5 Windows-specific skips, including
+both performance tests. The pinned Windows suite passed 722 tests with 2 skips
+and both performance tests excluded. GitHub's Linux suite passed 719 tests
+with 5 skips and both performance tests excluded. The corrected browser
+scenario passed in two hosted runs, and security checks passed.
 
-GitHub browser validation and packaged release acceptance are separate release
-checks. See [Testing](TESTING.md) and [Windows testing](WINDOWS-TESTING.md).
+The Mac app is Developer ID signed, Apple-notarized, and stapled; frozen
+selfcheck, gzip-requested HTTP routes, graceful server shutdown, signature
+verification, and Gatekeeper assessment passed. The Windows build passed
+encryption, frozen selfcheck, startup/shutdown, and installer packaging checks.
+
+Native installation and upgrade acceptance remain separate from these
+automated checks. See [Testing](TESTING.md) and
+[Windows testing](WINDOWS-TESTING.md).
