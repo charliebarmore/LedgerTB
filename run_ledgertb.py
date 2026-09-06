@@ -349,14 +349,15 @@ def _selfcheck() -> int:
     bundle didn't drop anything the app needs. Run: LEDGERTB_MODE=selfcheck <bin>"""
     os.chdir(BUNDLE)
     sys.path.insert(0, str(BUNDLE))
-    from config import UNENCRYPTED_REFUSAL_MESSAGE, allow_unencrypted
+    # Mirror app.py's cold-start import order to expose circular dependencies.
     from database import connection as dbconn
 
-    if not dbconn.ENCRYPTION_AVAILABLE and not allow_unencrypted():
-        print(UNENCRYPTED_REFUSAL_MESSAGE)
+    # Selfcheck is a release gate, not a demo launch. The source-only demo
+    # override must never allow a build without SQLCipher to pass this gate.
+    if not dbconn.ENCRYPTION_AVAILABLE:
+        print("SELFCHECK FAIL: SQLCipher is required for release builds. "
+              "The unencrypted demo opt-in does not apply to selfcheck.")
         return 1
-    # Import database.connection before config to mirror app.py's real cold-start
-    # path and catch package-level circular imports in the frozen bundle.
     # NB: submodules must be listed explicitly — importing a package does NOT
     # import its submodules, so a bare "openpyxl" here passed while the Excel
     # export crashed on the missing openpyxl.styles / openpyxl.utils.

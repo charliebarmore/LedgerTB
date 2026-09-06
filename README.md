@@ -95,7 +95,7 @@ LedgerTB's dependencies into everything else you run.
 
 Verified on a clean macOS install (Python 3.12.7, fresh venv, nothing preinstalled): `pip install -r requirements.txt` pulls a prebuilt `sqlcipher3` wheel and needs no Homebrew step. The same is true on Windows x64.
 
-If your platform has no wheel and the `sqlcipher3` build fails, you need the SQLCipher system library (macOS: `brew install sqlcipher`, Debian/Ubuntu: `libsqlcipher-dev`) — or drop that line from `requirements.txt` and set `LEDGERTB_ALLOW_UNENCRYPTED=1` to run anyway. Without that variable the app, the frozen selfcheck, and the MCP server all refuse to start and say why. With it, the database is unencrypted and every page says so. Fine for evaluating with sample data; put SQLCipher back before keeping real books.
+If your platform has no wheel and the `sqlcipher3` build fails, you need the SQLCipher system library (macOS: `brew install sqlcipher`, Debian/Ubuntu: `libsqlcipher-dev`) — or drop that line from `requirements.txt` and set `LEDGERTB_ALLOW_UNENCRYPTED=1` to evaluate with sample data. Without that variable the app and MCP server refuse to open books and say why. With it, the database is unencrypted and every page says so. Install SQLCipher before keeping real books. The release selfcheck always requires SQLCipher, even when this demo variable is set.
 
 The app runs fully without any API key. To turn on AI categorization, either set `ANTHROPIC_API_KEY` in a `.env` file or save a key on the **Firm Settings** page (stored in your system credential vault, not in a file).
 
