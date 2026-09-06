@@ -4,6 +4,7 @@ import asyncio
 import json
 
 import mcp_server
+from database import connection as dbconn
 
 
 def _tool(name):
@@ -38,6 +39,9 @@ def test_import_accounts_typed_rows_preserve_per_row_results(
     db, client_id, monkeypatch
 ):
     monkeypatch.setattr(mcp_server, "_require_level", lambda _level: None)
+    monkeypatch.setattr(
+        mcp_server, "_refresh_access", lambda: dbconn.ASSISTANT_ACCESS_LEVEL,
+    )
 
     result = asyncio.run(mcp_server.server.call_tool("import_accounts", {
         "client_id": client_id,
