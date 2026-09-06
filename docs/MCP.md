@@ -23,7 +23,10 @@ assistant works in ink, never with an eraser. Entries it posts carry
 "Posted by assistant (MCP)" and the full audit trail; corrections are
 new, visible entries. Changing the level takes effect on the assistant's next
 tool call and is audit-logged. Disabling access also revokes the next tool call
-from an already-running MCP process.
+from an already-running MCP process. Tool calls within one MCP process run one
+at a time, and each re-reads the vault right before it starts, so two calls
+can never interleave writes or run on a stale level. A level change made while
+a call is already executing applies to the next call, not the running one.
 
 ## Security model
 
