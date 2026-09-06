@@ -1,10 +1,60 @@
 import os
 import sys
 import threading
+from types import SimpleNamespace
 
 import pytest
 
 import run_ledgertb
+
+
+@pytest.mark.parametrize("launcher", ["source", "packaged"])
+def test_launchers_configure_downloads_and_keep_links_in_app(monkeypatch, tmp_path, launcher):
+    """Exercise each real entry point up to native window creation.
+
+    Stub OS/window boundaries, not the shared policy: a launcher forgetting to
+    call it must fail even if the other launcher has the correct settings.
+    """
+    import desktop
+    import platformdirs
+
+    # Windows opens a server log before spawning; keep that inside the fixture.
+    monkeypatch.setattr(platformdirs, "user_data_dir", lambda *a, **k: str(tmp_path))
+
+    monkeypatch.delenv("LEDGERTB_MODE", raising=False)
+    monkeypatch.delenv("PROBOOKS_MODE", raising=False)
+    monkeypatch.setattr(sys, "argv", ["LedgerTB"])
+    settings = {"ALLOW_DOWNLOADS": False, "OPEN_EXTERNAL_LINKS_IN_BROWSER": True}
+    observed = []
+    stopped = []
+    proc = object()
+
+    def create_window(*args, **kwargs):
+        observed.append(dict(settings))
+        return object()
+
+    monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(
+        settings=settings, create_window=create_window, start=lambda *a, **k: None,
+    ))
+    entry = desktop if launcher == "source" else run_ledgertb
+    monkeypatch.setattr(entry, "_find_free_port", lambda: 8501)
+    monkeypatch.setattr(entry, "_window_geometry", lambda: {})
+    if launcher == "source":
+        monkeypatch.setattr(desktop, "start_streamlit", lambda *a: proc)
+        monkeypatch.setattr(desktop, "wait_until_ready", lambda url: True)
+        monkeypatch.setattr(desktop, "stop_streamlit", stopped.append)
+        monkeypatch.setattr(desktop.atexit, "register", lambda *a: None)
+    else:
+        monkeypatch.setattr(run_ledgertb, "_create_windows_app_mutex", lambda: None)
+        monkeypatch.setattr(run_ledgertb, "_wait_until_ready", lambda url: True)
+        monkeypatch.setattr(run_ledgertb, "_webview_blocked_by_windows", lambda: False)
+        monkeypatch.setattr(run_ledgertb.subprocess, "Popen", lambda *a, **k: proc)
+        monkeypatch.setattr(run_ledgertb, "_stop", stopped.append)
+        monkeypatch.setattr(run_ledgertb, "_register_windows_close_handler", lambda *a: None)
+
+    assert entry.main() == 0
+    assert observed == [{"ALLOW_DOWNLOADS": True, "OPEN_EXTERNAL_LINKS_IN_BROWSER": False}]
+    assert stopped == [proc]
 
 
 def test_command_line_selfcheck_cannot_launch_a_second_app(monkeypatch):

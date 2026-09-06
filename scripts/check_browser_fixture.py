@@ -135,16 +135,33 @@ def main():
                 click("radio", "Templates & recurring")
                 wait("Recurring schedule")
                 settled()
-                command("find", "text", "Recurring schedule", "click")
+                # Native <summary> is keyboard-focusable but the browser tool's
+                # text-click can miss it while scrolling. This fixture has one
+                # template, with its schedule as the first main-area expander. Verify the
+                # focused label before opening it via the normal Enter handler.
+                command("focus", '[data-testid="stMain"] summary')
+                assert command("eval", "document.activeElement?.tagName === 'SUMMARY' && "
+                               "document.activeElement.innerText.includes('Recurring schedule')")["result"] is True
+                command("press", "Enter")
                 reversal_label = "Create a reversal draft after the period-end entry posts"
                 command("wait", "--fn", "Array.from(document.querySelectorAll('input[type=checkbox]')).some(el => "
                         "el.closest('label')?.innerText.includes('Create a reversal draft after the period-end entry posts') "
                         "&& el.checked)")
-                click("checkbox", reversal_label)
+                # A visible widget can belong to an unfinished Streamlit rerun.
+                # Wait after the editor is rendered, then resolve the actual
+                # checkbox at action time. Space exercises its normal keyboard
+                # handler without clicking a moving/scrolling label hit target.
+                settled()
+                command("focus", ref("checkbox", reversal_label))
+                assert command("eval", "document.activeElement?.type === 'checkbox' && "
+                               "document.activeElement.closest('label')?.innerText.includes(" +
+                               json.dumps(reversal_label) + ")")["result"] is True
+                command("press", "Space")
                 command("wait", "--fn", "Array.from(document.querySelectorAll('input[type=checkbox]')).some(el => "
                         "el.closest('label')?.innerText.includes('Create a reversal draft after the period-end entry posts') "
                         "&& !el.checked)")
                 settled()
+                assert command("is", "checked", ref("checkbox", reversal_label))["checked"] is False
                 # Date inputs can restore focus and open their calendar during
                 # a rerun. Dismiss it as a user would before clicking Save;
                 # never force a click through an overlapping calendar.
@@ -201,6 +218,13 @@ def main():
                                "approval", "refresh", "dashboard amounts", "back navigation", "reversal approval"]}, indent=2))
                 print(f"Browser acceptance passed; evidence: {output}")
             except BaseException:
+                # Preserve semantic state as well as pixels: this distinguishes
+                # a stale/rerunning widget from an application error in CI.
+                try:
+                    (output / "failure-snapshot.txt").write_text(snapshot())
+                    (output / "failure-body.txt").write_text(body())
+                except Exception:
+                    pass
                 try:
                     command("screenshot", str(output / "failure.png"))
                 except Exception:

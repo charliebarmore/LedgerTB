@@ -488,6 +488,11 @@ with mcp_cols[0]:
                 _mcp_delete(_mcp_names.level)
                 _mcp_delete(_mcp_names.book_id)
                 st.error(f"Could not store the key securely: {exc}")
+    if not _mcp_enabled and not _book_level_ok:
+        st.caption(
+            "Post access is available only for books stored in the app's data "
+            "folder. Move or copy this book there, or choose read access."
+        )
     if (_mcp_enabled and _picked_level != _mcp_level
             and st.button("Change level", type="primary",
                           disabled=not _post_ok or not _book_level_ok)):

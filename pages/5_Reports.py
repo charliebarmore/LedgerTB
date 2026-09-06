@@ -340,6 +340,17 @@ if st.session_state.get(route_key) != route_signature:
 selected_report = view_switcher(report_options, key="active_report",
                                 label="Select Report")
 
+if _query_value("report") and _query_value("report") != selected_report:
+    for _name in _ROUTE_FIELDS:
+        if _name in st.query_params:
+            del st.query_params[_name]
+    st.session_state.pop(report_key("return_route"), None)
+    # Re-mark against the now-cleared URL, so browser Back to the old drill
+    # URL reads as a new route and reapplies its report.
+    st.session_state[route_key] = tuple(
+        (name, _query_value(name)) for name in _ROUTE_FIELDS
+    )
+
 st.divider()
 
 if selected_report == "Trial Balance":
