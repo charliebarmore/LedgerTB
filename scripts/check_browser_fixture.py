@@ -135,7 +135,14 @@ def main():
                 click("radio", "Templates & recurring")
                 wait("Recurring schedule")
                 settled()
-                command("find", "text", "Recurring schedule", "click")
+                # Native <summary> is keyboard-focusable but the browser tool's
+                # text-click can miss it while scrolling. This fixture has one
+                # template, with its schedule as the first main-area expander. Verify the
+                # focused label before opening it via the normal Enter handler.
+                command("focus", '[data-testid="stMain"] summary')
+                assert command("eval", "document.activeElement?.tagName === 'SUMMARY' && "
+                               "document.activeElement.innerText.includes('Recurring schedule')")["result"] is True
+                command("press", "Enter")
                 reversal_label = "Create a reversal draft after the period-end entry posts"
                 command("wait", "--fn", "Array.from(document.querySelectorAll('input[type=checkbox]')).some(el => "
                         "el.closest('label')?.innerText.includes('Create a reversal draft after the period-end entry posts') "
