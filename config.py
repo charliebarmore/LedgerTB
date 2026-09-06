@@ -24,6 +24,20 @@ def app_env(suffix: str, default=None):
     )
 
 
+UNENCRYPTED_REFUSAL_MESSAGE = (
+    "This build has no encryption support. Set "
+    "LEDGERTB_ALLOW_UNENCRYPTED=1 to evaluate with an unencrypted demo book, "
+    "or install SQLCipher."
+)
+
+
+def allow_unencrypted() -> bool:
+    """Whether this source build may use the unencrypted SQLite fallback."""
+    return str(app_env("ALLOW_UNENCRYPTED", "")).strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 def _contains_existing_data(path: Path) -> bool:
     """Whether a product-data directory contains an existing installation."""
     return any((path / name).exists() for name in (

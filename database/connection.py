@@ -17,7 +17,7 @@ except ImportError:
 
     ENCRYPTION_AVAILABLE = False
 
-from config import DATABASE_PATH
+from config import DATABASE_PATH, UNENCRYPTED_REFUSAL_MESSAGE, allow_unencrypted
 from .crypto import key_pragma
 from .schema import create_tables
 
@@ -224,6 +224,8 @@ def get_connection():
     SQLCipher requires. Fallback mode (stdlib sqlite3) has no passphrase and no
     key requirement.
     """
+    if not ENCRYPTION_AVAILABLE and not allow_unencrypted():
+        raise DatabaseLocked(UNENCRYPTED_REFUSAL_MESSAGE)
     if ENCRYPTION_AVAILABLE and _active_key is None:
         raise DatabaseLocked("Database is locked; unlock with the passphrase first.")
     from utils import maintenance_lock
@@ -286,6 +288,8 @@ def open_keyed(path, key=None):
     passphrase to be set, same as get_connection(). In fallback mode there is no
     key, so backups are plaintext like the database itself.
     """
+    if not ENCRYPTION_AVAILABLE and not allow_unencrypted():
+        raise DatabaseLocked(UNENCRYPTED_REFUSAL_MESSAGE)
     chosen = key or _active_key
     if ENCRYPTION_AVAILABLE and chosen is None:
         raise DatabaseLocked("Database is locked; unlock with the passphrase first.")

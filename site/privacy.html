@@ -34,8 +34,11 @@
       that file is in LedgerTB's local data folder or another location,
       including shared storage. Backups and exports go to user-chosen locations.</p>
       <p>Official release builds encrypt books and LedgerTB-created backups at
-      rest with SQLCipher. A source build without SQLCipher displays an
-      unencrypted-mode warning and should not be used for real books. Ledger
+      rest with SQLCipher. Starting with v1.7.2, a source build without SQLCipher
+      refuses to open books unless <code>LEDGERTB_ALLOW_UNENCRYPTED=1</code>
+      explicitly enables unencrypted demo use. Opted-in demo builds display an
+      unencrypted-mode warning and should not be used for real books. Earlier
+      source versions could run unencrypted with that warning. Ledger
       Labs LLC does not receive a book merely because LedgerTB is used and
       cannot recover a lost passphrase or retrieve a user-controlled book.</p>
       <p>If “Remember on this computer” is enabled, a derived unlock key is kept
