@@ -365,7 +365,7 @@ def _selfcheck() -> int:
             "config", "constants", "money", "models.journal_entry", "models.reconciliation",
             "models.recurring_entry", "services.recurring_entries",
             "services.categorization", "services.document_import", "pypdfium2", "PIL",
-            "keyring", "version"]
+            "keyring", "version", "utils.desktop_window"]
     failed = []
     for m in mods:
         try:
@@ -537,6 +537,9 @@ def main() -> int:
 
         try:
             import webview
+            from utils.desktop_window import configure_webview
+
+            configure_webview(webview)
             geom = _window_geometry()
             win_x, win_y = geom.pop("x", None), geom.pop("y", None)
             window = webview.create_window(

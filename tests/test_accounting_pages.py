@@ -791,6 +791,15 @@ def test_report_tab_clears_stale_drilldown_route(
     assert not reloaded.exception
     assert reloaded.session_state["active_report"] == "Income Statement"
 
+    # Re-visiting the drill URL (Back/Forward) must apply it again after the
+    # tab switch cleared it, without losing the authorized launch token.
+    page.query_params.update(route)
+    page.run()
+    assert not page.exception
+    assert page.session_state["active_report"] == "General Ledger"
+    assert page.selectbox(key="gl_account_filter__reports_g0").value == accounts["cash"]
+    assert page.query_params["t"] == ["launch-secret"]
+
 
 def test_year_close_checklist_page_renders(client_id, accounts, monkeypatch):
     _select_client(monkeypatch, client_id)
