@@ -1,8 +1,9 @@
-import pytest
 import os
 from pathlib import Path
 import subprocess
 import sys
+
+import pytest
 
 import config
 import mcp_server
@@ -46,7 +47,7 @@ assert db.DATABASE_PATH.read_bytes().startswith(b'SQLite format 3')
     env.pop("LEDGERTB_ALLOW_UNENCRYPTED", None)
     env.pop("PROBOOKS_ALLOW_UNENCRYPTED", None)
     # Config must not consult the real credential vault in the child either.
-    env["ANTHROPIC_API_KEY"] = "unused-demo-value"
+    env["ANTHROPIC_API_KEY"] = "unused-demo-value"  # pragma: allowlist secret -- synthetic, never sent
     result = subprocess.run(
         [sys.executable, "-c", code, str(Path(__file__).resolve().parents[1]), str(tmp_path)],
         env=env, capture_output=True, text=True, timeout=20,
