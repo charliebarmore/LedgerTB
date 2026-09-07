@@ -1044,7 +1044,8 @@ def _pdf_income_statement_table(report: Dict) -> Table:
 
 
 def _pdf_grouped_comparison_table(groups: List[Dict], empty_label: str,
-                                  total_label: str, total: Dict) -> Table:
+                                  total_label: str, total: Dict,
+                                  closing_total=None) -> Table:
     data_rows = []
     bold_rows = []
     ruled_rows = []
@@ -1068,12 +1069,21 @@ def _pdf_grouped_comparison_table(groups: List[Dict], empty_label: str,
         ])
         bold_rows.append(len(data_rows) - 1)
         ruled_rows.append(len(data_rows) - 1)
+    totals_row = [total_label] + _pdf_comparison_values(total, totals=True)
+    if closing_total is not None:
+        data_rows.append(totals_row)
+        bold_rows.append(len(data_rows) - 1)
+        ruled_rows.append(len(data_rows) - 1)
+        # The section subtotal and statement grand total must travel together,
+        # even when a large equity table needs to split across pages.
+        no_split_ranges.append((len(data_rows) - 1, len(data_rows)))
+        totals_row = closing_total
     return _pdf_table(
         ["Account", "Current", "Prior Year", "$ Change", "% Change"],
         data_rows,
         [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
         money_from=1,
-        totals_row=[total_label] + _pdf_comparison_values(total, totals=True),
+        totals_row=totals_row,
         bold_data_rows=bold_rows,
         ruled_data_rows=ruled_rows,
         no_split_data_ranges=no_split_ranges,
@@ -1238,6 +1248,9 @@ def build_close_package_pdf(
     ]
 
     # ---- Balance Sheet
+    balance_section_heading = ParagraphStyle(
+        "balance_section", parent=heading_2, spaceBefore=4, spaceAfter=4,
+    )
     story += [
         Paragraph("Balance Sheet", heading_2),
         Paragraph(f"As of {long_date(period_end)}", _PDF_META),
@@ -1257,14 +1270,20 @@ def build_close_package_pdf(
          "Total Equity", comparative_balance["total_equity"]),
     ]:
         section_block = [
-            Paragraph(section_title, heading_2),
+            Paragraph(section_title, balance_section_heading),
             _pdf_grouped_comparison_table(
                 items,
                 f"No {section_title.lower()} recorded",
                 total_label,
                 total_value,
+                closing_total=(
+                    ["TOTAL LIABILITIES & EQUITY"] + _pdf_comparison_values(
+                        comparative_balance["total_liabilities_equity"], totals=True
+                    )
+                    if section_title == "Equity" else None
+                ),
             ),
-            Spacer(1, 10),
+            Spacer(1, 4),
         ]
         section_row_count = 1 + sum(
             2 + len(group['accounts']) for group in items
@@ -1278,15 +1297,6 @@ def build_close_package_pdf(
         balance_sheet["total_liabilities_equity"], 2
     )
     story += [
-        _pdf_table(
-            ["", "Current", "Prior Year", "$ Change", "% Change"], [],
-            [4.4 * inch, 1.35 * inch, 1.35 * inch, 1.35 * inch, 1.0 * inch],
-            money_from=1,
-            totals_row=["TOTAL LIABILITIES & EQUITY"] + _pdf_comparison_values(
-                comparative_balance["total_liabilities_equity"], totals=True
-            ),
-        ),
-        Spacer(1, 8),
         Paragraph(
             "Balance sheet is in balance."
             if abs(balance_difference) < 0.01

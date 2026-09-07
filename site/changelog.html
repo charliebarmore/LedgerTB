@@ -88,9 +88,40 @@
   person doing the accounting work.</p>
 
   <article class="changelog">
+    <section class="release" id="v1-7-2">
+      <div class="release-head">
+        <h2>LedgerTB v1.7.2 <span class="release-label">Latest</span></h2>
+        <span class="release-date">September 7, 2026</span>
+      </div>
+      <p>This update repairs desktop downloads and report navigation, improves
+      close-package PDF page breaks, and makes assistant calls use consistent
+      book permissions.</p>
+      <ul>
+        <li>PDF and Excel downloads open the native save dialog in the desktop app.</li>
+        <li>Changing Reports tabs clears an old General Ledger drill-down, so
+        reloading no longer brings it back unexpectedly. New-window report links
+        stay inside the app.</li>
+        <li>Balance-sheet grand totals stay with the equity subtotal in
+        close-package PDFs. Compact statements fit on one page.</li>
+        <li>Assistant calls run one at a time in each assistant process and
+        refresh permissions before accessing the book.</li>
+        <li>Data Safety explains why books outside the local data folder cannot
+        enable direct assistant posting.</li>
+      </ul>
+      <h3>For source installs</h3>
+      <p>Source builds without SQLCipher now require
+      <code>LEDGERTB_ALLOW_UNENCRYPTED=1</code> for unencrypted demo use.
+      Official installers already include SQLCipher. Existing encrypted books
+      remain encrypted and still require their passphrases.</p>
+      <p>Create a verified backup and close LedgerTB before installing.
+      Upgrades from v1.7.0 still use the recurring-draft recovery steps below.</p>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.7.2">Detailed release notes</a> ·
+      <a href="https://github.com/charliebarmore/LedgerTB/compare/v1.7.1...v1.7.2">Source comparison</a></p>
+    </section>
+
     <section class="release" id="v1-7-1">
       <div class="release-head">
-        <h2>LedgerTB v1.7.1 <span class="release-label">Latest</span></h2>
+        <h2>LedgerTB v1.7.1</h2>
         <span class="release-date">September 5, 2026</span>
       </div>
       <p>This update fixes recurring-entry approval so a prepared draft keeps

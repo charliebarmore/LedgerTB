@@ -696,6 +696,68 @@ def test_pdf_package_contains_every_section(booked_period, accounts):
         doc.close()
 
 
+@pytest.mark.parametrize("extra_accounts,account_type", [(0, "Asset"), (40, "Asset"), (40, "Equity")])
+def test_balance_sheet_keeps_grand_total_with_equity(db, extra_accounts, account_type):
+    """Compact statements fit one page; long statements retain every account."""
+    from tests.helpers.cedar import create_cedar
+
+    client_id, _, accounts, _ = create_cedar()
+    post_entry(client_id, date(2026, 1, 1), [
+        (accounts["cash"], 10000, 0), (accounts["capital"], 0, 10000),
+    ])
+    post_entry(client_id, date(2026, 1, 5), [
+        (accounts["cash"], 2500, 0), (accounts["revenue"], 0, 2500),
+    ])
+    post_entry(client_id, date(2026, 1, 8), [
+        (accounts["office"], 300, 0), (accounts["cash"], 0, 300),
+    ])
+    post_entry(client_id, date(2026, 1, 31), [
+        (accounts["rent"], 1200, 0), (accounts["accrual"], 0, 1200),
+    ], entry_type="Adjusting")
+    for index in range(extra_accounts):
+        account = Account(
+            client_id=client_id,
+            account_number=str((1100 if account_type == "Asset" else 3100) + index),
+            name=f"Cedar account {index:02d}", type=account_type,
+            subtype="Cash" if account_type == "Asset" else "Owner's Equity",
+        )
+        account.save()
+        post_entry(client_id, date(2026, 1, 10), [
+            (account.id, 1, 0), (accounts["cash"], 0, 1),
+        ] if account_type == "Asset" else [
+            (accounts["cash"], 1, 0), (account.id, 0, 1),
+        ])
+    period = (date(2026, 1, 1), date(2026, 12, 31))
+    rows, _ = ReportGenerator.trial_balance_worksheet(client_id, *period)
+    doc = pdfium.PdfDocument(build_close_package_pdf(
+        client_id, "Cedar Demo Services", *period, rows,
+    ).read())
+    try:
+        pages = []
+        for index in range(len(doc)):
+            page = doc[index]
+            text_page = page.get_textpage()
+            try:
+                pages.append(text_page.get_text_range())
+            finally:
+                text_page.close()
+                page.close()
+    finally:
+        doc.close()
+    start = next(i for i, text in enumerate(pages) if "Balance Sheet" in text)
+    end = next(i for i, text in enumerate(pages) if "Statement of Cash Flows" in text)
+    statement = pages[start:end]
+    if not extra_accounts:
+        assert len(statement) == 1
+    for index in range(extra_accounts):
+        assert f"Cedar account {index:02d}" in "\n".join(statement)
+    total_page = next(text for text in statement if "TOTAL LIABILITIES & EQUITY" in text)
+    assert "Total Equity" in total_page
+    expected_assets = 12200 + (extra_accounts if account_type == "Equity" else 0)
+    assert f"{expected_assets:,.2f}" in total_page
+    assert "Balance sheet is in balance." in total_page
+
+
 def test_snapshot_reuses_current_cash_flow_when_building_comparison(
     booked_period, monkeypatch
 ):

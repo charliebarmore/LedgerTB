@@ -1,6 +1,6 @@
 # LedgerTB v1.7.2
 
-Release candidate — not yet published.
+Released September 7, 2026.
 
 This update repairs downloads and report navigation in the native application,
 and makes concurrent assistant calls use consistent book permissions.
@@ -19,8 +19,15 @@ and makes concurrent assistant calls use consistent book permissions.
   A permission change during a running call applies to the next call.
 - Data Safety explains why a book outside the local data folder cannot enable
   direct assistant posting.
+- Close-package PDFs keep the balance-sheet grand total with the equity
+  subtotal. Compact statements fit on one page, while larger statements
+  continue across pages without dropping accounts.
 
 No database migration is added. Existing books and posted entries are preserved.
+
+Create a verified backup and close LedgerTB before installing. When upgrading
+from v1.7.0, the [v1.7.1 recurring-draft recovery instructions](RELEASE-NOTES-1.7.1.md)
+still apply to older pending primary drafts.
 
 ## Source-build encryption requirement
 
@@ -37,9 +44,14 @@ of the demo override.
 
 ## Release verification
 
-Candidate builds use the pinned Mac and Windows dependencies. The release
-checklist includes frozen selfcheck, server startup and shutdown, native PDF
-and Excel saves, and new-window report navigation. Results will be recorded
-with the candidate before publication.
+Builds use the pinned Mac and Windows dependencies. Regression tests cover
+compact balance sheets and statements with large asset or equity sections.
+The Cedar PDF was rendered and visually checked after the pagination fix.
+The preceding v1.7.2 candidate passed hands-on Mac PDF and Excel save checks;
+the saved files reconciled to the fictional book's expected balances.
+
+Final platform test counts, signing, notarization, and startup/shutdown results
+are recorded in the GitHub release. Windows native save dialogs and installed
+upgrade behavior have not been verified on a physical Windows desktop.
 
 Thanks to Scott Edwards for the original fixes and MCP serialization work.
