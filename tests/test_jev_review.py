@@ -1,5 +1,6 @@
 from streamlit.testing.v1 import AppTest
 import streamlit as st
+import pytest
 
 from services import jev_categorization as jev
 from tests.conftest import page_path
@@ -71,11 +72,18 @@ def test_failure_keeps_rows_and_no_automatic_retry(monkeypatch, client_id, accou
     assert len(calls) == 2
 
 
-def test_ledger_switch_clears_consent_selection_and_results():
-    state = {"jev_results": {"k": "v"}, "jev_rows": ["x"], "jev_consent": True}
+@pytest.mark.parametrize("next_client,next_book", [(1, "book-b"), (2, "book-a")])
+def test_ledger_switch_clears_consent_selection_and_results(next_client, next_book):
+    state = {"jev_results": {"k": "v"}, "jev_rows": ["x"], "jev_consent": True,
+             "jev_known_rows": ["x"], "bulk_rows": ["x"], "review_page": 2,
+             "transactions_to_review": [{"uid": "x", "include": False,
+                                          "jev_accepted": {"key": "k", "account_id": 1}}],
+             "cat_x": 1, "include_x": False, "unrelated_preference": "keep"}
     scope_import_state_to_client(state, 1, "book-a")
-    scope_import_state_to_client(state, 1, "book-b")
+    scope_import_state_to_client(state, next_client, next_book)
     assert not any(k.startswith("jev_") for k in state)
+    assert not {"bulk_rows", "review_page", "transactions_to_review", "cat_x", "include_x"} & state.keys()
+    assert state["unrelated_preference"] == "keep"
 
 
 def test_settings_provider_and_key_use_vault(monkeypatch, client_id, fake_credential_vault):

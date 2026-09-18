@@ -72,7 +72,16 @@ def main():
         # Repeat only read-only waits on a contended machine. Never replay a
         # click, fill, upload, posting action or cloud request after a timeout.
         for attempt in range(6 if parts[0] == "wait" else 1):
-            result = subprocess.run(cli + list(parts), capture_output=True, text=True, timeout=120)
+            started = time.monotonic()
+            try:
+                result = subprocess.run(cli + list(parts), capture_output=True, text=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                transcript.append({"command": list(parts), "subprocess_timeout": True,
+                                   "elapsed_seconds": time.monotonic() - started})
+                (output / "browser.json").write_text(json.dumps(transcript, indent=2))
+                if parts[0] == "wait" and attempt < 5:
+                    continue
+                raise
             transcript.append({"command": list(parts), "stdout": result.stdout, "stderr": result.stderr})
             (output / "browser.json").write_text(json.dumps(transcript, indent=2))
             response = json.loads(result.stdout)
@@ -91,6 +100,18 @@ def main():
         if role == "button":
             command("wait", "--fn", "Array.from(document.querySelectorAll('button')).some(b => "
                     f"(b.textContent.trim() === {json.dumps(name)} || b.getAttribute('aria-label') === {json.dumps(name)}) && !b.disabled)")
+            # Rerenders can move a button above the visible viewport. Center it
+            # before the ordinary pointer click; never force through an overlay.
+            command("eval", "Array.from(document.querySelectorAll('button')).find(b => "
+                    f"b.textContent.trim() === {json.dumps(name)} || b.getAttribute('aria-label') === {json.dumps(name)})"
+                    ".scrollIntoView({block: 'center', behavior: 'instant'})")
+            # Scrolling can leave the pointer over Retry and open its help
+            # tooltip across Ask. Move to the observed empty sidebar margin.
+            command("mouse", "move", "10", "10")
+            command("wait", "--fn", "Array.from(document.querySelectorAll('button')).some(b => {"
+                    f"if (b.textContent.trim() !== {json.dumps(name)} && b.getAttribute('aria-label') !== {json.dumps(name)}) return false;"
+                    "const r = b.getBoundingClientRect(); return !b.disabled && "
+                    "b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); })")
         command("find", "role", role, "click", "--name", name, *(["--exact"] if exact else []))
 
     def wait(text):
@@ -237,6 +258,15 @@ def main():
                     "source_sha256": hashes, "live": bool(args.key_file),
                     "limitations": "Frozen server mode in Chromium with test-only fake vault; not native window, installed upgrade or Windows acceptance."}, indent=2))
                 print(f"Packaged Jev workflow: {len(checks)} checks passed")
+            except Exception:
+                # Keep the original error even if a wedged browser cannot
+                # provide diagnostics. These reads never replay an action.
+                for parts in [("snapshot", "-i"), ("screenshot", str(output / "failure.png"))]:
+                    try:
+                        command(*parts)
+                    except Exception:
+                        pass
+                raise
             finally:
                 try:
                     subprocess.run(cli + ["close"], capture_output=True, timeout=20)

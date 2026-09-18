@@ -152,7 +152,10 @@ OS credential vault: acceptance fixtures must also supply their test-only keyrin
 backend. `scripts/check_packaged_jev.py` requires a disposable `.app` under this
 checkout's `output/`, verifies production source hashes, adds only the test fake
 vault module, and creates/removes its own fictional encrypted books. It never
-replaces the installed application. Example after building there:
+replaces the installed application. Adding the test backend changes the bundle's
+resource seal, so the harness ad-hoc signs and verifies that disposable bundle
+before launching it. It uses no developer signing certificate or real keychain.
+Example after building there:
 
 ```sh
 PYINSTALLER_CONFIG_DIR="$PWD/output/jev-package-cache" \
@@ -167,7 +170,8 @@ PYINSTALLER_CONFIG_DIR="$PWD/output/jev-package-cache" \
 # The key is read in memory by the test backend, never copied into the bundle.
 ```
 
-Open `http://127.0.0.1:8629` for the last command. Pick the synthetic row, consent,
+For the manual `jev_browser_fixture.py --port 8629` command above, open
+`http://127.0.0.1:8629`. Pick the synthetic row, consent,
 request twice, and confirm **Synthetic transport calls: 1**. Accept and verify the
 category fills while the posting checkbox stays unchecked. **Change synthetic
 evidence** must clear the accepted category without a new call. Enable **Simulate
@@ -225,6 +229,41 @@ open a ledger or read credential secrets. Build/test logs and the ad-hoc-signed
 bundle are under `output/jev-review-20260917/`. This checks Mac packaging/imports
 and CA availability, not packaged live-network or installed-app acceptance.
 Windows packaging remains unverified. No build was installed or published.
+
+### September 18 packaged workflow acceptance
+
+The fresh isolated Mac bundle passed ten end-to-end checks through its frozen
+server in Chromium, using the test-only fake vault and disposable encrypted books.
+The [saved result](jev-evaluation-results/packaged-mac-2026-09-18.json) records the
+production source hashes and transport evidence. After importing two fictional
+CSV rows and excluding both, a simulated offline request left both staged rows
+intact. Asking again reused the failure. Explicit Retry made exactly one real
+TLS request to TypeSafe; accepting its account suggestion and asking again reused
+that result without another network request. Bulk select/clear preserved exclusion.
+
+The reviewer then included only the accepted row and posted it through the normal
+page. Database inspection found one imported transaction and one journal entry,
+with 3,333-cent debit and credit lines, preserved source/fingerprint/idempotency
+fields, and human attribution. The encrypted file header and audit records were
+verified. The final screenshot reads “Posted 1 transaction — 1 excluded.” Jev
+1.13.0 reported 1,229 input / 131 output tokens. This one acceptance request is
+additional to the evaluation totals; billed dollars were not available.
+
+Evidence is under `output/jev-overnight-20260917/packaged-browser-tooltip/`:
+`result.json`, `transport-events.jsonl`, `database-evidence.json`, `browser.json`,
+`posted.png`, and signature/server logs. Earlier attempts are retained separately:
+startup/readiness/fixture subprocess timeouts occurred under heavy host load;
+another attempt exposed the Retry hover tooltip covering Ask after scrolling.
+The harness now moves the pointer away and checks the actual hit target before
+ordinary clicks, captures screenshots on failure, and retries only read-only
+waits. No failed attempt made a live provider request. No forced click or replayed
+mutation was used to obtain the passing run.
+
+This establishes packaged Mac imports, live CA/TLS, offline recovery, rerun reuse,
+human review and posting for this fictional case. It does not establish native
+window, installed-upgrade or Windows acceptance, production model accuracy, or
+startup/performance suitability under normal load. Final broad regression and
+volume rechecks remain separate gates.
 
 ## Labeled synthetic comparison
 
