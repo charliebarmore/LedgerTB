@@ -59,7 +59,12 @@ def choose_user_data_dir(current: Path, legacy: Path) -> Path:
 # data (database, saved API key) in a per-user app-data directory. Running from
 # source keeps everything in the repo -- unchanged dev/test behavior.
 _IS_FROZEN = getattr(sys, "frozen", False)
-if _IS_FROZEN:
+_DATA_DIR_OVERRIDE = app_env("DATA_DIR")
+if _DATA_DIR_OVERRIDE:
+    USER_DATA_DIR = Path(_DATA_DIR_OVERRIDE).expanduser()
+    if not USER_DATA_DIR.is_absolute():
+        raise ValueError("LEDGERTB_DATA_DIR must be an absolute path.")
+elif _IS_FROZEN:
     LEDGERTB_USER_DATA_DIR = Path(
         platformdirs.user_data_dir("LedgerTB", "LedgerLabs")
     )
