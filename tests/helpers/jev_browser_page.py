@@ -34,3 +34,5 @@ st.caption(f"Fixture evidence revision: {st.session_state.get('fixture_revision'
 runpy.run_path(str(Path(__file__).resolve().parents[2] / "pages/4_Import_Transactions.py"))
 st.divider()
 st.caption(f"Synthetic transport calls: {st.session_state.get('fixture_calls', 0)}")
+
+st.caption(f"Synthetic other-provider calls: {st.session_state.get('fixture_other_calls', 0)}")

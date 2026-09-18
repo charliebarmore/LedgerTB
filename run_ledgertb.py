@@ -372,6 +372,7 @@ def _selfcheck() -> int:
             "config", "constants", "money", "models.journal_entry", "models.reconciliation",
             "models.recurring_entry", "services.recurring_entries",
             "services.categorization", "services.jev_categorization", "utils.jev_review",
+            "services.review_categorization", "utils.ai_review",
             "urllib.request", "certifi", "services.document_import", "pypdfium2", "PIL",
             "keyring", "version", "utils.desktop_window"]
     failed = []

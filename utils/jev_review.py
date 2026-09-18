@@ -11,6 +11,7 @@ def _accept_suggestion(transaction, account_id, request_key):
     # This human category choice must be reflected in the same rendered frame.
     st.session_state[row_key("cat", transaction)] = account_id
     transaction["selected_account_id"] = account_id
+    transaction.pop("ai_review_accepted", None)
     transaction["jev_accepted"] = {"key": request_key, "account_id": account_id}
 
 
@@ -60,13 +61,15 @@ def prepare_jev_review(transactions, accounts, client_id, book, business_context
 
 
 def render_jev_review(transactions, accounts, client_id, prepared, *, chosen=None, show_results=True):
-    st.caption(
-        "TypeSafe Jev sends only the rows you choose: dates, descriptions, amounts, "
-        "source account IDs, transfer flags and receipt text if present, plus eligible "
-        "account IDs/names/numbers/types and the client's AI business context. "
-        "General client Notes are not sent. Every suggestion needs your review. "
-        "Choosing rows here does not change inclusion for posting."
-    )
+    with st.expander("What is sent to TypeSafe"):
+        st.caption(
+            "TypeSafe Jev sends only the rows you choose: dates, descriptions, amounts, "
+            "source account IDs, transfer flags and receipt text if present, plus eligible "
+            "account IDs/names/numbers/types and the client's AI business context. "
+            "General client Notes are not sent. Every suggestion needs your review. "
+            "Choosing rows here does not change inclusion for posting."
+        )
+    st.caption("Suggestions only. Every account choice needs your approval.")
     inputs, keys = prepared
     cache = st.session_state.setdefault("jev_results", {})
     by_uid = {t["uid"]: t for t in transactions}
@@ -114,6 +117,7 @@ def render_jev_result(transaction, accounts, client_id, prepared):
     result = st.session_state.get("jev_results", {}).get(keys.get(uid))
     if not result:
         return
+    st.text(f"TypeSafe Jev · {result.get("model", jev.MODEL)}")
     if result.get("error"):
         st.warning(result["error"] + " Your staged transactions are unchanged.")
         return

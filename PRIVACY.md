@@ -55,6 +55,13 @@ operating system credential vault. Suggestions and request results are held in
 session memory; each account suggestion needs human acceptance. Jev does not
 create entries or change inclusion for posting.
 
+Import review also offers Anthropic and OpenAI suggestions and independent second
+opinions. Each explicit request sends the same selected evidence described above
+to the chosen provider; other providers’ answers are not included. Provider/model
+changes alone send nothing. Their keys use the operating system credential vault.
+Results stay in session memory and require human acceptance. OpenAI requests go
+directly from your computer to OpenAI under your OpenAI account and service terms.
+
 TypeSafe requests go directly from your computer to TypeSafe and are governed
 by your TypeSafe account, agreement, and service settings.
 

@@ -259,10 +259,10 @@ from services.jev_categorization import PROVIDERS, configured_provider
 
 st.caption(
     "Cloud categorization is optional. Local rules and manual review work offline. "
-    "Choose a provider, save your own key in the system credential vault, and "
+    "Choose a default provider, save your own key in the system credential vault, and "
     "explicitly request suggestions in Import Review. Nothing posts automatically."
 )
-_provider = st.selectbox("Categorization provider", options=list(PROVIDERS),
+_provider = st.selectbox("Default categorization provider", options=list(PROVIDERS),
                          index=list(PROVIDERS).index(configured_provider()),
                          format_func=PROVIDERS.get, key="firm_categorization_provider")
 if st.button("Save categorization provider"):
@@ -295,18 +295,35 @@ if _typesafe_saved and st.button("Remove TypeSafe key"):
     delete_secret("typesafe_api_key")
     st.rerun()
 
+st.markdown("**OpenAI**")
+st.caption("Selected transaction evidence, eligible accounts and AI business context are sent to OpenAI only when requested. "
+           "Every suggestion needs your review and acceptance.")
+_openai_saved = get_secret("openai_api_key")
+if _openai_saved:
+    st.success("An OpenAI key is saved in the system credential vault.")
+_openai_key = st.text_input("OpenAI API Key", type="password", key="firm_openai_key")
+if st.button("Save OpenAI key", disabled=not _openai_key.strip()):
+    try:
+        set_secret("openai_api_key", _openai_key.strip())
+        st.success("OpenAI key saved. Available immediately for review requests.")
+    except Exception:
+        st.error("Could not save the OpenAI key securely. Try again.")
+if _openai_saved and st.button("Remove OpenAI key"):
+    delete_secret("openai_api_key")
+    st.rerun()
+
 st.markdown("**Anthropic**")
 st.caption(
-    "Sends transaction dates, descriptions, amounts, account names/numbers, "
+    "Sends selected transaction dates, descriptions, amounts, source account IDs, transfer flags, receipt text and eligible account details, "
     "client entity and business types, and optional AI business context to "
     "Anthropic when you request categorization. General client Notes are not sent."
 )
 
 _saved_key = get_secret("anthropic_api_key")
-if ANTHROPIC_API_KEY:
-    st.success("An Anthropic key is available for this session.")
-elif _saved_key:
-    st.info("An API key is saved. Restart LedgerTB to enable AI categorization.")
+if _saved_key:
+    st.success("An Anthropic key is saved. Available immediately for import review.")
+elif ANTHROPIC_API_KEY:
+    st.info("An environment key is available to other AI features. Save a key below to enable import review requests.")
 else:
     st.warning("Not configured — add an Anthropic API key below.")
 
@@ -322,9 +339,9 @@ with key_cols[0]:
     if st.button("Save key", type="primary", disabled=not api_key_input):
         try:
             set_secret("anthropic_api_key", api_key_input.strip())
-            st.success("Saved to the system credential vault. Restart LedgerTB to enable.")
+            st.success("Saved to the system credential vault. Available immediately for import review; restart for other AI features.")
         except Exception as exc:
-            st.error(f"Could not save the API key securely: {exc}")
+            st.error("Could not save the API key securely. Try again.")
 with key_cols[1]:
     if _saved_key and st.button("Remove key"):
         delete_secret("anthropic_api_key")

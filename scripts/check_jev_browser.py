@@ -47,7 +47,7 @@ def main():
     def click(role, name):
         if name in ("Selected rows", "Select all", "Clear selection"):
             show_panel("Select rows for actions")
-        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests"):
+        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests", "Ask another AI", "Ask Anthropic for suggestions", "Ask OpenAI for suggestions", "AI provider", "Model"):
             show_panel("AI suggestions")
         elif role != "option":
             show_panel()
@@ -110,6 +110,35 @@ def main():
             click("button", "Ask Jev for suggestions")
             snapshot()
             assert "Synthetic transport calls: 1" in command("get", "text", "body")
+            click("button", "Ask another AI")
+            state = snapshot()
+            assert any('combobox "AI provider"' in line and 'Anthropic' in line for line in state.splitlines()), state
+            assert 'Synthetic other-provider calls: 0' in command("get", "text", "body")
+            command("find", "role", "checkbox", "check", "--name", "Send the selected transaction information to Anthropic", "--exact")
+            click("button", "Ask Anthropic for suggestions")
+            command("wait", "--text", "AI opinions disagree")
+            check_account(True)
+            assert 'Synthetic other-provider calls: 1' in command("get", "text", "body")
+            click("button", "Ask Anthropic for suggestions")
+            snapshot()
+            assert 'Synthetic other-provider calls: 1' in command("get", "text", "body")
+            click("button", "Ask another AI")
+            snapshot()
+            command("find", "role", "checkbox", "check", "--name", "Send the selected transaction information to OpenAI", "--exact")
+            click("button", "Ask OpenAI for suggestions")
+            command("wait", "--text", "Synthetic other-provider calls: 2")
+            check_account(True)
+            show_panel("AI suggestions")
+            command("find", "role", "combobox", "fill", "gpt-4o-mini", "--name", "Model", "--exact")
+            snapshot()
+            command("press", "ArrowDown")
+            command("press", "Enter")
+            state = snapshot()
+            assert any('checkbox "Send the selected transaction information to OpenAI"' in line and 'checked=false' in line for line in state.splitlines()), state
+            assert 'Synthetic other-provider calls: 2' in command("get", "text", "body")
+            command("screenshot", str((args.output / "provider-picker.png").resolve()))
+            show_panel()
+            command("screenshot", str((args.output / "comparison.png").resolve()))
             click("radio", "Upload CSV")
             command("wait", "--text", "Upload Bank/Credit Card CSV File")
             snapshot()
@@ -153,9 +182,10 @@ def main():
             command("screenshot", str((args.output / "final.png").resolve()))
             (args.output / "result.json").write_text(json.dumps({"passed": True, "checks": [
                 "consent", "separate inclusion", "acceptance", "request reuse", "navigation persistence",
-                "provider-off invalidation", "failure preservation", "immediate explicit retry"
+                "provider-off invalidation", "failure preservation", "immediate explicit retry",
+                "independent Anthropic opinion", "OpenAI opinion", "disagreement visibility", "second-opinion reuse", "model switch resets consent without a request"
             ]}, indent=2) + "\n")
-            print("Jev browser review: 8 checks passed.")
+            print("Jev browser review: 13 checks passed.")
         except Exception:
             # Preserve the rendered state for diagnosing assertion or timing failures.
             command("snapshot", "-i")

@@ -137,7 +137,7 @@ def test_off_and_anthropic_options_remain_available(monkeypatch, client_id, acco
     fake_credential_vault["categorization_provider"] = "anthropic"
     at.run()
     assert not at.exception
-    assert any("transactions with AI" in b.label for b in at.button)
+    assert any(b.label == "Ask Anthropic for suggestions" for b in at.button)
 
 
 def _accept_fixture(at, row):

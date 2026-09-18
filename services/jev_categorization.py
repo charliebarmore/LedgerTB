@@ -54,7 +54,7 @@ OUTCOMES = {
     "split_required": "Split required: confirmed components of this movement need different accounting, such as multiple categories, mixed business/personal, principal plus interest, revenue plus fees, or rent plus refundable deposit. A human must allocate the amounts.",
     "transfer_review": "Transfer review: confirmed owned-account movement, card-balance repayment, owner funding/draw, loan principal, refundable security deposit, or human-flagged transfer. Check the other side. An ordinary card purchase is not a card-balance repayment; a confirmed expense component with principal requires a split.",
 }
-PROVIDERS = {"off": "Off (local rules only)", "anthropic": "Anthropic", "jev": "TypeSafe Jev"}
+PROVIDERS = {"off": "Off (local rules only)", "anthropic": "Anthropic", "jev": "TypeSafe Jev", "openai": "OpenAI"}
 
 
 def configured_provider():

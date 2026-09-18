@@ -90,6 +90,7 @@ def apply_bulk_category(transactions, state, account_id, *, transfer_ids, uncate
         if uncategorized_only and current:
             continue
         row["selected_account_id"] = account_id
+        row.pop("ai_review_accepted", None)
         row.pop("jev_accepted", None)  # This is a later explicit human decision.
         state[row_key("cat", row)] = account_id
         count += 1
@@ -167,6 +168,7 @@ _CLIENT_IMPORT_STATE_KEYS = {
 
 _CLIENT_IMPORT_STATE_PREFIXES = (
     "jev_",
+    "ai_review_",
     "cat_",
     "include_",
     "xfer_",

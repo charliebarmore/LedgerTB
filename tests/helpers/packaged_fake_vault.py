@@ -17,7 +17,7 @@ class Keyring(KeyringBackend):
     priority = 1
 
     def __init__(self):
-        self.values = {"categorization_provider": "jev"}
+        self.values = {"categorization_provider": "jev", "anthropic_api_key": "fictional-test-key", "openai_api_key": "fictional-test-key"}
         directory = os.environ.get("LEDGERTB_FIXTURE_DIR")
         if not directory:
             # keyring.load_env catches KeyError and would try OS discovery.
@@ -63,6 +63,18 @@ class Keyring(KeyringBackend):
                     log.write(json.dumps(event) + "\n")
 
         jev.send_request = tracked
+        from services import review_categorization as ai
+        def other_send(provider, payload, key):
+            # These providers are ALWAYS fake, even when --key-file enables live Jev.
+            state = json.loads(payload['input'][0]['content'] if provider == 'openai' else payload['messages'][0]['content'])
+            text = json.dumps({'suggestions': [dict(request_id=k, choice='insufficient_information',
+                reason='Synthetic second opinion requests receipt review.') for k in state['transactions']]})
+            with (scratch / 'other-requests.jsonl').open('a') as log:
+                log.write(json.dumps(dict(provider=provider, model=payload['model'], live=False, network_attempted=False)) + '\n')
+            if provider == 'openai':
+                return dict(model=payload['model'], status='completed', output=[dict(type='message', content=[dict(type='output_text', text=text)])])
+            return dict(model=payload['model'], stop_reason='end_turn', content=[dict(type='text', text=text)])
+        ai.send_request = other_send
 
     def get_password(self, service, username):
         return self.values.get(username) if service == "com.ledgerlabs.ledgertb" else None

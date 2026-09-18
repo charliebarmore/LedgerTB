@@ -44,7 +44,8 @@ def main():
         parser.error("The disposable bundle must not link its Frameworks directory outside the app")
     sources = ["config.py", "pages/4_Import_Transactions.py", "services/jev_categorization.py",
                "utils/jev_review.py", "utils/import_review.py", "services/csv_import.py",
-               "pages/2_Journal_Entries.py"]
+               "pages/2_Journal_Entries.py", "pages/7_Dashboard.py", "pages/12_Firm_Settings.py",
+               "services/review_categorization.py", "utils/ai_review.py"]
     hashes = {}
     for name in sources:
         actual = (bundle / name).read_bytes()
@@ -109,7 +110,7 @@ def main():
     def click(role, name, exact=True):
         if name in ("Selected rows", "Select all", "Clear selection"):
             show_panel("Select rows for actions")
-        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests"):
+        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests", "Ask another AI", "Ask Anthropic for suggestions", "Ask OpenAI for suggestions"):
             show_panel("AI suggestions")
         elif role != "option":
             show_panel()
@@ -247,6 +248,23 @@ def main():
                 assert sum(row["network_attempted"] for row in requests) == int(bool(args.key_file))
                 checks += ["packaged SQLCipher unlock and CSV import", "explicit Jev request and human acceptance", "acceptance preserves exclusion", "rerun and repeated request reuse"]
                 checks += ["offline failure preserves staged rows", "failed result reuse and explicit recovery retry"]
+                for other_provider in ("Anthropic", "OpenAI"):
+                    click("button", "Ask another AI")
+                    snap()
+                    command("find", "role", "checkbox", "check", "--name",
+                            f"Send the selected transaction information to {other_provider}", "--exact")
+                    click("button", f"Ask {other_provider} for suggestions")
+                    wait("AI opinions disagree")
+                    click("button", f"Ask {other_provider} for suggestions")
+                    snap()
+                other_requests = [json.loads(line) for line in (scratch / "other-requests.jsonl").read_text().splitlines()]
+                assert [r["provider"] for r in other_requests] == ["anthropic", "openai"]
+                assert not any(r["network_attempted"] for r in other_requests)
+                (output / "other-requests.json").write_text(json.dumps(other_requests, indent=2))
+                show_panel()
+                assert len([line for line in snap().splitlines() if 'checkbox "Include for posting"' in line and "checked=false" in line]) == 2
+                command("screenshot", str(output / "provider-comparison.png"))
+                checks += ["packaged Anthropic and OpenAI structured responses", "independent disagreement display", "second opinions preserve accepted category and exclusions", "second opinions reuse requests"]
                 click("button", "Select all")
                 second_chip = "Remove 2026-09-02 | Unknown marketplace no receipt | $-48.25"
                 command("wait", "--fn", "Array.from(document.querySelectorAll('button')).some(b => "

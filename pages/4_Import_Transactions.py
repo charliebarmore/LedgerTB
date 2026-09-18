@@ -22,8 +22,8 @@ from services.csv_import import (
 )
 from services.import_verification import check_row_continuity, verify_against_source
 from services.categorization import CategorizationService
-from services.jev_categorization import configured_provider
-from utils.jev_review import prepare_jev_review, render_jev_review, render_jev_result
+from utils.jev_review import prepare_jev_review
+from utils.ai_review import current_config, prepare_other_reviews, render_controls, render_results
 from services.pattern_learning import PatternLearner
 from services.posting import post_transaction
 from services.import_identity import classify_import_duplicates, hash_source
@@ -1620,11 +1620,16 @@ elif selected_tab == "Review & Categorize":
 
         # Reconcile previously accepted Jev categories independently of the
         # currently selected provider, before category controls or posting.
-        provider = configured_provider()
+        provider, review_model = current_config(st.session_state)
         jev_prepared = prepare_jev_review(
             transactions, all_accounts, client_id, dbconn.DATABASE_PATH,
             client.categorization_context(), st.session_state,
-            include_unaccepted=provider == "jev",
+            include_unaccepted=provider != "off",
+        )
+
+        other_prepared = prepare_other_reviews(
+            transactions, all_accounts, client_id, dbconn.DATABASE_PATH,
+            client.categorization_context(), st.session_state, provider, review_model,
         )
 
         # Summary and bulk actions
@@ -1717,84 +1722,7 @@ elif selected_tab == "Review & Categorize":
 
         with action_ai:
             with st.popover("AI suggestions", width="stretch"):
-                # AI Categorization section
-
-                # Show previous categorization result if any
-                if st.session_state.get('ai_categorization_result'):
-                    result = st.session_state.ai_categorization_result
-                    if result.get('error'):
-                        st.error(f"AI categorization error: {result['error']}")
-                    elif result.get('matched', 0) > 0:
-                        st.success(f"AI categorization complete! Matched {result['matched']} of {result['total']} transactions.")
-                    else:
-                        st.warning(f"AI processed {result.get('total', 0)} transactions but none matched your accounts.")
-                    # Clear the message after showing
-                    st.session_state.ai_categorization_result = None
-
-                if provider == "jev":
-                    render_jev_review(transactions, all_accounts, client_id, jev_prepared,
-                                      chosen=st.session_state["bulk_rows"], show_results=False)
-                elif provider == "anthropic" and categorization_service.is_available():
-                    # Build list of uncategorized transactions.
-                    # Check session state for current selection, not transaction dict.
-                    uncategorized = [
-                        t for t in transactions
-                        if not st.session_state.get(row_key("cat", t))
-                    ]
-
-                    if uncategorized:
-                        col1, col2 = st.columns([2, 2])
-                        with col1:
-                            if st.button(f"Categorize {len(uncategorized)} transactions with AI", type="secondary"):
-                                with st.spinner("AI is analyzing transactions..."):
-                                    # Get expense and revenue accounts for suggestions
-                                    expense_accts = [a for a in all_accounts if a.type == 'Expense']
-                                    revenue_accts = [a for a in all_accounts if a.type == 'Revenue']
-                                    categorization_service.categorize_transactions(
-                                        uncategorized,
-                                        expense_accts + revenue_accts,
-                                        business_context=client.categorization_context(),
-                                    )
-
-                                # Store result in session state for display after rerun
-                                if hasattr(categorization_service, 'last_error') and categorization_service.last_error:
-                                    st.session_state.ai_categorization_result = {
-                                        'error': categorization_service.last_error
-                                    }
-                                else:
-                                    st.session_state.ai_categorization_result = {
-                                        'matched': getattr(categorization_service, 'last_matched', 0),
-                                        'total': getattr(categorization_service, 'last_total', 0),
-                                    }
-
-                                # Update the selectbox session state keys to match AI suggestions.
-                                # Only the transactions that were just categorized (uncategorized
-                                # holds references to the same dicts, now mutated by the AI call),
-                                # so manual selections the user already made are preserved.
-                                for t in uncategorized:
-                                    if 'suggested_account_id' in t and t['suggested_account_id']:
-                                        st.session_state[row_key("cat", t)] = t['suggested_account_id']
-
-                                # Save updated transactions to session state
-                                st.session_state.transactions_to_review = transactions
-                                st.rerun()
-                        with col2:
-                            st.caption(
-                                "Sends transaction dates, descriptions, amounts, and the "
-                                "available account names/numbers to Anthropic, along with "
-                                "the client's entity type, business type, and optional AI "
-                                "business context. General client Notes are not sent. "
-                                "Suggestions only; nothing posts automatically."
-                            )
-                    else:
-                        st.success("All transactions have been categorized!")
-                else:
-                    # Configuration lives on Firm Settings with the rest of the
-                    # firm-level setup; this workflow page only points there.
-                    st.caption("AI categorization is off — choose a provider and add its API key "
-                               "on the Firm Settings page to enable suggestions here.")
-                    st.page_link("pages/12_Firm_Settings.py",
-                                 label="Set up AI categorization", icon=icons.FIRM)
+                render_controls(transactions, all_accounts, client_id, jev_prepared, other_prepared)
 
         def _apply_bulk(uncategorized_only):
             account_id = st.session_state.get("bulk_account_select")
@@ -2001,8 +1929,8 @@ elif selected_tab == "Review & Categorize":
                 transactions[i]['is_transfer'] = is_transfer
 
             with col5:
-                if provider == "jev":
-                    render_jev_result(t, all_accounts, client_id, jev_prepared)
+                if provider != "off":
+                    render_results(t, all_accounts, client_id, jev_prepared, other_prepared)
                 # Initialize session state for this selectbox if not already set
                 cat_key = row_key("cat", t)
                 if cat_key not in st.session_state:
@@ -2158,9 +2086,6 @@ elif selected_tab == "Review & Categorize":
                 }
                 st.rerun()
 
-        with col3:
-            if provider == "anthropic" and not categorization_service.is_available():
-                st.caption("Anthropic is unavailable — add its key in Firm Settings.")
 
 elif selected_tab == "Import History":
     st.subheader("Import History")

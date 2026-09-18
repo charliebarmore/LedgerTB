@@ -1,4 +1,4 @@
-# Optional TypeSafe Jev categorization
+# Optional AI categorization and second opinions
 
 Implementation and local verification: 2026-09-17–18. Current business priorities and
 rollout decisions live on the [LedgerTB Notion project](https://app.notion.com/p/3d7f5bd8d2b981ed91d3fad1a03255ce).
@@ -31,12 +31,114 @@ and parked categories stay visible in the review count when their rows are
 off-screen. Accepting a Jev account updates the summary in the same interaction.
 
 **Off (local rules only)** is the default until a provider is saved, including
-for existing installations with an Anthropic key. Existing Anthropic categorization
-remains selectable, with its existing behavior. Document parsing and Book Review
+for existing installations with an Anthropic key. Import review now supports
+Jev, Anthropic and OpenAI through the same explicit review-and-accept flow.
+Document parsing and Book Review
 retain their separate Anthropic behavior; this setting controls import categorization.
 No provider call occurs from loading the page, choosing rows, opening action panels, changing consent,
 sorting, accepting a suggestion, or ordinary reruns. Offline manual review and
 local pattern matching remain available.
+
+## Choose a model or get a second opinion
+
+In the **AI suggestions** popover, choose **AI provider** and **Model** for the
+current request. Firm Settings stores the default provider and separate API keys;
+review uses only keys saved through the OS credential vault. Model availability
+and billing depend on that provider account. **Other model ID** supports a
+structured-JSON-capable model on the selected Anthropic/OpenAI API, not arbitrary
+providers or custom endpoints. Jev exposes its supported `jev-latest` model.
+
+After requesting Jev (or another provider), click **Ask another AI**, select the
+provider/model you want, consent to sending the selected evidence, then request
+suggestions. Nothing is sent by switching providers/models. The second opinion
+uses the same evidence independently; it does not receive the first AI's answer.
+Earlier current-input opinions remain beside the row, attributed to their returned
+model. Conflicting account/review outcomes show a disagreement warning. Choose
+which account suggestion to accept; posting inclusion remains a separate decision.
+Provider/model preferences survive navigation; consent resets on provider/model
+changes. A provider request never automatically falls back to another provider.
+
+Anthropic/OpenAI return one allowlisted account or review outcome per requested
+row, with a brief explanation. No model-generated confidence is presented as a
+probability. Jev retains its distribution-concentration label. Both adapters
+reject unknown account/row IDs, duplicate or omitted rows, refusals, incomplete
+output and malformed responses before displaying any suggestion from the batch.
+
+`services/review_categorization.py` uses fixed HTTPS endpoints and the existing
+stdlib/certifi stack; no new dependency or SDK is added. Official API contracts
+checked September 18, 2026:
+[OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+(Responses API `text.format`, `store: false`) and
+[Anthropic Structured Outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+(Messages API `output_config.format`). Disabling response storage is not a promise
+of zero provider retention; the provider's terms and account settings still apply.
+
+Reuse keys include ledger/client scope, provider, requested model, endpoint,
+complete evidence, eligible choices, instructions and schema version. Each
+accepted opinion is revalidated using its own provider/model even if the picker
+now names a different provider or is Off. Changing evidence/context/choices clears
+a stale accepted category before posting; a later manual category choice survives.
+Errors and interrupted requests require explicit retry; retry can incur another
+charge. Returning to a previously successful input/model reuses its cached result.
+Closing the app ends this session cache.
+
+### Local checks for provider selection
+
+Use the repository's Python 3.12 environment. All automated cases below use fake
+vaults/transports and disposable SQLCipher databases; they do not use live keys.
+
+```sh
+.macos-venv/bin/python -m pytest tests/test_review_categorization.py tests/test_ai_review.py tests/test_jev_review.py -q
+.macos-venv/bin/python scripts/check_jev_browser.py --output output/provider-browser
+.macos-venv/bin/python -m pytest -q -m "not performance"
+.macos-venv/bin/python -m PyInstaller LedgerTB.spec --noconfirm --distpath output/provider-preview/dist --workpath output/provider-preview/build
+.macos-venv/bin/python scripts/check_packaged_jev.py --app output/provider-preview/dist/LedgerTB.app --output output/provider-preview/acceptance
+```
+
+The packaged harness injects a test-only fake vault into that disposable output
+bundle and repairs its ad hoc signature. It always simulates Anthropic/OpenAI;
+`--key-file` applies only to the separately authorized fictional Jev check. Do not
+use the modified bundle for real books or as a release artifact. Production
+packaging includes the new source modules automatically as data; `run_ledgertb.py`
+checks both new imports. No lockfile or dependency changes are required.
+
+For a human walkthrough with the isolated synthetic fixture: choose one action
+row while leaving it excluded, request Jev, then **Ask another AI** → Anthropic
+or OpenAI. Confirm earlier opinions remain and disagreement is shown. Accept an
+account and confirm Include is still unchecked. Change provider/model: consent
+must be unchecked, and no request occurs until explicitly requested. Requests
+that timed out should show Retry without losing the staged row. Model access,
+live response contracts, real usage/cost and provider account terms still require
+validation with approved development accounts before rollout.
+
+### September 18 provider selection verification
+
+[Verification record](jev-evaluation-results/providers-2026-09-18.json): full suite
+**848 passed, 5 Windows-only skips**, 396.82 seconds; all **3 performance checks**
+passed. The full suite precedes the final display-only grouping of the selectors
+and expandable disclosure; all **26 affected review-screen tests** passed afterward
+(71.53 seconds). Final-source browser passed **13 checks**, including model-change
+consent reset with no automatic request. Final-source frozen Mac acceptance passed
+**18 checks**, including all three simulated providers, disagreements, request
+reuse, retained exclusions, human balanced posting, import identity/audit and book
+isolation. The native preview opened and was brought forward; full native-window
+workflow, real credential-vault/upgrade and Windows acceptance remain separate.
+
+No live provider calls or billing occurred in this pass. New Anthropic/OpenAI
+contracts, model IDs/access and real usage/cost still need approved development
+account validation. Existing live Jev evaluation is unchanged. At small viewport
+heights Streamlit can position the popover partly above the visible page;
+keyboard model selection passed, but that placement remains a native usability
+walkthrough item. Failed harness runs are retained in the artifact directory and
+are not counted as passing evidence. Final screenshots and source hashes are
+under `output/provider-review-20260918/final-{browser,packaged}/`.
+
+The separate fictional native preview uses
+`output/provider-review-20260918/walkthrough/launch.py`, disposable books in its
+`books/` directory, and the included `synthetic-import.csv`. Its test passphrase is
+`fictional-packaged-acceptance-only`. This launcher forces the fake vault and
+simulated providers. Do not open the bundle directly for real client work. The
+installed application and older walkthrough windows were not replaced or closed.
 
 ## Data and boundaries
 

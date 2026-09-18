@@ -4,6 +4,7 @@ Usage: python scripts/jev_browser_fixture.py --port 8629
 The temporary book is removed on normal shutdown; no real key or ledger is read.
 """
 import argparse
+import json
 import os
 from pathlib import Path
 import sys
@@ -22,7 +23,8 @@ def main():
         os.environ["LEDGERTB_DB_PATH"] = str(Path(scratch) / "synthetic.db")
         os.environ["LEDGERTB_BACKUP_DIR"] = str(Path(scratch) / "backups")
         from utils import secure_store
-        vault = {"categorization_provider": "jev", "typesafe_api_key": "fake-not-used"}
+        vault = {"categorization_provider": "jev", "typesafe_api_key": "fake-not-used",
+                 "anthropic_api_key": "fake-not-used", "openai_api_key": "fake-not-used"}
         secure_store.get_secret = lambda name: vault.get(name)
         secure_store.set_secret = lambda name, value: vault.__setitem__(name, value)
         secure_store.delete_secret = lambda name: vault.pop(name, None)
@@ -52,6 +54,18 @@ def main():
                                 "probabilities": {c: float(c == choice) for c in question["criteria"]}}
             return {"model": "fake-jev", "answers": answers, "usage": {"input_tokens": 10, "output_tokens": 10}}
         jev.send_request = send
+        from services import review_categorization as ai
+        def other_send(provider, payload, key):
+            st.session_state["fixture_other_calls"] = st.session_state.get("fixture_other_calls", 0) + 1
+            if st.session_state.get("fixture_fail"):
+                raise TimeoutError()
+            state = json.loads(payload['input'][0]['content'] if provider == 'openai' else payload['messages'][0]['content'])
+            text = json.dumps({'suggestions': [dict(request_id=k, choice='insufficient_information',
+                reason='Synthetic second opinion requests a receipt.') for k in state['transactions']]})
+            if provider == 'openai':
+                return dict(model=payload['model'], status='completed', output=[dict(type='message', content=[dict(type='output_text', text=text)])])
+            return dict(model=payload['model'], stop_reason='end_turn', content=[dict(type='text', text=text)])
+        ai.send_request = other_send
         import utils.client_selector as selector
         selector.render_client_selector = lambda: client_id
         st.page_link = lambda *args, **kwargs: None
