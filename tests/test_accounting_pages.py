@@ -1095,7 +1095,7 @@ def test_dashboard_balances_show_totals_and_equation(client_id, accounts, monkey
         assert label in html, f"missing {label!r}"
     assert "$1,080.00" in html  # total assets: 900 + 300 - 120
 
-    success = "\n".join(str(s.value) for s in dashboard.success)
+    success = "\n".join(str(s.value) for s in dashboard.success).replace(r"\$", "$")
     assert "In balance" in success
     assert "assets $1,080.00" in success
     # liabilities 50 + equity 900 + net income (300 - 170) = 1,080
