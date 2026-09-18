@@ -70,9 +70,11 @@ def test_consent_cache_retry_and_scope(accounts, client_id):
         changed = copy.deepcopy(data)
         changed["transaction"][field] = "changed"
         assert jev.request_key(("book-a", client_id), changed) != key
-    for field in ("business_context", "eligible_accounts"):
-        changed = {**data, field: "changed"}
-        assert jev.request_key(("book-a", client_id), changed) != key
+    changed = {**data, "business_context": "changed"}
+    assert jev.request_key(("book-a", client_id), changed) != key
+    changed = copy.deepcopy(data)
+    changed["eligible_accounts"][0]["name"] = "Changed account choice"
+    assert jev.request_key(("book-a", client_id), changed) != key
 
 
 @pytest.mark.parametrize("failure", [TimeoutError("SECRET"), urllib.error.URLError("SECRET"),
@@ -194,3 +196,93 @@ def test_staged_jev_review_preserves_identity_permissions_and_posting(accounts, 
     assert history and "(AI)" not in history[0].performed_by
     again = mcp_tools.propose_import(client_id, "1000", [row], "Synthetic statement")
     assert again["staged"] == 0
+
+
+def test_choice_criteria_change_invalidates_request(accounts, client_id, monkeypatch):
+    data = inputs(accounts, client_id)
+    original = jev.request_key(('book', client_id), data)
+    criteria = jev.criteria_for(data)
+    monkeypatch.setattr(jev, 'criteria_for', lambda _: {**criteria, 'insufficient_information': 'Updated review rule'})
+    assert jev.request_key(('book', client_id), data) != original
+
+
+@pytest.mark.parametrize('total', [.99, 1.01])
+def test_rounded_provider_distribution_remains_reviewable(total):
+    data = {'eligible_accounts': [{'id': 1, 'number': '6100', 'name': 'Supplies', 'type': 'Expense', 'subtype': None}]}
+    probabilities = {'account_1': .93, 'insufficient_information': .05 if total < 1 else .07,
+                     'split_required': .01, 'transfer_review': 0.0}
+    answer = {'type': 'choice', 'choice': 'account_1', 'confidence': .92, 'probabilities': probabilities}
+    result = jev.validate_answer(answer, data)
+    assert result['account_id'] == 1 and result['requires_review']
+    assert result['probabilities'] == probabilities  # Preserve provider values; don't fabricate precision.
+
+
+@pytest.mark.parametrize('probabilities', [
+    {'account_1': .9, 'insufficient_information': .05, 'split_required': 0, 'transfer_review': 0},
+    {'account_1': .95, 'insufficient_information': .15, 'split_required': 0, 'transfer_review': 0},
+    {'account_1': .934, 'insufficient_information': .076, 'split_required': 0, 'transfer_review': 0},
+])
+def test_distribution_tolerance_does_not_accept_material_or_unrounded_errors(probabilities):
+    data = {'eligible_accounts': [{'id': 1, 'number': '6100', 'name': 'Supplies', 'type': 'Expense', 'subtype': None}]}
+    with pytest.raises(ValueError):
+        jev.validate_answer({'type': 'choice', 'choice': 'account_1', 'confidence': .9, 'probabilities': probabilities}, data)
+
+
+def large_chart_inputs(count=100, receipt='Studio printing paper'):
+    # Plain fake objects avoid a large fixture DB for tests of pure request planning.
+    from types import SimpleNamespace
+    accounts = [SimpleNamespace(id=i+1, client_id=1, is_active=True, account_number=str(6000+i),
+                                name=f'Fictional business category {i}', type='Expense', subtype=None)
+                for i in range(count)]
+    return jev.request_input({'date': '2026-01-01', 'description': 'Synthetic receipt',
+                              'amount': -10, 'receipt_text': receipt}, accounts, 1, 'Synthetic studio')
+
+
+def test_large_chart_is_split_without_truncation_and_reruns_reuse_all_results():
+    import json
+    data = large_chart_inputs()
+    requested = {str(i): {**data, 'transaction': {**data['transaction'], 'description': f'Synthetic row {i}'}}
+                 for i in range(25)}
+    calls, cache = [], {}
+    def send(payload, key):
+        calls.append(payload)
+        assert len(json.dumps(payload, ensure_ascii=False).encode()) <= jev.MAX_REQUEST_BYTES
+        assert len(payload['state']['eligible_accounts']) == 100
+        assert all(len(q['criteria']) == 103 for q in payload['questions'].values())
+        return response(payload)
+    jev.suggest(requested, cache, api_key='fake', consent=True, transport=send)
+    assert len(calls) > 1
+    assert set(cache) == set(requested) and not any(c.get('error') for c in cache.values())
+    first_calls = len(calls)
+    jev.suggest(requested, cache, api_key='fake', consent=True, retry=True, transport=send)
+    assert len(calls) == first_calls
+    assert {key for payload in calls for key in payload['questions']} == set(requested)
+
+
+def test_oversized_evidence_stays_local_and_is_not_retried_without_input_change():
+    data = large_chart_inputs(1, receipt='字' * 30_000)
+    cache = {}
+    def never(*args):
+        pytest.fail('Oversized evidence must not be sent or silently truncated')
+    for retry in (False, True):
+        jev.suggest({'key': data}, cache, api_key='fake', consent=True, retry=retry, transport=never)
+    assert cache['key']['retryable'] is False
+    assert 'account_id' not in cache['key']
+    assert len(data['transaction']['receipt_text']) == 30_000
+
+
+def test_transport_failure_stops_remaining_chunks_and_explicit_retry_is_required():
+    data = large_chart_inputs()
+    cache, calls = {}, []
+    requested = {str(i): data for i in range(25)}
+    def unavailable(*args):
+        calls.append(True)
+        raise urllib.error.HTTPError(jev.ENDPOINT, 429, 'not logged', {}, None)
+    jev.suggest(requested, cache, api_key='fake', consent=True, transport=unavailable)
+    assert len(calls) == 1 and len(cache) == 25
+    assert all(c.get('error') for c in cache.values())
+    assert any('Not sent' in c['error'] for c in cache.values())
+    jev.suggest(requested, cache, api_key='fake', consent=True, transport=unavailable)
+    assert len(calls) == 1
+    jev.suggest(requested, cache, api_key='fake', consent=True, retry=True, transport=unavailable)
+    assert len(calls) == 2

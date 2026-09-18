@@ -31,6 +31,7 @@ def test_metrics_separate_wrong_accounts_from_review_route_mismatches():
     result = comparison.summarize(rows)
     assert result['cases'] == 5 and result['completed'] == 4 and result['correct'] == 1
     assert result['wrong_account_suggestions'] == 1
+    assert result['confident_wrong_account_suggestions'] == 1
     assert result['review_route_mismatches'] == 1
     assert result['missed_account_suggestions'] == 1
     assert result['account_suggestion_precision'] == .5
@@ -65,9 +66,10 @@ def test_batching_preserves_evidence_excludes_labels_and_counts_usage_once(accou
         return _response(payload)
     result = comparison.evaluate_jev(cases, transactions, chart, client_id, {'business_context': 'Synthetic'},
                                      api_key='fake', transport=send)
-    assert [len(c['questions']) for c in calls] == [25, 25, 3]
-    assert result['network_requests'] == 3
-    assert result['usage'] == {'input_tokens': 300, 'output_tokens': 30}
+    assert sum(len(c['questions']) for c in calls) == 53
+    assert all(0 < len(c['questions']) <= 25 for c in calls)
+    assert result['network_requests'] == len(calls)
+    assert result['usage'] == {'input_tokens': 100 * len(calls), 'output_tokens': 10 * len(calls)}
     assert result['summary']['completed'] == 53
 
 

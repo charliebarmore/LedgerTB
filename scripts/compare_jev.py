@@ -35,6 +35,7 @@ def summarize(rows):
         "account_suggestion_precision": sum(r["actual"] == r["expected"] for r in accounts) / len(accounts) if accounts else None,
         "confident_errors": sum(r.get("confidence", 0) >= .8 for r in wrong),
         "wrong_account_suggestions": sum(r["actual"] not in REVIEW_OUTCOMES for r in wrong),
+        "confident_wrong_account_suggestions": sum(r["actual"] not in REVIEW_OUTCOMES and r.get("confidence", 0) >= .8 for r in wrong),
         "missed_account_suggestions": sum(r["actual"] in REVIEW_OUTCOMES and r["expected"] not in REVIEW_OUTCOMES for r in wrong),
         "review_route_mismatches": sum(r["actual"] in REVIEW_OUTCOMES and r["expected"] in REVIEW_OUTCOMES for r in wrong),
         "errors": len(rows) - len(valid),
@@ -93,7 +94,12 @@ def evaluate_jev(cases, transactions, accounts, client_id, fixture, *, api_key,
         # Evaluation-only scope is stable and fictional; production always uses the actual ledger scope.
         fingerprint = jev.request_key(("synthetic-evaluation", client_id), data)
         groups[json.dumps((data["business_context"], data["eligible_accounts"]), sort_keys=True)].append((case, data, fingerprint))
-    chunks = [group[i:i + batch_size] for group in groups.values() for i in range(0, len(group), batch_size)]
+    chunks = []
+    for group in groups.values():
+        for i in range(0, len(group), batch_size):
+            chunk = group[i:i + batch_size]
+            for planned, _ in jev.plan_requests({key: data for _, data, key in chunk}):
+                chunks.append([entry for entry in chunk if entry[2] in planned])
     if len(chunks) > max_requests:
         raise ValueError("Request limit would be exceeded; select fewer cases or explicitly increase --max-requests.")
     rows, batches, cache = [], [], {}
@@ -118,6 +124,10 @@ def evaluate_jev(cases, transactions, accounts, client_id, fixture, *, api_key,
                         "network_requests": len(called), "latency_seconds": duration,
                         "model": response.get("model") if isinstance(response.get("model"), str) else None,
                         "usage": usage, "error": next((cache[k]["error"] for _, _, k in chunk if cache[k].get("error")), None)})
+        if batches[-1]["error"] and response:
+            # Fictional evaluation only: retain the typed answer fields needed
+            # to diagnose validation failures, never credentials or HTTP bodies.
+            batches[-1]["invalid_answers"] = response.get("answers")
         for case, _, key in chunk:
             result = cache[key]
             rows.append(labeled_row(case, by_id.get(result.get("account_id"), result.get("outcome")),
@@ -148,6 +158,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=ROOT / "tests/fixtures/jev_comparison.json")
     parser.add_argument("--split", choices=("all", "development", "holdout"), default="all")
+    parser.add_argument("--case-id", action="append", help="Explicit diagnostic subset within the selected split; repeat for more IDs")
     parser.add_argument("--live-jev", action="store_true")
     parser.add_argument("--live-anthropic", action="store_true")
     parser.add_argument("--key-file", type=Path, default=Path.home() / ".typesafe.env")
@@ -156,6 +167,11 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "output/jev-comparison.json")
     args = parser.parse_args()
     fixture, cases = load_fixture(args.fixture, args.split)
+    if args.case_id:
+        selected_ids = set(args.case_id)
+        if selected_ids - {c["id"] for c in cases}:
+            raise SystemExit("An explicit case ID is not in the selected split.")
+        cases = [c for c in cases if c["id"] in selected_ids]
     # Patch BEFORE importing config; none of this program accesses the real vault.
     from utils import secure_store
     secure_store.get_secret = lambda name: None

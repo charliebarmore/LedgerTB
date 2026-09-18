@@ -43,6 +43,12 @@ those choices exactly. The adapter validates question IDs, answer type, complete
 finite probability distributions, totals, winner, and concentration. A malformed
 batch fails closed, leaving staged transactions unchanged.
 
+Live Jev 1.13 also returns two-decimal probabilities whose total can be 0.99 or
+1.01. Validation accepts only a rounding-compatible discrepancy bounded by 0.005
+per choice and capped at 0.02 overall; non-rounded discrepancies retain the 0.001
+normalization tolerance. Original values are preserved. Materially wrong totals,
+unknown/missing choices, nonfinite values and an invalid winner still fail closed.
+
 `services/jev_categorization.py` has no database-write or posting path. It returns
 review outcomes; `utils/jev_review.py` displays them inside the existing import
 page. Only a human acceptance fills a category. It never changes posting inclusion
@@ -77,6 +83,23 @@ provider fallback. A 30-second socket timeout bounds stalled network operations;
 responses are capped at 2 MB. Redirects are rejected, and provider exception bodies
 are never shown or stored. Missing keys, invalid keys, rate limits, network failures
 and invalid responses leave staged work available for manual review.
+
+The request key includes the actual Choice criteria, so editing an option's rubric
+also invalidates reuse. Confirmed mixed components, unresolved conflicting evidence,
+ordinary card purchases and card-balance payments have distinct review rules.
+Instructions embedded in transaction/receipt/account/context text cannot authorize
+an action and are explicitly excluded as evidence of a business purpose. These are
+model instructions, not a guarantee against semantic errors; human review remains
+mandatory.
+
+Selecting up to 25 rows may require multiple requests for a large chart or long
+receipts. The panel discloses the new request count. Conservative UTF-8 JSON byte
+budgets (60,000 overall and 30,000 for state plus the largest question) stay below
+the documented 64k/32k token limits without adding a tokenizer. No evidence or
+eligible accounts are silently truncated. An individually oversized row stays local
+with guidance; unchanged retries do not send it. All pending keys are marked before
+network IO, and a transport failure stops the remaining requests until explicit retry.
+Validation failures remain isolated to the affected response batch.
 
 Reuse lasts only within the current session; restarting or opening a second session
 requires another explicit request and may charge again. `jev-latest` can move upstream;
@@ -166,6 +189,10 @@ and CA availability, not packaged live-network or installed-app acceptance.
 Windows packaging remains unverified. No build was installed or published.
 
 ## Labeled synthetic comparison
+
+The expanded 120-case protocol and development/held-out separation are specified in
+[JEV-VALIDATION-PLAN.md](JEV-VALIDATION-PLAN.md). The original smoke results below
+remain historical evidence; they do not establish the expanded set's accuracy.
 
 The fixed [fixture](../tests/fixtures/jev_comparison.json) labels 16 fictional cases:
 clear controls, ambiguous merchants, transfers/card payments/owner funding,
