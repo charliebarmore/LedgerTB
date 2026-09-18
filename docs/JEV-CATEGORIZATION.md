@@ -19,6 +19,13 @@ This is a source implementation, not a released or installed application update.
    is outside this integration; resolve it through the existing accounting workflow.
 5. Review inclusion and category/transfer controls before posting normally.
 
+Review rows are shown 50 at a time. **Include All / Exclude All** controls posting
+across the whole review list. **Rows for bulk categorization** is a separate
+selection: applying an account or clearing that selection never changes posting
+inclusion. Bulk transfer edits require an asset/liability account. Categories,
+transfer flags and exclusions remain attached to stable row IDs when paging or
+sorting. Posting uses included rows on every page, as disclosed above the grid.
+
 **Off (local rules only)** is the default until a provider is saved, including
 for existing installations with an Anthropic key. Existing Anthropic categorization
 remains selectable, with its existing behavior. Document parsing and Book Review
@@ -106,6 +113,12 @@ requires another explicit request and may charge again. `jev-latest` can move up
 recorded responses include the actual model. There is no cross-session paid-request
 idempotency claim or persistent cache of financial evidence.
 
+For large imports, request inputs are built only for selected, previously requested,
+or accepted rows. Previously requested results remain available after leaving and
+returning to Review; accepted suggestions are still checked for stale evidence even
+with Jev off. The grid reuses loaded account labels instead of querying each row's
+source account separately.
+
 ## Tests and desktop packaging
 
 ```sh
@@ -127,6 +140,31 @@ idempotency claim or persistent cache of financial evidence.
 
 # Automated browser regression checks (requires agent-browser and Chromium):
 .macos-venv/bin/python scripts/check_jev_browser.py
+```
+
+The expanded 120-case comparison, first held-out result and iteration failures are
+documented in [the September 17 evaluation report](JEV-EVALUATION-2026-09-17.md).
+
+`LEDGERTB_DATA_DIR` can point a source or frozen launch at an absolute, isolated
+data home (registry, default book, backups and legacy-key-file location). Without
+the override, existing directory selection is unchanged. It does not isolate the
+OS credential vault: acceptance fixtures must also supply their test-only keyring
+backend. `scripts/check_packaged_jev.py` requires a disposable `.app` under this
+checkout's `output/`, verifies production source hashes, adds only the test fake
+vault module, and creates/removes its own fictional encrypted books. It never
+replaces the installed application. Example after building there:
+
+```sh
+PYINSTALLER_CONFIG_DIR="$PWD/output/jev-package-cache" \
+  LEDGERTB_CODESIGN_ID= PROBOOKS_CODESIGN_ID= \
+  .macos-venv/bin/python -m PyInstaller LedgerTB.spec --noconfirm \
+  --distpath output/jev-overnight-20260917/dist \
+  --workpath output/jev-overnight-20260917/build
+.macos-venv/bin/python scripts/check_packaged_jev.py \
+  --app output/jev-overnight-20260917/dist/LedgerTB.app \
+  --output output/jev-overnight-20260917/packaged-browser
+# Optional explicit fictional live TLS check: add --key-file ~/.typesafe.env.
+# The key is read in memory by the test backend, never copied into the bundle.
 ```
 
 Open `http://127.0.0.1:8629` for the last command. Pick the synthetic row, consent,
@@ -158,7 +196,7 @@ machine's OpenSSL certificate path. `LedgerTB.spec` collects `certifi` and expli
 includes the HTTP modules; its existing service/utils data directories include the
 new modules. The desktop selfcheck imports both modules and `certifi`.
 
-Verified locally after review: full non-performance suite (775 passed, 5 skipped,
+Initial review baseline, before the overnight additions: full non-performance suite (775 passed, 5 skipped,
 2 performance tests deselected), focused
 Jev/identity/state checks, `pip check`, source selfcheck (44 imports plus Apple Vision
 OCR, fake credential backend), and the real browser flow above. The sandboxed OCR

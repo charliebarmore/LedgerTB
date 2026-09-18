@@ -49,7 +49,7 @@ def main():
 
     def check_account(selected):
         state = snapshot()
-        assert re.search(r'checkbox "Select".*checked=false', state), state
+        assert re.search(r'checkbox "Include for posting".*checked=false', state), state
         account = next(line for line in state.splitlines() if 'combobox "Account"' in line)
         assert ("6100 - Office Supplies" in account) == selected, account
 

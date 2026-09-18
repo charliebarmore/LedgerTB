@@ -12,11 +12,19 @@ def prepare_jev_review(transactions, accounts, client_id, book, business_context
 
     Widget state disappears when a view unmounts. The row retains the human's
     selection, including an explicit clear, and is the fallback on remount.
+    Only chosen, previously requested, or accepted rows need cloud input hashes.
+    Loading a large import must not duplicate the whole chart for every row.
     """
     scope = (str(book), client_id)
     inputs, keys = {}, {}
+    known = set(session_state.get("jev_known_rows", ()))
+    relevant = known | set(session_state.get("jev_rows", ()))
+    if include_unaccepted:
+        session_state["jev_known_rows"] = sorted(known & {t["uid"] for t in transactions})
     for transaction in transactions:
-        if not include_unaccepted and not transaction.get("jev_accepted"):
+        if not transaction.get("jev_accepted") and (
+            not include_unaccepted or transaction["uid"] not in relevant
+        ):
             continue
         uid = transaction["uid"]
         evidence = {
@@ -63,11 +71,18 @@ def render_jev_review(transactions, accounts, client_id, prepared):
     if not api_key:
         st.info("Add your TypeSafe API key in Firm Settings. Local review remains available.")
     requested = {keys[uid]: inputs[uid] for uid in chosen}
+    new_requests = jev.plan_requests({k: v for k, v in requested.items() if k not in cache})
+    if new_requests:
+        count = sum(fits for _, fits in new_requests)
+        st.caption(f"This selection needs {count} new TypeSafe request(s). Existing results are reused.")
+        if any(not fits for _, fits in new_requests):
+            st.info("Some selected evidence is too long for Jev and will remain for local review.")
     run = st.button("Ask Jev for suggestions", disabled=not (chosen and consent and api_key), key="jev_run")
-    has_error = any(cache.get(k, {}).get("error") for k in requested)
+    has_error = any(cache.get(k, {}).get("error") and cache[k].get("retryable", True) for k in requested)
     retry = st.button("Retry failed Jev requests", disabled=not (has_error and consent and api_key), key="jev_retry",
                       help="Wait after a rate limit. A retry may incur another charge, including after a timeout.")
     if run or retry:
+        st.session_state["jev_known_rows"] = sorted(set(st.session_state.get("jev_known_rows", ())) | set(chosen))
         with st.spinner("Jev is reviewing the selected information..."):
             jev.suggest(requested, cache, api_key=api_key, consent=consent, retry=retry)
         # Refresh result-dependent controls immediately. The cached failure or
@@ -75,7 +90,7 @@ def render_jev_review(transactions, accounts, client_id, prepared):
         st.rerun()
     account_names = {a.id: a.display_name() for a in jev.eligible_accounts(accounts, client_id)}
     for uid, transaction in by_uid.items():
-        result = cache.get(keys[uid])
+        result = cache.get(keys.get(uid))
         if not result:
             continue
         with st.expander(f"Jev review: {transaction['description']}", expanded=True):

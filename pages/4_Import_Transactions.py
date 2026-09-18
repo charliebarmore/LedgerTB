@@ -47,6 +47,8 @@ from utils.import_review import (
     ensure_row_ids,
     row_key,
     scope_import_state_to_client,
+    reconcile_review_rows,
+    apply_bulk_category,
 )
 
 # Initialize database
@@ -1603,6 +1605,9 @@ elif selected_tab == "Review & Categorize":
             if 'include' not in t:
                 t['include'] = True
 
+        transfer_ids = {a.id for a in all_accounts if a.type in ('Asset', 'Liability')}
+        reconcile_review_rows(transactions, st.session_state, set(account_options), transfer_ids)
+
         # Reconcile previously accepted Jev categories independently of the
         # currently selected provider, before category controls or posting.
         provider = configured_provider()
@@ -1621,7 +1626,7 @@ elif selected_tab == "Review & Categorize":
         with col1:
             st.metric("Total", len(transactions))
         with col2:
-            st.metric("Selected", included_count)
+            st.metric("Included for posting", included_count)
         with col3:
             parked_count = sum(
                 1 for t in transactions
@@ -1642,7 +1647,7 @@ elif selected_tab == "Review & Categorize":
         with col5:
             subcol1, subcol2 = st.columns(2)
             with subcol1:
-                if st.button("Select All", key="select_all_top"):
+                if st.button("Include All", key="select_all_top"):
                     for t in transactions:
                         # An overridden duplicate is selectable; no reason needed.
                         # An exact re-import of an already-posted source row never
@@ -1658,7 +1663,7 @@ elif selected_tab == "Review & Categorize":
                         st.session_state[row_key("include", t)] = bool(duplicate_allowed)
                     st.rerun()
             with subcol2:
-                if st.button("Deselect All", key="deselect_all_top"):
+                if st.button("Exclude All", key="deselect_all_top"):
                     for t in transactions:
                         t['include'] = False
                         st.session_state[row_key("include", t)] = False
@@ -1777,87 +1782,47 @@ elif selected_tab == "Review & Categorize":
         # Bulk categorization section
         st.divider()
         st.markdown("**Bulk Categorization**")
-        st.caption("Deselect all, then check the transactions you want to categorize together")
-
-        # Selection controls
-        sel_col1, sel_col2, sel_col3, sel_col4 = st.columns([1, 1, 1, 2])
+        st.caption("Choose rows for a category change. Bulk selection does not change inclusion for posting.")
+        bulk_by_uid = {t["uid"]: t for t in transactions}
+        st.session_state["bulk_rows"] = [uid for uid in st.session_state.get("bulk_rows", []) if uid in bulk_by_uid]
+        sel_col1, sel_col2, _ = st.columns([1, 1, 3])
         with sel_col1:
-            if st.button("Deselect All", key="deselect_bulk"):
-                for t in transactions:
-                    t['include'] = False
-                    st.session_state[row_key("include", t)] = False
-                st.rerun()
+            if st.button("Clear bulk selection", key="deselect_bulk"):
+                st.session_state["bulk_rows"] = []
         with sel_col2:
-            if st.button("Select All", key="select_bulk"):
-                for t in transactions:
-                    t['include'] = True
-                    st.session_state[row_key("include", t)] = True
-                st.rerun()
-        with sel_col3:
-            # Count selected using session state checkbox values
-            selected_count = sum(1 for t in transactions if st.session_state.get(row_key("include", t), True))
-            st.markdown(f"**{selected_count}** selected")
+            if st.button("Select all for bulk", key="select_bulk"):
+                st.session_state["bulk_rows"] = list(bulk_by_uid)
+        st.multiselect(
+            "Rows for bulk categorization", options=list(bulk_by_uid), key="bulk_rows",
+            format_func=lambda uid: f"{bulk_by_uid[uid]['date']} | {bulk_by_uid[uid]['description']} | ${bulk_by_uid[uid]['amount']:,.2f}",
+        )
+
+        def _apply_bulk(uncategorized_only):
+            account_id = st.session_state.get("bulk_account_select")
+            if account_id not in account_options:
+                st.session_state.bulk_result = "Choose an account first."
+                return
+            count = apply_bulk_category(
+                transactions, st.session_state, account_id,
+                uncategorized_only=uncategorized_only, transfer_ids=transfer_ids,
+            )
+            st.session_state.bulk_result = (
+                f"Applied to {count} transactions. Posting inclusion is unchanged. "
+                "Transfer rows require an asset or liability account."
+            )
 
         col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
             bulk_account = st.selectbox(
-                "Account to apply",
-                options=category_option_ids,
-                format_func=category_label,
-                key="bulk_account_select",
-                index=None,
+                "Account to apply", options=category_option_ids,
+                format_func=category_label, key="bulk_account_select", index=None,
                 placeholder="Type an account number or name",
             )
         with col2:
-            if st.button("Apply to Selected", type="primary"):
-                if not bulk_account or bulk_account == ADD_NEW_ACCOUNT:
-                    st.warning("Please select an account first")
-                else:
-                    applied_count = 0
-                    for t in transactions:
-                        # Check session state for checkbox value
-                        is_selected = st.session_state.get(row_key("include", t), True)
-                        if is_selected:
-                            t['selected_account_id'] = bulk_account
-                            t['suggested_account_id'] = bulk_account
-                            # Update the selectbox session state
-                            st.session_state[row_key("cat", t)] = bulk_account
-                            applied_count += 1
-                    # Deselect all checkboxes after applying
-                    for t in transactions:
-                        st.session_state[row_key("include", t)] = False
-                        t['include'] = False
-                    # Save changes to session state
-                    st.session_state.transactions_to_review = transactions
-                    if applied_count > 0:
-                        st.session_state.bulk_result = f"Applied to {applied_count} transactions"
-                    else:
-                        st.session_state.bulk_result = "No transactions selected"
-                    st.rerun()
+            st.button("Apply to Selected", type="primary", on_click=_apply_bulk, args=(False,))
         with col3:
-            if st.button("Apply to Uncategorized"):
-                if not bulk_account or bulk_account == ADD_NEW_ACCOUNT:
-                    st.warning("Please select an account first")
-                else:
-                    applied_count = 0
-                    for t in transactions:
-                        is_selected = st.session_state.get(row_key("include", t), True)
-                        # None/0/absent all mean uncategorized
-                        current_category = st.session_state.get(row_key("cat", t))
-                        if is_selected and not current_category:
-                            t['selected_account_id'] = bulk_account
-                            t['suggested_account_id'] = bulk_account
-                            # Update the selectbox session state
-                            st.session_state[row_key("cat", t)] = bulk_account
-                            applied_count += 1
-                    # Deselect all checkboxes after applying
-                    for t in transactions:
-                        st.session_state[row_key("include", t)] = False
-                        t['include'] = False
-                    # Save changes to session state
-                    st.session_state.transactions_to_review = transactions
-                    st.session_state.bulk_result = f"Applied to {applied_count} uncategorized transactions"
-                    st.rerun()
+            st.button("Apply to Uncategorized", on_click=_apply_bulk, args=(True,),
+                      help="Apply only to selected rows that have no category.")
 
         # The bulk dropdown can create an account too.
         if st.session_state.get("bulk_account_select") == ADD_NEW_ACCOUNT:
@@ -1874,9 +1839,19 @@ elif selected_tab == "Review & Categorize":
         # Review each transaction - header row
         st.divider()
 
+        page_size = 50
+        page_count = max(1, (len(transactions) + page_size - 1) // page_size)
+        if st.session_state.get("review_page", 1) not in range(1, page_count + 1):
+            st.session_state["review_page"] = 1
+        page_number = st.selectbox("Review page", options=list(range(1, page_count + 1)), key="review_page")
+        row_start = (page_number - 1) * page_size
+        visible_rows = transactions[row_start:row_start + page_size]
+        st.caption(f"Rows {row_start + 1}–{row_start + len(visible_rows)} of {len(transactions)}. "
+                   "Posting uses included rows across all pages. Category edits and exclusions are retained when you change pages.")
+
         header_cols = st.columns([0.5, 0.9, 2.2, 1, 0.6, 2])
         with header_cols[0]:
-            st.markdown("**Select**")
+            st.markdown("**Include**")
         with header_cols[1]:
             st.markdown("**Date**")
         with header_cols[2]:
@@ -1894,7 +1869,7 @@ elif selected_tab == "Review & Categorize":
         transfer_accounts = [a for a in all_accounts if a.type in ('Asset', 'Liability')]
         transfer_options = {a.id: a.display_name() for a in transfer_accounts}
 
-        for i, t in enumerate(transactions):
+        for i, t in enumerate(visible_rows, start=row_start):
             duplicate_select_disabled = False
             if t.get("is_duplicate"):
                 duplicate_kind = t.get("duplicate_kind")
@@ -1975,7 +1950,7 @@ elif selected_tab == "Review & Categorize":
                     st.session_state[include_key] = t.get('include', True)
 
                 include = st.checkbox(
-                    "Select",
+                    "Include for posting",
                     key=include_key,
                     disabled=duplicate_select_disabled,
                     label_visibility="collapsed"
@@ -2002,9 +1977,9 @@ elif selected_tab == "Review & Categorize":
                         st.text(_desc)
                 # Show source account if from multi-account import
                 if t.get('source_account'):
-                    source_acct = Account.get_by_id(t.get('bank_account_id'), client_id=client_id)
-                    if source_acct:
-                        st.caption(f"From: {source_acct.display_name()}")
+                    source_label = account_options.get(t.get('bank_account_id'))
+                    if source_label:
+                        st.caption(f"From: {source_label}")
                 if t.get('reason'):
                     st.caption(t['reason'])
 
@@ -2081,7 +2056,7 @@ elif selected_tab == "Review & Categorize":
             if st.button("Post Transactions", type="primary"):
                 plan = classify_review_rows(
                     transactions,
-                    is_included=lambda t: st.session_state.get(row_key("include", t), True),
+                    is_included=lambda t: st.session_state.get(row_key("include", t), t.get('include', True)),
                     get_account_id=lambda t: t.get('selected_account_id', 0),
                 )
                 created = 0
@@ -2125,7 +2100,7 @@ elif selected_tab == "Review & Categorize":
                         'level': 'warning',
                         'text': (
                             f"Nothing was posted — all {skipped} row(s) were excluded. "
-                            "A row must be selected in the leftmost column to post; "
+                            "A row must be included in the leftmost column to post; "
                             "duplicates are deselected automatically until you tick "
                             "\"Post this transaction anyway\"."
                         ),

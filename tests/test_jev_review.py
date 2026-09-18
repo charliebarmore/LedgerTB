@@ -129,6 +129,25 @@ def test_accepted_category_survives_leaving_review(monkeypatch, client_id, accou
     assert not at.session_state[row_key("include", row)]
 
 
+def test_unaccepted_result_survives_navigation_without_another_paid_call(monkeypatch, client_id, accounts, fake_credential_vault):
+    calls = []
+    def send(payload, key):
+        calls.append(payload)
+        return response(payload, f"account_{accounts['expense']}")
+    monkeypatch.setattr(jev, "send_request", send)
+    at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
+    at.run()
+    at.multiselect(key="jev_rows").set_value([row["uid"]]).run()
+    at.checkbox(key="jev_consent").check().run()
+    at.button(key="jev_run").click().run()
+    at.radio[0].set_value("Upload CSV").run()
+    at.radio[0].set_value("Review & Categorize").run()
+    assert not at.exception and len(calls) == 1
+    assert any(b.label == "Accept account suggestion" for b in at.button)
+    assert at.session_state[row_key("cat", row)] is None
+    assert not at.session_state[row_key("include", row)]
+
+
 def test_stale_acceptance_clears_even_when_provider_off(monkeypatch, client_id, accounts, fake_credential_vault):
     monkeypatch.setattr(jev, "send_request", lambda p,k: response(p, f"account_{accounts['expense']}"))
     at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
@@ -201,3 +220,24 @@ def test_off_without_accepted_jev_does_not_prepare_cloud_inputs(monkeypatch, cli
     monkeypatch.setattr(jev, "request_input", unexpected)
     at.run()
     assert not at.exception
+
+
+def test_large_import_prepares_only_chosen_previously_requested_or_accepted_rows(monkeypatch):
+    from utils.jev_review import prepare_jev_review
+    rows = [dict(uid=str(i), date='2026-01-01', description='Synthetic', amount=-1,
+                 bank_account_id=1, include=False) for i in range(10_000)]
+    state = {}
+    calls = []
+    original = jev.request_input
+    def track(transaction, *args):
+        calls.append(transaction['uid'])
+        return original(transaction, *args)
+    monkeypatch.setattr(jev, 'request_input', track)
+    assert prepare_jev_review(rows, [], 1, 'fake-book', 'Synthetic', state) == ({}, {})
+    assert calls == []
+    state.update(jev_rows=['2', '3'], jev_known_rows=['7', 'removed-row'])
+    prepared, keys = prepare_jev_review(rows, [], 1, 'fake-book', 'Synthetic', state)
+    assert set(prepared) == set(keys) == {'2', '3', '7'}
+    assert calls == ['2', '3', '7']
+    assert state['jev_known_rows'] == ['7']
+    assert all(not t['include'] for t in rows)

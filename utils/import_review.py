@@ -64,6 +64,39 @@ def row_key(prefix, transaction):
     return f"{prefix}_{transaction['uid']}"
 
 
+def reconcile_review_rows(transactions, state, account_ids, transfer_ids):
+    """Retain row edits when paging unmounts widgets; validate every row alike."""
+    for row in transactions:
+        row["include"] = bool(state.get(row_key("include", row), row.get("include", True)))
+        if row.get("is_duplicate") and (not row.get("duplicate_override") or row.get("duplicate_info", {}).get("exact_retry")):
+            row["include"] = False
+            state[row_key("include", row)] = False
+        row["is_transfer"] = bool(state.get(row_key("xfer", row), row.get("is_transfer", False)))
+        selected = state.get(row_key("cat", row), row.get("selected_account_id", row.get("suggested_account_id")))
+        allowed = transfer_ids if row["is_transfer"] else account_ids
+        row["selected_account_id"] = selected if selected in allowed else 0
+
+
+def apply_bulk_category(transactions, state, account_id, *, transfer_ids, uncategorized_only=False):
+    """An explicit human category edit never changes inclusion or transfer state."""
+    chosen = set(state.get("bulk_rows", ()))
+    count = 0
+    for row in transactions:
+        if row["uid"] not in chosen:
+            continue
+        if state.get(row_key("xfer", row), row.get("is_transfer", False)) and account_id not in transfer_ids:
+            continue
+        current = state.get(row_key("cat", row), row.get("selected_account_id", row.get("suggested_account_id")))
+        if uncategorized_only and current:
+            continue
+        row["selected_account_id"] = account_id
+        row.pop("jev_accepted", None)  # This is a later explicit human decision.
+        state[row_key("cat", row)] = account_id
+        count += 1
+    state["bulk_rows"] = []
+    return count
+
+
 _CLIENT_IMPORT_STATE_KEYS = {
     "imported_data",
     "column_mapping",
@@ -115,6 +148,8 @@ _CLIENT_IMPORT_STATE_KEYS = {
     "jev_consent",
     "bulk_result",
     "bulk_account_select",
+    "bulk_rows",
+    "review_page",
     "sort_by",
     "sort_order",
     "history_batch",

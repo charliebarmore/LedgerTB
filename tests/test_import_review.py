@@ -11,7 +11,45 @@ from utils.import_review import (
     ensure_row_ids,
     row_key,
     scope_import_state_to_client,
+    reconcile_review_rows,
+    apply_bulk_category,
 )
+
+
+def test_bulk_selection_never_changes_posting_inclusion_or_transfer():
+    rows = ensure_row_ids([
+        dict(include=False, selected_account_id=0),
+        dict(include=True, selected_account_id=7),
+        dict(include=True, is_transfer=True, selected_account_id=2),
+    ])
+    state = {"bulk_rows": [r["uid"] for r in rows], "jev_rows": [rows[0]["uid"]]}
+    rows[0]["jev_accepted"] = {"account_id": 5, "key": "old"}
+    assert apply_bulk_category(rows, state, 5, transfer_ids={2}) == 2
+    assert [r["include"] for r in rows] == [False, True, True]
+    assert [r["selected_account_id"] for r in rows] == [5, 5, 2]
+    assert rows[2]["is_transfer"] is True
+    assert "jev_accepted" not in rows[0]
+    assert state["bulk_rows"] == [] and state["jev_rows"] == [rows[0]["uid"]]
+
+
+def test_bulk_uncategorized_uses_persisted_categories_and_explicit_clears():
+    rows = ensure_row_ids([dict(selected_account_id=7), dict(selected_account_id=0, suggested_account_id=7)])
+    state = {"bulk_rows": [r["uid"] for r in rows]}
+    assert apply_bulk_category(rows, state, 5, transfer_ids=set(), uncategorized_only=True) == 1
+    assert [r["selected_account_id"] for r in rows] == [7, 5]
+
+
+def test_unmounted_row_state_keeps_exclusions_and_validates_hidden_categories():
+    rows = ensure_row_ids([
+        dict(include=False, selected_account_id=0, suggested_account_id=5),
+        dict(include=True, is_transfer=True, selected_account_id=5),
+        dict(include=True, is_duplicate=True, duplicate_override=True, duplicate_info={"exact_retry": True}, selected_account_id=5),
+    ])
+    reconcile_review_rows(rows, {}, {2, 5}, {2})
+    assert [r["selected_account_id"] for r in rows] == [0, 0, 5]
+    assert [r["include"] for r in rows] == [False, True, False]
+    plan = classify_review_rows(rows, lambda r: r["include"], lambda r: r["selected_account_id"])
+    assert plan.to_post == [] and plan.uncategorized == [rows[1]]
 
 
 def test_ensure_row_ids_assigns_unique_ids():

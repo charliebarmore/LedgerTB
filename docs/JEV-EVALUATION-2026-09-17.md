@@ -73,6 +73,13 @@ validation batch. API responses did not provide billed dollars; actual billing
 was not checked. No live Anthropic run was made because no development credential
 was supplied.
 
+[TypeSafe's model documentation](https://docs.typesafe.ai/models), checked on
+September 17 for this task, lists $0.042 per million input tokens and free output
+tokens for Jev 1.13. At that published rate, the 20 expanded-evaluation requests
+estimate to **$0.012923**; the first holdout alone estimates to **$0.001902**.
+These are calculations from reported tokens, not verified charges, and exclude
+the earlier 16-case smoke runs and any subsequent packaged-app checks.
+
 Holdout batch latencies were 1.742, 3.097, 1.723 and 0.970 seconds. Final development
 batch latencies ranged from 1.559 to 35.591 seconds on a heavily contended Mac.
 These are client-observed wall times, including local processing and scheduling,
