@@ -25,6 +25,9 @@ selection: applying an account or clearing that selection never changes posting
 inclusion. Bulk transfer edits require an asset/liability account. Categories,
 transfer flags and exclusions remain attached to stable row IDs when paging or
 sorting. Posting uses included rows on every page, as disclosed above the grid.
+Summary counts also cover all pages: empty suggestions remain uncategorized,
+and parked categories stay visible in the review count when their rows are
+off-screen. Accepting a Jev account updates the summary in the same interaction.
 
 **Off (local rules only)** is the default until a provider is saved, including
 for existing installations with an Anthropic key. Existing Anthropic categorization

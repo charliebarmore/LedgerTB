@@ -44,6 +44,7 @@ def test_reruns_and_acceptance_preserve_inclusion(monkeypatch, client_id, accoun
     assert not at.exception
     assert at.session_state[row_key("cat", row)] == accounts["expense"]
     assert not at.session_state[row_key("include", row)]
+    assert next(m for m in at.metric if m.label == "Uncategorized").value == "0"
     at.session_state["transactions_to_review"][0]["description"] = "Changed evidence"
     at.run()
     assert not at.exception
@@ -70,6 +71,28 @@ def test_failure_keeps_rows_and_no_automatic_retry(monkeypatch, client_id, accou
     assert not at.session_state[row_key("include", row)]
     at.button(key="jev_retry").click().run()
     assert len(calls) == 2
+
+
+def test_accept_callback_rechecks_evidence_changed_since_display(
+    monkeypatch, client_id, accounts, fake_credential_vault,
+):
+    calls = []
+    def send(payload, key):
+        calls.append(payload)
+        return response(payload, f"account_{accounts['expense']}")
+    monkeypatch.setattr(jev, "send_request", send)
+    at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
+    at.run()
+    at.multiselect(key="jev_rows").set_value([row["uid"]]).run()
+    at.checkbox(key="jev_consent").check().run()
+    at.button(key="jev_run").click().run()
+    at.session_state["transactions_to_review"][0]["description"] = "Changed after the suggestion was displayed"
+    next(b for b in at.button if b.label == "Accept account suggestion").click().run()
+    assert not at.exception and len(calls) == 1
+    assert at.session_state[row_key("cat", row)] is None
+    assert not at.session_state[row_key("include", row)]
+    assert "jev_accepted" not in at.session_state["transactions_to_review"][0]
+    assert not any(b.label == "Accept account suggestion" for b in at.button)
 
 
 @pytest.mark.parametrize("next_client,next_book", [(1, "book-b"), (2, "book-a")])

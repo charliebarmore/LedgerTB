@@ -54,6 +54,33 @@ def test_paging_preserves_edits_and_posts_only_included_rows(monkeypatch, client
         assert sum(r["debit"] for r in lines) == sum(r["credit"] for r in lines) == 3333
 
 
+@pytest.mark.parametrize("empty_suggestion", [False, True])
+def test_summary_counts_uncategorized_and_parked_rows_across_pages(
+    monkeypatch, client_id, accounts, fake_credential_vault, empty_suggestion,
+):
+    from models.account import Account
+    parking_id = Account(client_id=client_id, account_number="6999",
+                         name="Ask My Accountant", type="Expense").save()
+    at, _ = page(monkeypatch, client_id, accounts, fake_credential_vault)
+    fake_credential_vault["categorization_provider"] = "off"
+    rows = ensure_row_ids([dict(date=date(2026, 9, 1), description=f"Summary row {i}",
+                              amount=-12.34, bank_account_id=accounts["cash"], include=False)
+                           for i in range(51)])
+    if empty_suggestion:
+        for row in rows:
+            row["suggested_account_id"] = None
+    rows[-1]["selected_account_id"] = parking_id
+    at.session_state["transactions_to_review"] = rows
+    at.run()
+    assert not at.exception
+    metric = next(m for m in at.metric if m.label == "Uncategorized")
+    assert metric.value == "50"
+    assert metric.delta == "1 parked for review"
+    at.selectbox(key="review_page").set_value(2).run()
+    metric = next(m for m in at.metric if m.label == "Uncategorized")
+    assert metric.value == "50" and metric.delta == "1 parked for review"
+
+
 @pytest.mark.performance
 def test_ten_thousand_row_review_renders_one_page_without_cloud_calls(monkeypatch, client_id, accounts, fake_credential_vault):
     from services import jev_categorization as jev

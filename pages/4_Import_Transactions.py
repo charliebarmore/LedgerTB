@@ -1619,7 +1619,7 @@ elif selected_tab == "Review & Categorize":
 
         # Summary and bulk actions
         included_count = sum(1 for t in transactions if t.get('include', True))
-        uncategorized_count = sum(1 for t in transactions if not t.get('selected_account_id') and 'suggested_account_id' not in t)
+        uncategorized_count = sum(1 for t in transactions if not t.get('selected_account_id'))
         duplicate_count = sum(1 for t in transactions if t.get('is_duplicate', False))
 
         col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
@@ -1631,7 +1631,7 @@ elif selected_tab == "Review & Categorize":
             parked_count = sum(
                 1 for t in transactions
                 if is_parking_account(account_options.get(
-                    st.session_state.get(row_key("cat", t)), ""))
+                    t.get("selected_account_id"), ""))
             )
             if parked_count:
                 st.metric("Uncategorized", uncategorized_count,

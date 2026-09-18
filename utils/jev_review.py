@@ -6,6 +6,14 @@ from utils import secure_store
 from utils.import_review import row_key
 
 
+def _accept_suggestion(transaction, account_id, request_key):
+    # Callbacks run before the page's summary and stale-input reconciliation.
+    # This human category choice must be reflected in the same rendered frame.
+    st.session_state[row_key("cat", transaction)] = account_id
+    transaction["selected_account_id"] = account_id
+    transaction["jev_accepted"] = {"key": request_key, "account_id": account_id}
+
+
 def prepare_jev_review(transactions, accounts, client_id, book, business_context, session_state,
                        *, include_unaccepted=True):
     """Reconcile accepted categories before posting, even when Jev is now off.
@@ -101,10 +109,9 @@ def render_jev_review(transactions, accounts, client_id, prepared):
             if result["outcome"] == "account":
                 account_id = result["account_id"]
                 st.write(f"Suggested account: {account_names[account_id]}")
-                if st.button("Accept account suggestion", key=f"jev_accept_{uid}_{keys[uid]}"):
-                    st.session_state[row_key("cat", transaction)] = account_id
-                    transaction["selected_account_id"] = account_id
-                    transaction["jev_accepted"] = {"key": keys[uid], "account_id": account_id}
+                if st.button("Accept account suggestion", key=f"jev_accept_{uid}_{keys[uid]}",
+                             on_click=_accept_suggestion,
+                             args=(transaction, account_id, keys[uid])):
                     st.success("Account accepted. Inclusion for posting is unchanged.")
             else:
                 st.info(jev.OUTCOMES[result["outcome"]])
