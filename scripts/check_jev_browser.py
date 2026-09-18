@@ -23,7 +23,9 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "output/jev-browser-review")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    cli = [args.agent_browser, "--session", "jev-review-" + uuid.uuid4().hex[:10]]
+    session = "jev-review-" + uuid.uuid4().hex[:10]
+    namespace = "jv-" + session.rsplit("-", 1)[1][:8]
+    cli = [args.agent_browser, "--namespace", namespace, "--session", session, "--pin-tab"]
     transcript = []
 
     def command(*parts):

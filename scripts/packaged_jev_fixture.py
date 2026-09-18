@@ -53,6 +53,20 @@ def main():
             for table in ("journal_entries", "journal_entry_lines", "imported_transactions", "audit_log"):
                 report[table] = [dict(row) for row in cursor.execute(f"SELECT * FROM {table}").fetchall()]
         report["encrypted_header"] = (root / "accounting.db").read_bytes()[:16] != b"SQLite format 3\x00"
+        report["book_counts"] = []
+        for book in json.loads(marker.read_text())["books"]:
+            path = Path(book["path"]).resolve()
+            if not path.is_relative_to(root) or not path.is_file():
+                parser.error("Every inspected fixture book must stay inside its disposable directory")
+            db.DATABASE_PATH = path
+            with db.get_cursor() as cursor:
+                report["book_counts"].append({
+                    "name": path.name,
+                    "client_id": book["client_id"],
+                    "journal_entries": cursor.execute("SELECT COUNT(*) FROM journal_entries").fetchone()[0],
+                    "imported_transactions": cursor.execute("SELECT COUNT(*) FROM imported_transactions").fetchone()[0],
+                    "encrypted_header": path.read_bytes()[:16] != b"SQLite format 3\x00",
+                })
         print(json.dumps(report, indent=2, default=str))
     else:
         books = []

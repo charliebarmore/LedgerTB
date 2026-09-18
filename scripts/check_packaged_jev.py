@@ -65,7 +65,8 @@ def main():
             subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)],
                            stdout=signing_log, stderr=signing_log, check=True, timeout=600)
     session = "jev-packaged-" + uuid.uuid4().hex[:10]
-    cli = [args.agent_browser, "--session", session, "--json"]
+    namespace = "jv-" + session.rsplit("-", 1)[1][:8]  # Stay below macOS's socket-path limit.
+    cli = [args.agent_browser, "--namespace", namespace, "--session", session, "--pin-tab", "--json"]
     transcript, checks = [], []
 
     def command(*parts):
@@ -254,6 +255,50 @@ def main():
                 (output / "database-evidence.json").write_text(json.dumps(evidence, indent=2))
                 checks += ["human posting creates one balanced integer-cent entry", "excluded row is not posted",
                            "import identity and human audit attribution retained"]
+                (output / "posting-result.json").write_text(json.dumps({"checks": checks, "requests": requests,
+                    "source_sha256": hashes, "live": bool(args.key_file)}, indent=2))
+
+                # Both fixture books deliberately have client ID 1 and the same
+                # account IDs. Switching must still reset consent/review state.
+                fixture_books = json.loads((scratch / "synthetic-fixture.json").read_text())["books"]
+                assert fixture_books[0]["client_id"] == fixture_books[1]["client_id"]
+                click("link", "Data Safety", exact=False)
+                click("button", "Switch book…")
+                wait("Open a recent book")
+                click("combobox", "Recent books")
+                click("option", str(scratch / "Books/Maple.ledgertb"))
+                click("button", "Open selected")
+                wait("Enter your passphrase")
+                fill("Passphrase", "fictional-packaged-acceptance-only")
+                click("button", "Unlock")
+                click("link", "Import Transactions", exact=False)
+                wait("Viewing: Maple Synthetic Studio")
+                wait("Upload CSV file")
+                command("upload", 'input[type="file"]', str(scratch / "synthetic-import.csv"))
+                wait("Confirm Import")
+                check("I have reviewed the CSV data and column mappings above and confirm they are correct")
+                click("button", "Parse Transactions")
+                wait("Review & Categorize Transactions")
+                state = snap()
+                assert 'checkbox "Send the selected transaction information to TypeSafe" [checked=false' in state
+                assert "Accept account suggestion" not in state and 'button "Remove 2026-' not in state
+                click("combobox", "Rows to ask Jev about")
+                click("option", "2026-09-01 | Cedar Paper receipt printer paper solely for design studio | $-33.33")
+                command("press", "Tab")
+                state = snap()
+                assert "Accept account suggestion" not in state
+                assert 'button "Ask Jev for suggestions" [disabled' in state
+                assert len((scratch / "requests.jsonl").read_text().splitlines()) == 2
+                verified = subprocess.run([sys.executable, str(ROOT / "scripts/packaged_jev_fixture.py"),
+                                           "--data-dir", str(scratch), "--verify"],
+                                          capture_output=True, text=True, check=True, timeout=180)
+                switched = json.loads(verified.stdout)
+                assert [(b["journal_entries"], b["imported_transactions"]) for b in switched["book_counts"]] == [(1, 1), (0, 0)]
+                assert all(b["encrypted_header"] for b in switched["book_counts"])
+                (output / "book-switch-evidence.json").write_text(json.dumps(switched["book_counts"], indent=2))
+                command("screenshot", str(output / "book-switched.png"))
+                checks += ["book switch with identical client/account IDs resets consent and review state",
+                           "second book receives no Jev result or entries and makes no new provider request"]
                 (output / "result.json").write_text(json.dumps({"checks": checks, "requests": requests,
                     "source_sha256": hashes, "live": bool(args.key_file),
                     "limitations": "Frozen server mode in Chromium with test-only fake vault; not native window, installed upgrade or Windows acceptance."}, indent=2))

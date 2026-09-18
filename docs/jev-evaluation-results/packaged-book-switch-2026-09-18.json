@@ -1,0 +1,16 @@
+[
+  {
+    "name": "accounting.db",
+    "client_id": 1,
+    "journal_entries": 1,
+    "imported_transactions": 1,
+    "encrypted_header": true
+  },
+  {
+    "name": "Maple.ledgertb",
+    "client_id": 1,
+    "journal_entries": 0,
+    "imported_transactions": 0,
+    "encrypted_header": true
+  }
+]

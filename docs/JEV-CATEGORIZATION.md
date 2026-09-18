@@ -1,6 +1,6 @@
 # Optional TypeSafe Jev categorization
 
-Implementation and local verification: 2026-09-17. Current business priorities and
+Implementation and local verification: 2026-09-17–18. Current business priorities and
 rollout decisions live on the [LedgerTB Notion project](https://app.notion.com/p/3d7f5bd8d2b981ed91d3fad1a03255ce).
 This is a source implementation, not a released or installed application update.
 
@@ -209,7 +209,7 @@ Jev/identity/state checks, `pip check`, source selfcheck (44 imports plus Apple 
 OCR, fake credential backend), and the real browser flow above. The sandboxed OCR
 selfcheck failed; the same check passed outside the sandbox.
 
-The final focused run passed 50 tests. The automated Chromium run passed eight
+The initial review's focused run passed 50 tests. The automated Chromium run passed eight
 checks: consent, separate posting inclusion, acceptance, paid-request reuse,
 navigation persistence, provider-off invalidation, failure preservation and immediate
 explicit retry. Browser automation uses Tab to leave the multiselect popover;
@@ -268,6 +268,70 @@ window, installed-upgrade or Windows acceptance, production model accuracy, or
 startup/performance suitability under normal load. Final broad regression and
 volume rechecks remain separate gates.
 
+After the summary fixes in `87aa093`, the rebuilt bundle passed an expanded
+[12-check workflow](jev-evaluation-results/packaged-mac-final-2026-09-18.json)
+with a fake provider. In addition to the posting/reuse/recovery checks, it switched
+to another encrypted book with the same client ID, account IDs, business context
+and transaction evidence. Consent and previous review state were cleared; choosing
+the same row required fresh consent/request and did not expose the first book's
+result. [Database inspection](jev-evaluation-results/packaged-book-switch-2026-09-18.json)
+confirmed one approved entry/import in the first book and none in the second.
+No real provider request was made in this rerun. The adapter and CA setup are
+unchanged from the earlier successful live-TLS check; the result files retain
+their respective source hashes rather than implying they tested identical UI code.
+
+This final-source evidence is under
+`output/jev-overnight-20260917/packaged-browser-short-namespace/`, including both
+posting and book-switch screenshots. The harness uses a short, unique browser
+daemon namespace, a separate session and a pinned tab. Earlier attempts retain
+an unexpected transition to `about:blank` and a macOS socket-path-length error;
+neither is counted as a passing application check.
+
+### September 18 final regression and volume checks
+
+The final normal functional suite passed **802 tests**, with five Windows-only
+NTFS skips, in 201.10 seconds. [The verification record](jev-evaluation-results/final-functional-tests-2026-09-18.json)
+also preserves an earlier full run's five timeouts and their targeted reruns.
+The clean full run used original deadlines and assertions after host contention
+subsided; it did not use the longer Streamlit waits from earlier diagnostic runs.
+
+All three performance tests passed serially with their original thresholds;
+[recorded metrics](jev-evaluation-results/performance-2026-09-18.json) retain the
+source commit and qualifications. The 10,000-row review rendered 50 row controls
+across 200 available pages in 0.599 seconds, preserved exclusions, and performed
+no cloud-input preparation or provider calls. This is AppTest server rendering,
+not browser paint or desktop startup timing.
+
+The 50,000-row CSV parsed in 8.3349 seconds and classified duplicates in 4.0641
+seconds, preserving the nine expected duplicates and every import identity at
+45.05 MiB peak traced memory. The 10,000-entry journal fixture passed its query,
+audit and page-render thresholds too. These are single synthetic measurements;
+earlier heavily contended runs (141-second review rendering and failed CSV timing
+limits) remain in `output/jev-overnight-20260917/` and are not counted as passes.
+
+The final source Chromium fixture also passed all eight consent, inclusion,
+acceptance, reuse, navigation, invalidation and recovery checks. Its
+[result](jev-evaluation-results/source-browser-final-2026-09-18.json) uses the
+same isolated browser namespace and pinned tab as the packaged harness.
+
+### September 18 native startup and self-check limits
+
+The final disposable bundle opened a native LedgerTB window with the expected
+passphrase unlock screen. The window's loopback port matched its isolated fixture
+server. This checks native startup only; unlock and the full workflow were verified
+through the packaged Chromium checks above, not through this native window.
+Only the identified test launcher and its child were stopped, and their exit was
+verified. No installed application was replaced or stopped.
+
+The final bundle's `--selfcheck` exited 1 because its release gate correctly
+rejected `packaged_fake_vault.Keyring` as the macOS backend. Its only reported
+failure was that backend identity check: all 44 imports, required SQLCipher and
+the real Apple Vision OCR recognition check completed without reported failure.
+This is **not a passing release self-check** or a real keychain acceptance test.
+The production gate was not weakened. The earlier bundle's passing self-check
+remains historical evidence for that earlier build. See the
+[scoped native and self-check record](jev-evaluation-results/native-mac-2026-09-18.json).
+
 ## Labeled synthetic comparison
 
 The expanded 120-case protocol and development/held-out separation are specified in
@@ -307,11 +371,14 @@ used 10,801 input and 2,589 output tokens and also matched 16/16, taking 0.738 s
 The two live calls together used 21,637 input tokens (estimated $0.000908754).
 Raw final outcomes, distributions and usage: [jev-comparison-results.json](jev-comparison-results.json).
 
-Before rollout: commit the reviewed source; run an approved Anthropic side-by-side if
-wanted; expand labels to less explicit, representative fixtures and review errors;
-confirm the firm's TypeSafe data-handling terms; verify packaged live TLS and review
-behavior on Mac, and packaging/imports/TLS/review on Windows; then obtain separate
-release/install approval.
+The reviewed source and expanded evaluation are saved on the local
+`codex/jev-overnight` branch. Before rollout: independently adjudicate representative
+labels; run an approved Anthropic side-by-side if wanted; confirm the firm's
+TypeSafe data-handling terms; complete clean release-bundle/native credential-vault
+and installed-upgrade acceptance on Mac, plus packaging/imports/TLS/review and
+native acceptance on Windows; then obtain separate release/install approval.
+Mac packaged live TLS and the final-source staged review/posting workflow have
+the distinct passing evidence described above.
 The existing Windows native save/upgrade acceptance and broader import workbench
 threads remain open in Notion. This change does not implement that workbench redesign.
 
