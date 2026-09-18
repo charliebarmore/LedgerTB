@@ -43,7 +43,8 @@ def main():
     if not bundle.resolve().is_relative_to(app):
         parser.error("The disposable bundle must not link its Frameworks directory outside the app")
     sources = ["config.py", "pages/4_Import_Transactions.py", "services/jev_categorization.py",
-               "utils/jev_review.py", "utils/import_review.py"]
+               "utils/jev_review.py", "utils/import_review.py", "services/csv_import.py",
+               "pages/2_Journal_Entries.py"]
     hashes = {}
     for name in sources:
         actual = (bundle / name).read_bytes()
@@ -96,7 +97,22 @@ def main():
         command("wait", '[data-testid="stApp"][data-test-script-state="notRunning"]')
         return command("snapshot", "-i")["snapshot"]
 
+    def show_panel(wanted=None):
+        state = snap()
+        for label in ("Select rows for actions", "AI suggestions", "Change category", "Sort"):
+            line = next((line for line in state.splitlines() if f'button "{label}"' in line), "")
+            opened = "expanded=true" in line
+            if line and opened != (label == wanted):
+                command("find", "role", "button", "click", "--name", label, "--exact")
+                state = snap()
+
     def click(role, name, exact=True):
+        if name in ("Selected rows", "Select all", "Clear selection"):
+            show_panel("Select rows for actions")
+        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests"):
+            show_panel("AI suggestions")
+        elif role != "option":
+            show_panel()
         snap()
         if role == "button":
             command("wait", "--fn", "Array.from(document.querySelectorAll('button')).some(b => "
@@ -123,6 +139,7 @@ def main():
         command("find", "role", "textbox", "fill", value, "--name", name, "--exact")
 
     def check(name):
+        show_panel("AI suggestions" if name == "Send the selected transaction information to TypeSafe" else None)
         snap()
         command("find", "role", "checkbox", "check", "--name", name, "--exact")
 
@@ -192,18 +209,24 @@ def main():
                 click("link", "Import Transactions", exact=False)
                 wait("Upload CSV file")
                 command("upload", 'input[type="file"]', str(scratch / "synthetic-import.csv"))
-                wait("Confirm Import")
-                check("I have reviewed the CSV data and column mappings above and confirm they are correct")
-                click("button", "Parse Transactions")
+                wait("Check totals")
+                snap()
+                command("eval", "Array.from(document.querySelectorAll('h3')).find(h => h.textContent.includes('Check totals')).scrollIntoView({block:'center'})")
+                wait("$81.58")
+                assert "$81.58" in command("get", "text", "body")["text"]
+                command("screenshot", str(output / "upload-totals.png"))
+                check("The account, columns and totals are correct")
+                click("button", "Continue to review")
                 wait("Review & Categorize Transactions")
                 click("button", "Exclude All")
-                click("combobox", "Rows to ask Jev about")
+                click("combobox", "Selected rows")
                 click("option", "2026-09-01 | Cedar Paper receipt printer paper solely for design studio | $-33.33")
                 command("press", "Tab")
                 check("Send the selected transaction information to TypeSafe")
                 (scratch / "offline").touch()
                 click("button", "Ask Jev for suggestions")
                 wait("TypeSafe could not be reached")
+                show_panel()
                 assert snap().count('checkbox "Include for posting"') == 2
                 click("button", "Ask Jev for suggestions")
                 snap()
@@ -214,6 +237,7 @@ def main():
                 wait("Suggested account:")
                 click("button", "Accept account suggestion")
                 wait("Account accepted.")
+                show_panel()
                 assert snap().count('checkbox "Include for posting"') == 2
                 assert len([line for line in snap().splitlines() if 'checkbox "Include for posting"' in line and "checked=false" in line]) == 2
                 click("button", "Ask Jev for suggestions")
@@ -223,13 +247,14 @@ def main():
                 assert sum(row["network_attempted"] for row in requests) == int(bool(args.key_file))
                 checks += ["packaged SQLCipher unlock and CSV import", "explicit Jev request and human acceptance", "acceptance preserves exclusion", "rerun and repeated request reuse"]
                 checks += ["offline failure preserves staged rows", "failed result reuse and explicit recovery retry"]
-                click("button", "Select all for bulk")
+                click("button", "Select all")
                 second_chip = "Remove 2026-09-02 | Unknown marketplace no receipt | $-48.25"
                 command("wait", "--fn", "Array.from(document.querySelectorAll('button')).some(b => "
                         f"b.getAttribute('aria-label') === {json.dumps(second_chip)})")
-                click("button", "Clear bulk selection")
+                click("button", "Clear selection")
                 command("wait", "--fn", "!Array.from(document.querySelectorAll('button')).some(b => "
                         f"b.getAttribute('aria-label') === {json.dumps(second_chip)})")
+                show_panel()
                 assert len([line for line in snap().splitlines() if 'checkbox "Include for posting"' in line and "checked=false" in line]) == 2
                 checks.append("bulk select/clear preserves posting exclusion")
                 # Include only the accepted first row through the actual checkbox.
@@ -258,6 +283,19 @@ def main():
                 (output / "posting-result.json").write_text(json.dumps({"checks": checks, "requests": requests,
                     "source_sha256": hashes, "live": bool(args.key_file)}, indent=2))
 
+                click("link", "Journal Entries", exact=False)
+                click("radio", "View Entries")
+                wait("Journal Entry List")
+                snap()
+                entry_header = "summary:has(strong)"  # The observed journal header contains bold entry #1.
+                command("wait", entry_header)
+                command("click", entry_header)
+                wait("Balanced")
+                command("eval", "Array.from(document.querySelectorAll('summary')).find(e => e.textContent.includes('Cedar Paper')).scrollIntoView({block:'start'})")
+                command("wait", '[data-testid="stDataFrame"]')
+                command("screenshot", str(output / "journal-table.png"))
+                checks += ["CSV preview shows 81.58 disbursements", "journal entry displays a balanced debit/credit table"]
+
                 # Both fixture books deliberately have client ID 1 and the same
                 # account IDs. Switching must still reset consent/review state.
                 fixture_books = json.loads((scratch / "synthetic-fixture.json").read_text())["books"]
@@ -275,16 +313,18 @@ def main():
                 wait("Viewing: Maple Synthetic Studio")
                 wait("Upload CSV file")
                 command("upload", 'input[type="file"]', str(scratch / "synthetic-import.csv"))
-                wait("Confirm Import")
-                check("I have reviewed the CSV data and column mappings above and confirm they are correct")
-                click("button", "Parse Transactions")
+                wait("Check totals")
+                check("The account, columns and totals are correct")
+                click("button", "Continue to review")
                 wait("Review & Categorize Transactions")
+                show_panel("AI suggestions")
                 state = snap()
                 assert 'checkbox "Send the selected transaction information to TypeSafe" [checked=false' in state
                 assert "Accept account suggestion" not in state and 'button "Remove 2026-' not in state
-                click("combobox", "Rows to ask Jev about")
+                click("combobox", "Selected rows")
                 click("option", "2026-09-01 | Cedar Paper receipt printer paper solely for design studio | $-33.33")
                 command("press", "Tab")
+                show_panel("AI suggestions")
                 state = snap()
                 assert "Accept account suggestion" not in state
                 assert 'button "Ask Jev for suggestions" [disabled' in state

@@ -201,3 +201,23 @@ def test_undecodable_statement_bytes_do_not_raise():
     assert "AC" in text
     # A truncated UTF-16 BOM file must fall back rather than explode.
     assert CSVImporter.decode_upload(b"\xff\xfeAB\x41") is not None
+
+
+@pytest.mark.parametrize('content,kwargs,expected', [
+    ('Amount\n-33.33\n-48.25\n', {'amount_column': 'Amount'}, (-81.58, 81.58, 0)),
+    ('Amount\n"(1.234,56)"\n"12,34"\n', {'amount_column': 'Amount'}, (-1222.22, 1234.56, 12.34)),
+    ('Debit,Credit\n33.33,\n48.25,\n,10.00\n', {'debit_column': 'Debit', 'credit_column': 'Credit'}, (-71.58, 81.58, 10)),
+    ('Amount\n33.33\n-5.00\n', {'amount_column': 'Amount', 'sign_convention': 'credit_card'}, (-28.33, 33.33, 5)),
+])
+def test_preview_uses_import_amount_formats(content, kwargs, expected):
+    from services.csv_import import summarize_csv_preview
+    frame, _ = CSVImporter.preview_csv(content, num_rows=None)
+    result = summarize_csv_preview(frame, **kwargs)
+    assert (result['net'], result['outflow'], result['inflow']) == expected
+
+
+def test_unreadable_preview_amount_is_not_reported_as_zero():
+    from services.csv_import import summarize_csv_preview
+    frame, _ = CSVImporter.preview_csv('Amount\nnot-an-amount\n')
+    with pytest.raises(ValueError):
+        summarize_csv_preview(frame, amount_column='Amount')

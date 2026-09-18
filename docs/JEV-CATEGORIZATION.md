@@ -10,17 +10,18 @@ This is a source implementation, not a released or installed application update.
    provider, and save your own TypeSafe key. Keys use `utils/secure_store.py` and
    the OS credential vault. The desktop app never reads `~/.typesafe.env`.
 2. Load staged transactions through **Import Transactions → Review & Categorize**.
-3. Choose up to 25 rows in **Rows to ask Jev about**, check the disclosure consent,
-   and click **Ask Jev for suggestions**. This selection is independent of the
-   existing posting-inclusion checkboxes.
-4. Review the outcome. An account suggestion must be accepted explicitly to fill
+3. Open **Select rows for actions** and choose rows in **Selected rows**. Open
+   **AI suggestions**, check the disclosure consent, and click **Ask Jev for suggestions**.
+   Jev accepts at most 25 selected rows at a time. Selection is shared with manual
+   bulk category changes and remains independent of posting-inclusion checkboxes.
+4. Review the outcome beside its transaction. An account suggestion must be accepted explicitly to fill
    the category control. Insufficient information, split required, and transfer
    review outcomes leave categories alone and call for human work. Split creation
    is outside this integration; resolve it through the existing accounting workflow.
 5. Review inclusion and category/transfer controls before posting normally.
 
 Review rows are shown 50 at a time. **Include All / Exclude All** controls posting
-across the whole review list. **Rows for bulk categorization** is a separate
+across the whole review list. **Select rows for actions** controls the shared action
 selection: applying an account or clearing that selection never changes posting
 inclusion. Bulk transfer edits require an asset/liability account. Categories,
 transfer flags and exclusions remain attached to stable row IDs when paging or
@@ -33,7 +34,7 @@ off-screen. Accepting a Jev account updates the summary in the same interaction.
 for existing installations with an Anthropic key. Existing Anthropic categorization
 remains selectable, with its existing behavior. Document parsing and Book Review
 retain their separate Anthropic behavior; this setting controls import categorization.
-No provider call occurs from loading the page, choosing rows, changing consent,
+No provider call occurs from loading the page, choosing rows, opening action panels, changing consent,
 sorting, accepting a suggestion, or ordinary reruns. Offline manual review and
 local pattern matching remain available.
 
@@ -331,6 +332,54 @@ This is **not a passing release self-check** or a real keychain acceptance test.
 The production gate was not weakened. The earlier bundle's passing self-check
 remains historical evidence for that earlier build. See the
 [scoped native and self-check record](jev-evaluation-results/native-mac-2026-09-18.json).
+
+## September 18 walkthrough usability pass
+
+Charlie verified the simulated native workflow: accept an Office Supplies
+suggestion, retain both exclusions, include only Cedar Paper, and post one
+balanced $33.33 entry while leaving the unknown purchase unposted. He then
+requested a focused import/journal usability pass based on the crowded screens.
+
+The upload preview now leads to **Check totals → Continue to review**. Column
+mapping, sign convention and saved-format controls are grouped under **Import
+settings** (opened by default when detection is incomplete). A changed file,
+account, mapping or sign interpretation clears the previous confirmation.
+
+Review uses a compact toolbar: shared row selection, AI suggestions, manual
+category changes and sorting. The disclosure and consent remain inside the
+explicit AI action panel. Cached suggestions and errors appear beside their
+transaction's category. The single-page pagination selector is omitted; larger
+imports retain the existing 50-row paging and across-page inclusion behavior.
+Selecting more than 25 rows remains valid for manual bulk categorization but
+blocks a Jev request without silently truncating or changing the selection.
+
+Journal filters are collapsed, and entry lines use an Account / Debit / Credit /
+Memo table with numeric amounts and a cent-based balance indicator. **Change
+category** retains the existing imported-entry correction workflow.
+
+The screenshot's zero upload totals did not reproduce in the ordinary source
+fixture. The preview's separate coercion pipeline was replaced with the existing
+import amount parser, adding separate debit/credit support, cent-based sums and
+an explicit unavailable-total warning for unreadable amounts. The rebuilt Mac
+bundle visibly reports $81.58 disbursements and -$81.58 net for the two sample
+rows. This verifies the corrected path without claiming a proven cause for the
+original frozen-only symptom.
+
+Verification logs and screenshots are under `output/ux-polish-20260918/`.
+The normal full suite passed **810 tests**, with five Windows-only skips, in
+150.74 seconds. A final journal-only empty-cell display adjustment was followed
+by **41 passing journal-page tests** and all 14 final-source packaged checks; the
+full-suite result precedes that display-only adjustment. All **three performance
+tests** passed with original thresholds:
+10,000-row review 0.633 seconds; 50,000-row CSV parse 6.1739 seconds, duplicate
+classification 2.2489 seconds, peak 44.92 MiB. The source browser passed all eight
+state/recovery checks. Tests use fake vaults/providers and disposable encrypted
+books; this pass made no real TypeSafe requests. Packaged screenshots and a
+machine-readable [acceptance result](jev-evaluation-results/usability-2026-09-18.json)
+record all 14 passing packaged checks, including totals and journal display.
+Earlier harness visibility/selector failures remain in the output directory.
+This remains a local test build; native upgrade, release credential-vault and
+Windows acceptance gates are unchanged.
 
 ## Labeled synthetic comparison
 

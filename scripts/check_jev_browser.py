@@ -35,7 +35,22 @@ def main():
         assert result.returncode == 0, result.stderr
         return result.stdout
 
+    def show_panel(wanted=None):
+        state = snapshot()
+        for label in ("Select rows for actions", "AI suggestions", "Change category", "Sort"):
+            line = next((line for line in state.splitlines() if f'button "{label}"' in line), "")
+            opened = "expanded=true" in line
+            if line and opened != (label == wanted):
+                command("find", "role", "button", "click", "--name", label, "--exact")
+                state = snapshot()
+
     def click(role, name):
+        if name in ("Selected rows", "Select all", "Clear selection"):
+            show_panel("Select rows for actions")
+        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests"):
+            show_panel("AI suggestions")
+        elif role != "option":
+            show_panel()
         if role == "button":
             command("wait", "--fn", "Array.from(document.querySelectorAll('button')).some(b => "
                     f"(b.textContent.trim() === {json.dumps(name)} || "
@@ -74,15 +89,16 @@ def main():
                     raise AssertionError("Fixture failed to start; see server.log")
                 time.sleep(.1)
             command("open", f"http://127.0.0.1:{port}")
-            command("wait", "--text", "Rows to ask Jev about")
+            command("wait", "--text", "Select rows for actions")
             snapshot()
-            click("combobox", "Rows to ask Jev about")
+            click("combobox", "Selected rows")
             command("snapshot", "-i")
             click("option", "2026-01-01 | Cedar Paper: printer paper receipt | $-33.33")
             # Move focus out of the menu; Escape can stop Streamlit, while
             # React Aria's accessibility-only Dismiss button is not clickable.
             command("press", "Tab")
             snapshot()
+            show_panel("AI suggestions")
             command("find", "role", "checkbox", "check", "--name", "Send the selected transaction information to TypeSafe", "--exact")
             snapshot()
             click("button", "Ask Jev for suggestions")
@@ -98,9 +114,11 @@ def main():
             command("wait", "--text", "Upload Bank/Credit Card CSV File")
             snapshot()
             click("radio", "Review & Categorize")
-            command("wait", "--text", "Rows to ask Jev about")
+            command("wait", "--text", "Select rows for actions")
             check_account(True)
+            show_panel()
             command("find", "role", "checkbox", "check", "--name", "Disable Jev provider", "--exact")
+            show_panel("AI suggestions")
             command("wait", "--text", "AI categorization is off")
             snapshot()
             click("button", "Change synthetic evidence")
@@ -109,14 +127,16 @@ def main():
             provider_toggle = next(line for line in snapshot().splitlines()
                                    if 'checkbox "Disable Jev provider"' in line)
             command("uncheck", "@" + re.search(r"ref=(e\d+)", provider_toggle).group(1))
-            command("wait", "--text", "Rows to ask Jev about")
+            command("wait", "--text", "Select rows for actions")
             snapshot()
-            click("combobox", "Rows to ask Jev about")
+            click("combobox", "Selected rows")
             command("snapshot", "-i")
             click("option", "2026-01-01 | Cedar Paper: printer paper receipt changed | $-33.33")
             command("press", "Tab")
             snapshot()
+            show_panel("AI suggestions")
             command("find", "role", "checkbox", "check", "--name", "Send the selected transaction information to TypeSafe", "--exact")
+            show_panel()
             command("find", "role", "checkbox", "check", "--name", "Simulate network timeout", "--exact")
             command("wait", "--text", "Synthetic failure mode: on")
             snapshot()

@@ -30,7 +30,7 @@ def test_reruns_and_acceptance_preserve_inclusion(monkeypatch, client_id, accoun
     at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
     at.run()
     assert not at.exception and not calls
-    at.multiselect(key="jev_rows").set_value([row["uid"]]).run()
+    at.multiselect(key="bulk_rows").set_value([row["uid"]]).run()
     at.checkbox(key="jev_consent").check().run()
     assert not calls
     at.button(key="jev_run").click().run()
@@ -61,7 +61,7 @@ def test_failure_keeps_rows_and_no_automatic_retry(monkeypatch, client_id, accou
     monkeypatch.setattr(jev, "send_request", send)
     at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
     at.run()
-    at.multiselect(key="jev_rows").set_value([row["uid"]]).run()
+    at.multiselect(key="bulk_rows").set_value([row["uid"]]).run()
     at.checkbox(key="jev_consent").check().run()
     at.button(key="jev_run").click().run()
     at.run()
@@ -83,7 +83,7 @@ def test_accept_callback_rechecks_evidence_changed_since_display(
     monkeypatch.setattr(jev, "send_request", send)
     at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
     at.run()
-    at.multiselect(key="jev_rows").set_value([row["uid"]]).run()
+    at.multiselect(key="bulk_rows").set_value([row["uid"]]).run()
     at.checkbox(key="jev_consent").check().run()
     at.button(key="jev_run").click().run()
     at.session_state["transactions_to_review"][0]["description"] = "Changed after the suggestion was displayed"
@@ -142,7 +142,7 @@ def test_off_and_anthropic_options_remain_available(monkeypatch, client_id, acco
 
 def _accept_fixture(at, row):
     at.run()
-    at.multiselect(key="jev_rows").set_value([row["uid"]]).run()
+    at.multiselect(key="bulk_rows").set_value([row["uid"]]).run()
     at.checkbox(key="jev_consent").check().run()
     at.button(key="jev_run").click().run()
     next(b for b in at.button if b.label == "Accept account suggestion").click().run()
@@ -168,7 +168,7 @@ def test_unaccepted_result_survives_navigation_without_another_paid_call(monkeyp
     monkeypatch.setattr(jev, "send_request", send)
     at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
     at.run()
-    at.multiselect(key="jev_rows").set_value([row["uid"]]).run()
+    at.multiselect(key="bulk_rows").set_value([row["uid"]]).run()
     at.checkbox(key="jev_consent").check().run()
     at.button(key="jev_run").click().run()
     at.radio[0].set_value("Upload CSV").run()
@@ -196,7 +196,7 @@ def test_retry_enabled_immediately_after_failure(monkeypatch, client_id, account
     monkeypatch.setattr(jev, "send_request", fail)
     at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
     at.run()
-    at.multiselect(key="jev_rows").set_value([row["uid"]]).run()
+    at.multiselect(key="bulk_rows").set_value([row["uid"]]).run()
     at.checkbox(key="jev_consent").check().run()
     at.button(key="jev_run").click().run()
     assert not at.exception
@@ -272,3 +272,25 @@ def test_large_import_prepares_only_chosen_previously_requested_or_accepted_rows
     assert calls == ['2', '3', '7']
     assert state['jev_known_rows'] == ['7']
     assert all(not t['include'] for t in rows)
+
+
+def test_shared_selection_supports_bulk_without_exceeding_jev_limit(
+    monkeypatch, client_id, accounts, fake_credential_vault,
+):
+    at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
+    rows = ensure_row_ids([{**row, 'uid': str(i), 'description': f'Fictional purchase {i}'} for i in range(26)])
+    at.session_state['transactions_to_review'] = rows
+    calls = []
+    monkeypatch.setattr(jev, 'send_request', lambda *args: calls.append(args))
+    at.run()
+    at.button(key='select_bulk').click().run()
+    at.checkbox(key='jev_consent').check().run()
+    assert not at.exception and not calls
+    assert len(at.multiselect(key='bulk_rows').value) == 26
+    assert at.button(key='jev_run').disabled
+    assert any('at most 25' in x.value for x in at.info)
+    at.selectbox(key='bulk_account_select').set_value(accounts['expense']).run()
+    next(b for b in at.button if b.label == 'Apply to Selected').click().run()
+    assert not at.exception and not calls
+    assert all(r['selected_account_id'] == accounts['expense'] and not r['include']
+               for r in at.session_state['transactions_to_review'])

@@ -26,7 +26,8 @@ def prepare_jev_review(transactions, accounts, client_id, book, business_context
     scope = (str(book), client_id)
     inputs, keys = {}, {}
     known = set(session_state.get("jev_known_rows", ()))
-    relevant = known | set(session_state.get("jev_rows", ()))
+    chosen = session_state.get("bulk_rows", session_state.get("jev_rows", ()))
+    relevant = known | (set(chosen) if len(chosen) <= jev.MAX_BATCH else set())
     if include_unaccepted:
         session_state["jev_known_rows"] = sorted(known & {t["uid"] for t in transactions})
     for transaction in transactions:
@@ -58,7 +59,7 @@ def prepare_jev_review(transactions, accounts, client_id, book, business_context
     return inputs, keys
 
 
-def render_jev_review(transactions, accounts, client_id, prepared):
+def render_jev_review(transactions, accounts, client_id, prepared, *, chosen=None, show_results=True):
     st.caption(
         "TypeSafe Jev sends only the rows you choose: dates, descriptions, amounts, "
         "source account IDs, transfer flags and receipt text if present, plus eligible "
@@ -69,11 +70,16 @@ def render_jev_review(transactions, accounts, client_id, prepared):
     inputs, keys = prepared
     cache = st.session_state.setdefault("jev_results", {})
     by_uid = {t["uid"]: t for t in transactions}
-    st.session_state["jev_rows"] = [uid for uid in st.session_state.get("jev_rows", []) if uid in by_uid]
-    chosen = st.multiselect(
-        "Rows to ask Jev about", options=list(by_uid), key="jev_rows", max_selections=jev.MAX_BATCH,
-        format_func=lambda uid: f"{by_uid[uid]['date']} | {by_uid[uid]['description']} | ${by_uid[uid]['amount']:,.2f}",
-    )
+    if chosen is None:
+        st.session_state["jev_rows"] = [uid for uid in st.session_state.get("jev_rows", []) if uid in by_uid]
+        chosen = st.multiselect(
+            "Rows to ask Jev about", options=list(by_uid), key="jev_rows", max_selections=jev.MAX_BATCH,
+            format_func=lambda uid: f"{by_uid[uid]['date']} | {by_uid[uid]['description']} | ${by_uid[uid]['amount']:,.2f}",
+        )
+    if len(chosen) > jev.MAX_BATCH:
+        st.info(f"Select at most {jev.MAX_BATCH} rows for a Jev request. Your selection and posting inclusion are unchanged.")
+        chosen = []
+    st.caption(f"{len(chosen)} rows selected for suggestions.")
     consent = st.checkbox("Send the selected transaction information to TypeSafe", key="jev_consent")
     api_key = secure_store.get_secret("typesafe_api_key")
     if not api_key:
@@ -96,23 +102,28 @@ def render_jev_review(transactions, accounts, client_id, prepared):
         # Refresh result-dependent controls immediately. The cached failure or
         # success prevents this rerun from making another paid request.
         st.rerun()
+    if show_results:
+        for transaction in transactions:
+            render_jev_result(transaction, accounts, client_id, prepared)
+
+
+def render_jev_result(transaction, accounts, client_id, prepared):
+    """Render a cached suggestion beside its row; never initiates a request."""
+    _, keys = prepared
+    uid = transaction["uid"]
+    result = st.session_state.get("jev_results", {}).get(keys.get(uid))
+    if not result:
+        return
+    if result.get("error"):
+        st.warning(result["error"] + " Your staged transactions are unchanged.")
+        return
     account_names = {a.id: a.display_name() for a in jev.eligible_accounts(accounts, client_id)}
-    for uid, transaction in by_uid.items():
-        result = cache.get(keys.get(uid))
-        if not result:
-            continue
-        with st.expander(f"Jev review: {transaction['description']}", expanded=True):
-            if result.get("error"):
-                st.warning(result["error"] + " Your staged transactions are unchanged.")
-                continue
-            st.caption(f"Distribution concentration: {result['confidence']:.0%}. This is not a guarantee of correctness.")
-            if result["outcome"] == "account":
-                account_id = result["account_id"]
-                st.write(f"Suggested account: {account_names[account_id]}")
-                if st.button("Accept account suggestion", key=f"jev_accept_{uid}_{keys[uid]}",
-                             on_click=_accept_suggestion,
-                             args=(transaction, account_id, keys[uid])):
-                    st.success("Account accepted. Inclusion for posting is unchanged.")
-            else:
-                st.info(jev.OUTCOMES[result["outcome"]])
-            st.caption("Review the category and transfer controls below before creating journal entries.")
+    if result["outcome"] == "account":
+        account_id = result["account_id"]
+        st.caption(f"Suggested account: {account_names[account_id]}")
+        if st.button("Accept account suggestion", key=f"jev_accept_{uid}_{keys[uid]}",
+                     on_click=_accept_suggestion, args=(transaction, account_id, keys[uid])):
+            st.success("Account accepted. Inclusion for posting is unchanged.")
+    else:
+        st.info(jev.OUTCOMES[result["outcome"]])
+    st.caption(f"Distribution concentration: {result['confidence']:.0%}. Not a guarantee of correctness.")
