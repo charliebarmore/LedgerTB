@@ -132,7 +132,7 @@ def evaluate_jev(cases, transactions, accounts, client_id, fixture, *, api_key,
             result = cache[key]
             rows.append(labeled_row(case, by_id.get(result.get("account_id"), result.get("outcome")),
                                     result.get("confidence", 0), result.get("latency_seconds", duration),
-                                    result.get("error"), probabilities=result.get("probabilities"), request_key=key,
+                                    result.get("error"), probabilities=result.get("probabilities"), request_sha256=key,
                                     batch_index=index))
         if progress:
             progress(jev_report(rows, batches, time.monotonic() - started))
