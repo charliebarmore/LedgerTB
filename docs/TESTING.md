@@ -106,3 +106,9 @@ distributed Windows/Mac bundles. Keep the real-device checklist in
 `WINDOWS-TESTING.md` and the broader release plan in
 `RELEASE-REVIEW-1.7.0.md` for those acceptance steps. Generated randomized
 workflows and longer performance histories remain later extensions.
+
+## Optional Jev categorization
+
+See [Jev integration and synthetic comparison](JEV-CATEGORIZATION.md) for
+fake-vault/SQLCipher tests, the disposable browser fixture, opt-in live evaluation,
+request reuse guarantees, and remaining packaged-app acceptance.

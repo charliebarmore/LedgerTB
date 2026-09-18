@@ -22,6 +22,8 @@ from services.csv_import import (
 )
 from services.import_verification import check_row_continuity, verify_against_source
 from services.categorization import CategorizationService
+from services.jev_categorization import configured_provider
+from utils.jev_review import prepare_jev_review, render_jev_review
 from services.pattern_learning import PatternLearner
 from services.posting import post_transaction
 from services.import_identity import classify_import_duplicates, hash_source
@@ -1601,6 +1603,15 @@ elif selected_tab == "Review & Categorize":
             if 'include' not in t:
                 t['include'] = True
 
+        # Reconcile previously accepted Jev categories independently of the
+        # currently selected provider, before category controls or posting.
+        provider = configured_provider()
+        jev_prepared = prepare_jev_review(
+            transactions, all_accounts, client_id, dbconn.DATABASE_PATH,
+            client.categorization_context(), st.session_state,
+            include_unaccepted=provider == "jev",
+        )
+
         # Summary and bulk actions
         included_count = sum(1 for t in transactions if t.get('include', True))
         uncategorized_count = sum(1 for t in transactions if not t.get('selected_account_id') and 'suggested_account_id' not in t)
@@ -1699,7 +1710,9 @@ elif selected_tab == "Review & Categorize":
             # Clear the message after showing
             st.session_state.ai_categorization_result = None
 
-        if categorization_service.is_available():
+        if provider == "jev":
+            render_jev_review(transactions, all_accounts, client_id, jev_prepared)
+        elif provider == "anthropic" and categorization_service.is_available():
             # Build list of uncategorized transactions.
             # Check session state for current selection, not transaction dict.
             uncategorized = [
@@ -1756,7 +1769,7 @@ elif selected_tab == "Review & Categorize":
         else:
             # Configuration lives on Firm Settings with the rest of the
             # firm-level setup; this workflow page only points there.
-            st.caption("AI categorization is off — add your Anthropic API key "
+            st.caption("AI categorization is off — choose a provider and add its API key "
                        "on the Firm Settings page to enable suggestions here.")
             st.page_link("pages/12_Firm_Settings.py",
                          label="Set up AI categorization", icon=icons.FIRM)
@@ -2013,7 +2026,9 @@ elif selected_tab == "Review & Categorize":
                 # Initialize session state for this selectbox if not already set
                 cat_key = row_key("cat", t)
                 if cat_key not in st.session_state:
-                    st.session_state[cat_key] = t.get('suggested_account_id') or None
+                    st.session_state[cat_key] = t.get(
+                        'selected_account_id', t.get('suggested_account_id')
+                    ) or None
 
                 if is_transfer:
                     # For transfers, show only bank/liability accounts
@@ -2164,8 +2179,8 @@ elif selected_tab == "Review & Categorize":
                 st.rerun()
 
         with col3:
-            if not categorization_service.is_available():
-                st.caption("AI categorization unavailable — set ANTHROPIC_API_KEY")
+            if provider == "anthropic" and not categorization_service.is_available():
+                st.caption("Anthropic is unavailable — add its key in Firm Settings.")
 
 elif selected_tab == "Import History":
     st.subheader("Import History")

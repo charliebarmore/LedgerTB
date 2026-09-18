@@ -110,6 +110,9 @@ _CLIENT_IMPORT_STATE_KEYS = {
     "import_complete_msg",
     "confirm_dismiss_staged",
     "ai_categorization_result",
+    "jev_results",
+    "jev_rows",
+    "jev_consent",
     "bulk_result",
     "bulk_account_select",
     "sort_by",
@@ -128,6 +131,7 @@ _CLIENT_IMPORT_STATE_KEYS = {
 }
 
 _CLIENT_IMPORT_STATE_PREFIXES = (
+    "jev_",
     "cat_",
     "include_",
     "xfer_",

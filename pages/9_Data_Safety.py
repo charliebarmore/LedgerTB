@@ -605,7 +605,7 @@ if _mcp_enabled:
 
 st.divider()
 st.caption(
-    "AI categorization setup (your Anthropic API key) lives on the Firm "
+    "AI categorization setup (provider and API keys) lives on the Firm "
     "Settings page with the rest of the firm-level configuration."
 )
 st.page_link("pages/12_Firm_Settings.py", label="Firm Settings", icon=icons.FIRM)

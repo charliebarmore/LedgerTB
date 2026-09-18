@@ -1,0 +1,525 @@
+{
+  "fixture": "tests/fixtures/jev_comparison.json",
+  "scope": "Synthetic smoke comparison, not production calibration",
+  "confident_error_definition": "Wrong labeled outcome with concentration/confidence >= 0.8; metrics across providers are not calibrated equivalents.",
+  "providers": {
+    "local_patterns": {
+      "summary": {
+        "cases": 16,
+        "completed": 16,
+        "correct": 7,
+        "correctness_all_cases": 0.4375,
+        "abstentions": 8,
+        "confident_errors": 4,
+        "errors": 0,
+        "median_latency_seconds": 0.0005704789655283093
+      },
+      "rows": [
+        {
+          "id": "clear_supplies",
+          "kind": "control",
+          "expected": "6100",
+          "actual": "6100",
+          "confidence": 0.8,
+          "latency_seconds": 0.0006095420103520155
+        },
+        {
+          "id": "clear_software",
+          "kind": "control",
+          "expected": "6200",
+          "actual": "6200",
+          "confidence": 0.8,
+          "latency_seconds": 0.0007087080739438534
+        },
+        {
+          "id": "clear_revenue",
+          "kind": "control",
+          "expected": "4000",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "latency_seconds": 0.0005554999224841595
+        },
+        {
+          "id": "ambiguous_market",
+          "kind": "ambiguous_merchant",
+          "expected": "insufficient_information",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "latency_seconds": 0.0005976669490337372
+        },
+        {
+          "id": "ambiguous_wallet",
+          "kind": "ambiguous_merchant",
+          "expected": "insufficient_information",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "latency_seconds": 0.0005258331075310707
+        },
+        {
+          "id": "ambiguous_cafe",
+          "kind": "missing_receipt",
+          "expected": "insufficient_information",
+          "actual": "6300",
+          "confidence": 0.8,
+          "latency_seconds": 0.0006002089940011501
+        },
+        {
+          "id": "transfer_savings",
+          "kind": "transfer",
+          "expected": "transfer_review",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "latency_seconds": 0.0005097079556435347
+        },
+        {
+          "id": "card_payment",
+          "kind": "transfer",
+          "expected": "transfer_review",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "latency_seconds": 0.0005709580145776272
+        },
+        {
+          "id": "owner_funding",
+          "kind": "transfer",
+          "expected": "transfer_review",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "latency_seconds": 0.0005157920531928539
+        },
+        {
+          "id": "refund_supplies",
+          "kind": "refund",
+          "expected": "6100",
+          "actual": "6100",
+          "confidence": 0.8,
+          "latency_seconds": 0.0005647500511258841
+        },
+        {
+          "id": "refund_travel",
+          "kind": "refund",
+          "expected": "6400",
+          "actual": "6400",
+          "confidence": 0.8,
+          "latency_seconds": 0.0005236249417066574
+        },
+        {
+          "id": "refund_unknown",
+          "kind": "refund",
+          "expected": "insufficient_information",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "latency_seconds": 0.0005950420163571835
+        },
+        {
+          "id": "mixed_office_personal",
+          "kind": "mixed_purchase",
+          "expected": "split_required",
+          "actual": "6100",
+          "confidence": 0.8,
+          "latency_seconds": 0.0004984170664101839
+        },
+        {
+          "id": "mixed_categories",
+          "kind": "mixed_purchase",
+          "expected": "split_required",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "latency_seconds": 0.0005699999164789915
+        },
+        {
+          "id": "missing_paper_receipt",
+          "kind": "missing_receipt",
+          "expected": "insufficient_information",
+          "actual": "6100",
+          "confidence": 0.8,
+          "latency_seconds": 0.0006663331296294928
+        },
+        {
+          "id": "missing_flight_purpose",
+          "kind": "missing_receipt",
+          "expected": "insufficient_information",
+          "actual": "6400",
+          "confidence": 0.8,
+          "latency_seconds": 0.0006116658914834261
+        }
+      ],
+      "usage": {
+        "cost_usd": 0,
+        "network_requests": 0
+      }
+    },
+    "jev": {
+      "summary": {
+        "cases": 16,
+        "completed": 16,
+        "correct": 16,
+        "correctness_all_cases": 1.0,
+        "abstentions": 11,
+        "confident_errors": 0,
+        "errors": 0,
+        "median_latency_seconds": 0.9220744994236156
+      },
+      "rows": [
+        {
+          "id": "clear_supplies",
+          "kind": "control",
+          "expected": "6100",
+          "actual": "6100",
+          "confidence": 0.98,
+          "error": null,
+          "latency_seconds": 0.9220709579531103,
+          "probabilities": {
+            "account_4": 0.0,
+            "account_7": 0.0,
+            "insufficient_information": 0.01,
+            "account_6": 0.0,
+            "transfer_review": 0.0,
+            "account_3": 0.0,
+            "account_2": 0.0,
+            "account_5": 0.0,
+            "split_required": 0.0,
+            "account_1": 0.99
+          }
+        },
+        {
+          "id": "clear_software",
+          "kind": "control",
+          "expected": "6200",
+          "actual": "6200",
+          "confidence": 1.0,
+          "error": null,
+          "latency_seconds": 0.9220724159386009,
+          "probabilities": {
+            "account_4": 0.0,
+            "account_7": 0.0,
+            "insufficient_information": 0.0,
+            "account_6": 0.0,
+            "transfer_review": 0.0,
+            "split_required": 0.0,
+            "account_3": 0.0,
+            "account_5": 0.0,
+            "account_2": 1.0,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "clear_revenue",
+          "kind": "control",
+          "expected": "4000",
+          "actual": "4000",
+          "confidence": 1.0,
+          "error": null,
+          "latency_seconds": 0.9220731249079108,
+          "probabilities": {
+            "account_4": 0.0,
+            "account_7": 0.0,
+            "insufficient_information": 0.0,
+            "account_6": 1.0,
+            "account_2": 0.0,
+            "split_required": 0.0,
+            "transfer_review": 0.0,
+            "account_5": 0.0,
+            "account_3": 0.0,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "ambiguous_market",
+          "kind": "ambiguous_merchant",
+          "expected": "insufficient_information",
+          "actual": "insufficient_information",
+          "confidence": 0.95,
+          "error": null,
+          "latency_seconds": 0.9220734999980778,
+          "probabilities": {
+            "account_4": 0.0,
+            "account_7": 0.0,
+            "insufficient_information": 0.96,
+            "account_6": 0.0,
+            "transfer_review": 0.0,
+            "account_3": 0.0,
+            "account_2": 0.0,
+            "account_5": 0.0,
+            "split_required": 0.04,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "ambiguous_wallet",
+          "kind": "ambiguous_merchant",
+          "expected": "insufficient_information",
+          "actual": "insufficient_information",
+          "confidence": 0.83,
+          "error": null,
+          "latency_seconds": 0.9220737910363823,
+          "probabilities": {
+            "account_4": 0.01,
+            "account_7": 0.0,
+            "insufficient_information": 0.85,
+            "account_6": 0.0,
+            "account_2": 0.01,
+            "split_required": 0.0,
+            "transfer_review": 0.11,
+            "account_5": 0.01,
+            "account_3": 0.01,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "ambiguous_cafe",
+          "kind": "missing_receipt",
+          "expected": "insufficient_information",
+          "actual": "insufficient_information",
+          "confidence": 0.98,
+          "error": null,
+          "latency_seconds": 0.9220739998854697,
+          "probabilities": {
+            "account_4": 0.0,
+            "account_7": 0.0,
+            "insufficient_information": 0.98,
+            "account_6": 0.0,
+            "transfer_review": 0.0,
+            "split_required": 0.0,
+            "account_3": 0.01,
+            "account_5": 0.01,
+            "account_2": 0.0,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "transfer_savings",
+          "kind": "transfer",
+          "expected": "transfer_review",
+          "actual": "transfer_review",
+          "confidence": 1.0,
+          "error": null,
+          "latency_seconds": 0.9220742080360651,
+          "probabilities": {
+            "account_4": 0.0,
+            "insufficient_information": 0.0,
+            "account_7": 0.0,
+            "account_6": 0.0,
+            "account_2": 0.0,
+            "split_required": 0.0,
+            "account_3": 0.0,
+            "account_5": 0.0,
+            "transfer_review": 1.0,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "card_payment",
+          "kind": "transfer",
+          "expected": "transfer_review",
+          "actual": "transfer_review",
+          "confidence": 1.0,
+          "error": null,
+          "latency_seconds": 0.9220744159538299,
+          "probabilities": {
+            "account_4": 0.0,
+            "insufficient_information": 0.0,
+            "account_7": 0.0,
+            "account_6": 0.0,
+            "transfer_review": 1.0,
+            "split_required": 0.0,
+            "account_3": 0.0,
+            "account_5": 0.0,
+            "account_2": 0.0,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "owner_funding",
+          "kind": "transfer",
+          "expected": "transfer_review",
+          "actual": "transfer_review",
+          "confidence": 0.99,
+          "error": null,
+          "latency_seconds": 0.9220745828934014,
+          "probabilities": {
+            "account_4": 0.0,
+            "account_7": 0.0,
+            "insufficient_information": 0.0,
+            "account_6": 0.0,
+            "transfer_review": 1.0,
+            "account_3": 0.0,
+            "split_required": 0.0,
+            "account_5": 0.0,
+            "account_2": 0.0,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "refund_supplies",
+          "kind": "refund",
+          "expected": "6100",
+          "actual": "6100",
+          "confidence": 0.98,
+          "error": null,
+          "latency_seconds": 0.9220747910439968,
+          "probabilities": {
+            "account_4": 0.0,
+            "insufficient_information": 0.01,
+            "account_7": 0.0,
+            "account_6": 0.0,
+            "transfer_review": 0.0,
+            "account_3": 0.0,
+            "split_required": 0.0,
+            "account_5": 0.0,
+            "account_2": 0.0,
+            "account_1": 0.99
+          }
+        },
+        {
+          "id": "refund_travel",
+          "kind": "refund",
+          "expected": "6400",
+          "actual": "6400",
+          "confidence": 0.98,
+          "error": null,
+          "latency_seconds": 0.9220749579835683,
+          "probabilities": {
+            "account_4": 0.99,
+            "account_7": 0.0,
+            "insufficient_information": 0.01,
+            "account_6": 0.0,
+            "account_2": 0.0,
+            "split_required": 0.0,
+            "transfer_review": 0.0,
+            "account_5": 0.0,
+            "account_3": 0.0,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "refund_unknown",
+          "kind": "refund",
+          "expected": "insufficient_information",
+          "actual": "insufficient_information",
+          "confidence": 0.82,
+          "error": null,
+          "latency_seconds": 0.9220751659013331,
+          "probabilities": {
+            "account_4": 0.0,
+            "insufficient_information": 0.85,
+            "account_7": 0.0,
+            "account_6": 0.0,
+            "transfer_review": 0.0,
+            "account_3": 0.0,
+            "account_2": 0.0,
+            "account_5": 0.01,
+            "split_required": 0.12,
+            "account_1": 0.02
+          }
+        },
+        {
+          "id": "mixed_office_personal",
+          "kind": "mixed_purchase",
+          "expected": "split_required",
+          "actual": "split_required",
+          "confidence": 1.0,
+          "error": null,
+          "latency_seconds": 0.9220753330737352,
+          "probabilities": {
+            "account_4": 0.0,
+            "account_7": 0.0,
+            "insufficient_information": 0.0,
+            "account_6": 0.0,
+            "transfer_review": 0.0,
+            "split_required": 1.0,
+            "account_3": 0.0,
+            "account_5": 0.0,
+            "account_2": 0.0,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "mixed_categories",
+          "kind": "mixed_purchase",
+          "expected": "split_required",
+          "actual": "split_required",
+          "confidence": 0.99,
+          "error": null,
+          "latency_seconds": 0.9220755409915,
+          "probabilities": {
+            "account_4": 0.0,
+            "account_7": 0.0,
+            "insufficient_information": 0.0,
+            "account_6": 0.0,
+            "transfer_review": 0.0,
+            "split_required": 1.0,
+            "account_2": 0.0,
+            "account_5": 0.0,
+            "account_3": 0.0,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "missing_paper_receipt",
+          "kind": "missing_receipt",
+          "expected": "insufficient_information",
+          "actual": "insufficient_information",
+          "confidence": 0.98,
+          "error": null,
+          "latency_seconds": 0.9220757079310715,
+          "probabilities": {
+            "account_4": 0.0,
+            "insufficient_information": 0.99,
+            "account_7": 0.0,
+            "account_6": 0.0,
+            "account_2": 0.0,
+            "account_3": 0.0,
+            "transfer_review": 0.0,
+            "account_5": 0.0,
+            "split_required": 0.01,
+            "account_1": 0.0
+          }
+        },
+        {
+          "id": "missing_flight_purpose",
+          "kind": "missing_receipt",
+          "expected": "insufficient_information",
+          "actual": "insufficient_information",
+          "confidence": 0.98,
+          "error": null,
+          "latency_seconds": 0.9220758751034737,
+          "probabilities": {
+            "account_4": 0.01,
+            "account_7": 0.0,
+            "insufficient_information": 0.98,
+            "account_6": 0.0,
+            "transfer_review": 0.0,
+            "split_required": 0.01,
+            "account_3": 0.0,
+            "account_5": 0.0,
+            "account_2": 0.0,
+            "account_1": 0.0
+          }
+        }
+      ],
+      "model": "jev-1.13.0",
+      "batch_latency_seconds": 0.9222137918695807,
+      "usage": {
+        "input_tokens": 10836,
+        "output_tokens": 2605
+      },
+      "cost_usd": null,
+      "cost_note": "API response exposes tokens, not billed dollars. No price assumed.",
+      "network_requests": 1,
+      "published_price_evidence": {
+        "source": "https://docs.typesafe.ai/models",
+        "checked": "2026-09-17",
+        "model": "jev-1.13.0",
+        "usd_per_million_input_tokens": 0.042,
+        "output_tokens_free": true,
+        "estimated_batch_cost_usd": 0.000455112,
+        "actual_billed_cost_verified": false
+      }
+    },
+    "anthropic": {
+      "status": "not run; needs --live-anthropic and ANTHROPIC_API_KEY in environment"
+    }
+  },
+  "verified_date": "2026-09-17"
+}

@@ -253,21 +253,58 @@ else:
 
 st.divider()
 st.subheader("AI categorization")
-st.caption(
-    "Powered by your own Anthropic API key, stored in the system credential "
-    "vault — never in a file. When suggestions run, transaction dates, "
-    "descriptions, amounts, account names/numbers, client entity and business "
-    "types, and the client's optional AI business context are sent to "
-    "Anthropic's API. General client Notes are not sent. Suggestions only; "
-    "nothing posts without review."
-)
-
 from config import ANTHROPIC_API_KEY
 from utils.secure_store import delete_secret, get_secret, set_secret
+from services.jev_categorization import PROVIDERS, configured_provider
+
+st.caption(
+    "Cloud categorization is optional. Local rules and manual review work offline. "
+    "Choose a provider, save your own key in the system credential vault, and "
+    "explicitly request suggestions in Import Review. Nothing posts automatically."
+)
+_provider = st.selectbox("Categorization provider", options=list(PROVIDERS),
+                         index=list(PROVIDERS).index(configured_provider()),
+                         format_func=PROVIDERS.get, key="firm_categorization_provider")
+if st.button("Save categorization provider"):
+    try:
+        set_secret("categorization_provider", _provider)
+        st.success("Provider saved. Review requests remain opt-in.")
+    except Exception:
+        st.error("Could not save the provider in the credential vault. Try again.")
+
+st.markdown("**TypeSafe Jev**")
+st.caption(
+    "Selected transaction information is sent to TypeSafe: dates, descriptions, "
+    "amounts, source account IDs, transfer flags and receipt text if present, "
+    "eligible account IDs/names/numbers/types, and the client's entity type, "
+    "business type and optional AI business context. General client Notes are "
+    "not sent. Jev confidence describes distribution concentration, not correctness."
+)
+_typesafe_saved = get_secret("typesafe_api_key")
+if _typesafe_saved:
+    st.success("A TypeSafe key is saved in the system credential vault.")
+_typesafe_key = st.text_input("TypeSafe API Key", type="password", key="firm_typesafe_key",
+                              help="Get a key at https://console.typesafe.ai/")
+if st.button("Save TypeSafe key", disabled=not _typesafe_key.strip()):
+    try:
+        set_secret("typesafe_api_key", _typesafe_key.strip())
+        st.success("TypeSafe key saved. It is available immediately for review requests.")
+    except Exception:
+        st.error("Could not save the TypeSafe key securely. Try again.")
+if _typesafe_saved and st.button("Remove TypeSafe key"):
+    delete_secret("typesafe_api_key")
+    st.rerun()
+
+st.markdown("**Anthropic**")
+st.caption(
+    "Sends transaction dates, descriptions, amounts, account names/numbers, "
+    "client entity and business types, and optional AI business context to "
+    "Anthropic when you request categorization. General client Notes are not sent."
+)
 
 _saved_key = get_secret("anthropic_api_key")
 if ANTHROPIC_API_KEY:
-    st.success("AI categorization is enabled for this session.")
+    st.success("An Anthropic key is available for this session.")
 elif _saved_key:
     st.info("An API key is saved. Restart LedgerTB to enable AI categorization.")
 else:

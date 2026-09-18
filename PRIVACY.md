@@ -46,7 +46,19 @@ descriptions, amounts, account names and numbers, transaction details, or text
 extracted from a statement. Your Anthropic API key is stored in the operating
 system credential vault when saved in the app.
 
-Those requests are made directly from your computer to Anthropic and are
+TypeSafe Jev is a separate, optional categorization provider. Only on an explicit
+review request, it receives the selected rows' dates, descriptions, amounts,
+source account IDs, transfer flags and receipt text if present, eligible account
+IDs/names/numbers/types, and the client's entity type, business type and optional
+AI business context. General client Notes are not sent. Its key is stored in the
+operating system credential vault. Suggestions and request results are held in
+session memory; each account suggestion needs human acceptance. Jev does not
+create entries or change inclusion for posting.
+
+TypeSafe requests go directly from your computer to TypeSafe and are governed
+by your TypeSafe account, agreement, and service settings.
+
+Anthropic requests are made directly from your computer to Anthropic and are
 governed by your Anthropic account, agreement, and selected service settings.
 Ledger Labs LLC does not receive those requests.
 
