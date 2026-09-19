@@ -48,7 +48,7 @@ and billing depend on that provider account. **Other model ID** supports a
 structured-JSON-capable model on the selected Anthropic/OpenAI API, not arbitrary
 providers or custom endpoints. Jev exposes its supported `jev-latest` model.
 
-After requesting Jev (or another provider), click **Ask another AI**, select the
+After requesting Jev (or another provider), click **Choose another AI**, select the
 provider/model you want, consent to sending the selected evidence, then request
 suggestions. Nothing is sent by switching providers/models. The second opinion
 uses the same evidence independently; it does not receive the first AI's answer.
@@ -103,7 +103,7 @@ packaging includes the new source modules automatically as data; `run_ledgertb.p
 checks both new imports. No lockfile or dependency changes are required.
 
 For a human walkthrough with the isolated synthetic fixture: choose one action
-row while leaving it excluded, request Jev, then **Ask another AI** → Anthropic
+row while leaving it excluded, request Jev, then **Choose another AI** → Anthropic
 or OpenAI. Confirm earlier opinions remain and disagreement is shown. Accept an
 account and confirm Include is still unchecked. Change provider/model: consent
 must be unchecked, and no request occurs until explicitly requested. Requests

@@ -121,7 +121,7 @@ def main():
     def click(role, name, exact=True):
         if name in ("Selected rows", "Select all", "Clear selection"):
             show_panel("Select rows for actions")
-        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests", "Ask another AI", "Ask Anthropic for suggestions", "Ask OpenAI for suggestions"):
+        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests", "Choose another AI", "Ask Anthropic for suggestions", "Ask OpenAI for suggestions"):
             show_panel("AI suggestions")
         elif role != "option":
             show_panel()
@@ -264,7 +264,7 @@ def main():
                 checks += ["packaged SQLCipher unlock and CSV import", "explicit Jev request and human acceptance", "acceptance preserves exclusion", "rerun and repeated request reuse"]
                 checks += ["offline failure preserves staged rows", "failed result reuse and explicit recovery retry"]
                 for other_provider in ("Anthropic", "OpenAI"):
-                    click("button", "Ask another AI")
+                    click("button", "Choose another AI")
                     snap()
                     command("find", "role", "checkbox", "check", "--name",
                             f"Send the selected transaction information to {other_provider}", "--exact")

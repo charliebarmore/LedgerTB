@@ -57,7 +57,7 @@ def main():
     def click(role, name):
         if name in ("Selected rows", "Select all", "Clear selection"):
             show_panel("Select rows for actions")
-        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests", "Ask another AI", "Ask Anthropic for suggestions", "Ask OpenAI for suggestions", "AI provider", "Model"):
+        elif name in ("Ask Jev for suggestions", "Retry failed Jev requests", "Choose another AI", "Ask Anthropic for suggestions", "Ask OpenAI for suggestions", "AI provider", "Model"):
             show_panel("AI suggestions")
         elif role != "option":
             show_panel()
@@ -134,7 +134,7 @@ def main():
             click("button", "Ask Jev for suggestions")
             snapshot()
             assert "Synthetic transport calls: 1" in command("get", "text", "body")
-            click("button", "Ask another AI")
+            click("button", "Choose another AI")
             state = snapshot()
             assert any('combobox "AI provider"' in line and 'Anthropic' in line for line in state.splitlines()), state
             assert 'Synthetic other-provider calls: 0' in command("get", "text", "body")
@@ -148,7 +148,7 @@ def main():
             click("button", "Ask Anthropic for suggestions")
             snapshot()
             assert 'Synthetic other-provider calls: 1' in command("get", "text", "body")
-            click("button", "Ask another AI")
+            click("button", "Choose another AI")
             snapshot()
             command("find", "role", "checkbox", "check", "--name", "Send the selected transaction information to OpenAI", "--exact")
             click("button", "Ask OpenAI for suggestions")

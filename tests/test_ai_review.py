@@ -35,7 +35,7 @@ def test_second_opinions_keep_first_and_inclusion(monkeypatch, client_id, accoun
     at, row, calls = fixture(monkeypatch, client_id, accounts, fake_credential_vault, 'jev')
     at.checkbox(key='jev_consent').check().run()
     at.button(key='jev_run').click().run()
-    next(b for b in at.button if b.label == 'Ask another AI').click().run()
+    next(b for b in at.button if b.label == 'Choose another AI').click().run()
     assert next(w for w in at.selectbox if w.label == 'AI provider').value == 'anthropic'
     assert not at.checkbox(key='ai_review_consent').value and not calls
     ask(at)

@@ -139,8 +139,8 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
         has_error = any(cache.get(k, {}).get('error') and cache[k].get('retryable', True) for k in requested)
         retry = False
         if has_error:
-            retry = st.button(f'Retry failed {name} requests', key='ai_review_retry', disabled=not enabled,
-                              help='Explicit retry may incur another charge, including after a timeout.')
+            st.caption('Retry may incur another charge, including after a timeout.')
+            retry = st.button(f'Retry failed {name} requests', key='ai_review_retry', disabled=not enabled)
         if run or retry:
             variant_id = f'{provider}:{model}'
             variants = st.session_state.setdefault('ai_review_variants', {})
@@ -150,8 +150,7 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
                 ai.suggest(requested, cache, provider=provider, model=model, api_key=api_key, consent=consent, retry=retry)
             st.rerun()
     if st.session_state.get('jev_results') or st.session_state.get('ai_review_results'):
-        st.button('Ask another AI', on_click=choose_another,
-                  help='Choose another provider. Nothing is sent until you consent and request it. Earlier opinions remain visible.')
+        st.button('Choose another AI', on_click=choose_another)
 
 
 def render_results(row, accounts, client_id, jev_prepared, other_prepared):

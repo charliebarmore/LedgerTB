@@ -98,8 +98,8 @@ def render_jev_review(transactions, accounts, client_id, prepared, *, chosen=Non
     has_error = any(cache.get(k, {}).get("error") and cache[k].get("retryable", True) for k in requested)
     retry = False
     if has_error:
-        retry = st.button("Retry failed Jev requests", disabled=not (consent and api_key), key="jev_retry",
-                          help="Wait after a rate limit. A retry may incur another charge, including after a timeout.")
+        st.caption("Wait after a rate limit. Retry may incur another charge, including after a timeout.")
+        retry = st.button("Retry failed Jev requests", disabled=not (consent and api_key), key="jev_retry")
     if run or retry:
         st.session_state["jev_known_rows"] = sorted(set(st.session_state.get("jev_known_rows", ())) | set(chosen))
         with st.spinner("Jev is reviewing the selected information..."):
