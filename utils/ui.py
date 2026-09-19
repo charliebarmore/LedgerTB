@@ -102,10 +102,10 @@ def review_action_panels():
     def toggle(name):
         st.session_state[key] = None if st.session_state.get(key) == name else name
     active = st.session_state.get(key)
-    for col, (name, label) in zip(st.columns([3, 2, 2, 1.5]), actions.items()):
-        with col:
+    with st.container(horizontal=True):
+        for name, label in actions.items():
             st.button(f'Close {label}' if active == name else label,
-                      key=f'review_action_toggle_{name}', width='stretch',
+                      key=f'review_action_toggle_{name}',
                       type='primary' if active == name else 'secondary',
                       on_click=toggle, args=(name,))
     # Streamlit's zero-height layout wrapper still consumes a flex gap. Hide

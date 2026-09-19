@@ -1651,3 +1651,22 @@ def test_readonly_journal_disables_entry_and_correction_actions(client_id,accoun
     page.run()
     assert not page.exception
     assert next(b for b in page.button if b.label=='Change category').disabled
+
+
+def test_readonly_chart_keeps_review_available_without_write_actions(
+    client_id, accounts, monkeypatch,
+):
+    from database import connection as dbconn
+    _select_client(monkeypatch, client_id)
+    before = [(a.id, a.name, a.subtype) for a in Account.get_all(client_id)]
+    monkeypatch.setattr(dbconn, "READ_ONLY", True)
+    page = AppTest.from_file(page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30)
+    page.session_state["editing_account"] = accounts["expense"]
+    page.run()
+    assert not page.exception
+    mutations = [b for b in page.button if b.label in (
+        "Apply to selected accounts", "Save Changes", "Delete", "Add Account",
+    )]
+    assert mutations and all(b.disabled for b in mutations)
+    assert not next(b for b in page.button if b.label == "Cancel").disabled
+    assert before == [(a.id, a.name, a.subtype) for a in Account.get_all(client_id)]

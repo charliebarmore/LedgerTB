@@ -522,16 +522,15 @@ if rows:
         st.warning("Exports could not be prepared. Your worksheet is unchanged. Try Refresh again.")
 if dbconn.READ_ONLY and rows:
     st.caption("Downloads from a read-only session are not added to the book’s audit history.")
-btn_cols = st.columns([1, 1, 1, 1, 3])
+# Content-sized actions wrap as a group on smaller desktop windows.
+with st.container(horizontal=True, key="worksheet_actions"):
 
-with btn_cols[0]:
     if st.button(
         "+ Add AJE", type="primary", key=worksheet_key("add_aje_btn"), disabled=dbconn.READ_ONLY
     ):
         st.session_state.show_aje_form = True
         st.session_state.aje_prefill_account = None
 
-with btn_cols[1]:
     # Export to Excel with formulas
     if exports:
         output = exports["worksheet"]
@@ -548,7 +547,6 @@ with btn_cols[1]:
             }),
         )
 
-with btn_cols[2]:
     # Everything needed to hand off a finished period: financial statements,
     # final TB, all transactions, AJEs, and cash-account activity.
     # PDF is the file/record copy; the Excel workbook is for further work.
@@ -586,10 +584,10 @@ with btn_cols[2]:
             }),
         )
 
-with btn_cols[3]:
     if st.button("Refresh", key=worksheet_key("refresh_btn")):
         st.session_state.pop("_worksheet_exports", None)
         st.rerun()
+
 
 # AJE Entry Form (modal-like experience)
 if st.session_state.get('show_aje_form', False):

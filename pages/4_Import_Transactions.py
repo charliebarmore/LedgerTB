@@ -1643,11 +1643,11 @@ elif selected_tab == "Review & Categorize":
         uncategorized_count = sum(1 for t in transactions if not t.get('selected_account_id'))
         duplicate_count = sum(1 for t in transactions if t.get('is_duplicate', False))
 
-        col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+        col1, col2, col3, col4, col5 = st.columns([1, 1.25, 1.1, 1, 1.6])
         with col1:
             st.metric("Total", len(transactions))
         with col2:
-            st.metric("Included for posting", included_count)
+            st.metric("Included", included_count)
         with col3:
             parked_count = sum(
                 1 for t in transactions
@@ -1666,7 +1666,7 @@ elif selected_tab == "Review & Categorize":
             else:
                 st.metric("Duplicates", 0)
         with col5:
-            subcol1, subcol2 = st.columns(2)
+            subcol1, subcol2 = st.container(), st.container()
             with subcol1:
                 if st.button("Include All", key="select_all_top"):
                     for t in transactions:
@@ -1782,7 +1782,7 @@ elif selected_tab == "Review & Categorize":
                    f"Rows {row_start + 1}–{row_start + len(visible_rows)} of {len(transactions)}. "
                    "Only included rows post, across all pages.")
 
-        header_cols = st.columns([0.7, 0.9, 2.2, 1, 0.6, 2])
+        header_cols = st.columns([1.1, 1.5, 2.2, 1.2, 0.65, 2.2])
         with header_cols[0]:
             st.markdown("**Include**")
         with header_cols[1]:
@@ -1794,7 +1794,7 @@ elif selected_tab == "Review & Categorize":
         with header_cols[4]:
             st.markdown("**Xfer**")
         with header_cols[5]:
-            st.markdown("**Category/Transfer Account**")
+            st.markdown("**Category / account**")
 
         st.divider()
 
@@ -1874,7 +1874,7 @@ elif selected_tab == "Review & Categorize":
                     transactions[i]["include"] = False
                     st.session_state[row_key("include", t)] = False
 
-            col0, col1, col2, col3, col4, col5 = st.columns([0.7, 0.9, 2.2, 1, 0.6, 2])
+            col0, col1, col2, col3, col4, col5 = st.columns([1.1, 1.5, 2.2, 1.2, 0.65, 2.2])
 
             include_key = row_key("include", t)
             with col0:
@@ -1923,7 +1923,8 @@ elif selected_tab == "Review & Categorize":
             with col4:
                 # Transfer toggle
                 is_transfer = st.checkbox(
-                    "Xfer",
+                    "Transfer between accounts",
+                    label_visibility="collapsed",
                     value=t.get('is_transfer', False),
                     key=row_key("xfer", t),
                     help="Check if this is a transfer between accounts (e.g., credit card payment)"
@@ -1931,8 +1932,6 @@ elif selected_tab == "Review & Categorize":
                 transactions[i]['is_transfer'] = is_transfer
 
             with col5:
-                if provider != "off":
-                    render_results(t, all_accounts, client_id, jev_prepared, other_prepared)
                 # Initialize session state for this selectbox if not already set
                 cat_key = row_key("cat", t)
                 if cat_key not in st.session_state:
@@ -1977,6 +1976,11 @@ elif selected_tab == "Review & Categorize":
                 if (selected and selected != ADD_NEW_ACCOUNT
                         and is_parking_account(account_options.get(selected, ""))):
                     st.caption(":red[⚠ Parked — still needs a real category]")
+
+            # Opinions belong to the whole row. Keep long comparisons out of
+            # the narrow category cell, especially with the sidebar open.
+            if provider != "off":
+                render_results(t, all_accounts, client_id, jev_prepared, other_prepared)
 
             # Picking "Add new account…" opens the form right under this row;
             # creating selects the account here and in the chart of accounts.

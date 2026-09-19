@@ -66,6 +66,9 @@ with tab1:
         for account in Account.get_all(client_id, active_only=False)
         if not AccountSubtype.is_canonical(account.type, account.subtype)
     ]
+    if dbconn.READ_ONLY:
+        st.caption("Read-only book. Account changes are unavailable.")
+
     if review_accounts:
         st.warning(
             f"{len(review_accounts)} account"
@@ -130,7 +133,7 @@ with tab1:
                         key=coa_key(f"review_subtype_value_{review_type}"),
                     )
                     if st.form_submit_button(
-                        "Apply to selected accounts", type="primary"
+                        "Apply to selected accounts", type="primary", disabled=dbconn.READ_ONLY
                     ):
                         if not selected_ids:
                             st.warning("Select at least one account to update.")
@@ -160,7 +163,7 @@ with tab1:
             if type_accounts:
                 type_label = AccountType.plural_label(account_type)
                 with st.expander(
-                    f"**{type_label}** ({len(type_accounts)} accounts)",
+                    f"**{type_label}** ({len(type_accounts)} account{'s' if len(type_accounts) != 1 else ''})",
                     expanded=True,
                 ):
                     header_cols = st.columns([1, 3, 2, 1])
@@ -301,7 +304,7 @@ with tab1:
 
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        if st.form_submit_button("Save Changes", type="primary"):
+                        if st.form_submit_button("Save Changes", type="primary", disabled=dbconn.READ_ONLY):
                             account.account_number = new_number
                             account.name = new_name
                             account.type = new_type
@@ -334,7 +337,7 @@ with tab1:
                     with col3:
                         blockers = Account.deletion_blockers(account.id)
                         if not blockers:
-                            if st.form_submit_button("Delete", type="secondary"):
+                            if st.form_submit_button("Delete", type="secondary", disabled=dbconn.READ_ONLY):
                                 try:
                                     Account.delete(account.id, client_id=client_id)
                                     st.success("Account deleted!")
@@ -382,7 +385,7 @@ with tab2:
             key=coa_key("add_account_description"),
         )
 
-        if st.form_submit_button("Add Account", type="primary"):
+        if st.form_submit_button("Add Account", type="primary", disabled=dbconn.READ_ONLY):
             if not account_number or not account_name:
                 st.error("Account number and name are required.")
             else:
@@ -472,7 +475,7 @@ with tab3:
             st.caption(f"{new_count} new account(s); {skip_count} already exist (will be skipped).")
 
             if st.button(f"Import {new_count} account(s)", type="primary",
-                         disabled=(new_count == 0), key=coa_key("coa_import_btn")):
+                         disabled=(dbconn.READ_ONLY or new_count == 0), key=coa_key("coa_import_btn")):
                 created = 0
                 failed = []
                 for a in parsed:
