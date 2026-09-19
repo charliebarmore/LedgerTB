@@ -25,7 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--app", type=Path, required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--app", type=Path)
+    target.add_argument("--source", action="store_true", help="Exercise this checkout with the same fake-vault full-app workflow")
     parser.add_argument("--width", type=int, default=1360)
     parser.add_argument("--height", type=int, default=768)
     parser.add_argument("--key-file", type=Path)
@@ -36,13 +38,13 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "output/packaged-jev-check")
     parser.add_argument("--agent-browser", default=str(ROOT / "tests/browser-tools/node_modules/.bin/agent-browser"))
     args = parser.parse_args()
-    app = args.app.resolve()
-    if not app.is_relative_to(ROOT / "output") or app.suffix != ".app":
+    app = args.app.resolve() if args.app else None
+    if app and (not app.is_relative_to(ROOT / "output") or app.suffix != ".app"):
         parser.error("Use a disposable .app under this checkout's output directory")
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    bundle = app / "Contents/Frameworks"
-    if not bundle.resolve().is_relative_to(app):
+    bundle = app / "Contents/Frameworks" if app else ROOT
+    if app and not bundle.resolve().is_relative_to(app):
         parser.error("The disposable bundle must not link its Frameworks directory outside the app")
     sources = ["config.py", "pages/4_Import_Transactions.py", "services/jev_categorization.py",
                "utils/jev_review.py", "utils/import_review.py", "services/csv_import.py",
@@ -50,31 +52,33 @@ def main():
                "services/review_categorization.py", "utils/ai_review.py", "utils/ui.py",
                "services/import_review_drafts.py", "utils/review_recovery.py", "utils/recovery.py",
                "services/worksheet_export.py", "services/worksheet_export_cache.py",
-               "pages/1_Trial_Balance_Worksheet.py", "database/migrations/026_import_review_drafts.sql"]
+               "pages/1_Trial_Balance_Worksheet.py", "pages/3_Chart_of_Accounts.py", "database/migrations/026_import_review_drafts.sql"]
     hashes = {}
     for name in sources:
         actual = (bundle / name).read_bytes()
         assert actual == (ROOT / name).read_bytes(), f"Rebuild: packaged {name} differs from checkout"
         hashes[name] = hashlib.sha256(actual).hexdigest()
-    backend_source = ROOT / "tests/helpers/packaged_fake_vault.py"
-    backend_target = bundle / "packaged_fake_vault.py"
-    if not backend_target.exists() or backend_target.read_bytes() != backend_source.read_bytes():
-        shutil.copyfile(backend_source, backend_target)
-    # Adding the fixture changes the resource seal. Repair this disposable
-    # bundle with an ad hoc signature, never a developer certificate/keychain.
-    with (output / "signature.log").open("w") as signing_log:
-        verification = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)],
-                                      stdout=signing_log, stderr=signing_log, timeout=600)
-        if verification.returncode:
-            subprocess.run(["codesign", "--force", "--deep", "--options", "runtime", "--sign", "-",
-                            "--entitlements", str(ROOT / "scripts/entitlements.plist"), str(app)],
-                           stdout=signing_log, stderr=signing_log, check=True, timeout=600)
-            subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)],
-                           stdout=signing_log, stderr=signing_log, check=True, timeout=600)
+    if app:
+        backend_source = ROOT / "tests/helpers/packaged_fake_vault.py"
+        backend_target = bundle / "packaged_fake_vault.py"
+        if not backend_target.exists() or backend_target.read_bytes() != backend_source.read_bytes():
+            shutil.copyfile(backend_source, backend_target)
+        # Adding the fixture changes the resource seal. Repair this disposable
+        # bundle with an ad hoc signature, never a developer certificate/keychain.
+        with (output / "signature.log").open("w") as signing_log:
+            verification = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)],
+                                          stdout=signing_log, stderr=signing_log, timeout=600)
+            if verification.returncode:
+                subprocess.run(["codesign", "--force", "--deep", "--options", "runtime", "--sign", "-",
+                                "--entitlements", str(ROOT / "scripts/entitlements.plist"), str(app)],
+                               stdout=signing_log, stderr=signing_log, check=True, timeout=600)
+                subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)],
+                               stdout=signing_log, stderr=signing_log, check=True, timeout=600)
     session = "jev-packaged-" + uuid.uuid4().hex[:10]
     namespace = "jv-" + session.rsplit("-", 1)[1][:8]  # Stay below macOS's socket-path limit.
     cli = [args.agent_browser, "--namespace", namespace, "--session", session, "--pin-tab", "--json"]
     transcript, checks = [], []
+    page_opened = False
 
     def command(*parts):
         # Repeat only read-only waits on a contended machine. Never replay a
@@ -118,6 +122,8 @@ def main():
         command("eval", "Array.from(document.querySelectorAll('details')).filter(d => "
                 "d.querySelector('summary')?.textContent.includes('AI opinions')).forEach(d => {"
                 "if (!d.open) d.querySelector('summary').click(); })")
+        command("eval", "Array.from(document.querySelectorAll('summary')).find(s => "
+                "s.textContent.includes('AI opinions')).scrollIntoView({block:'start',behavior:'instant'})")
 
 
     def click(role, name, exact=True):
@@ -195,11 +201,16 @@ def main():
                    PYTHON_KEYRING_BACKEND="packaged_fake_vault.Keyring", PYTHON_DOTENV_DISABLED="1",
                    ANTHROPIC_API_KEY="fake-not-used", LEDGERTB_MODE="server", LEDGERTB_PORT=str(port),
                    LEDGERTB_UI_TOKEN=session, OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1")
+        if args.source:
+            env["PYTHONPATH"] = str(ROOT / "tests/helpers")
+        env["OPENAI_API_KEY"] = "fake-not-used"
+        env["TYPESAFE_API_KEY"] = "fake-not-used"
         env.pop("LEDGERTB_FIXTURE_KEY_FILE", None)
         if args.key_file:
             env["LEDGERTB_FIXTURE_KEY_FILE"] = str(args.key_file.expanduser().resolve())
         with (output / "server.log").open("w") as log:
-            server = subprocess.Popen([str(app / "Contents/MacOS/LedgerTB")], env=env,
+            launch = [str(app / "Contents/MacOS/LedgerTB")] if app else [sys.executable, str(ROOT / "run_ledgertb.py")]
+            server = subprocess.Popen(launch, env=env,
                                       cwd=scratch, stdout=log, stderr=log)
             try:
                 base = f"http://127.0.0.1:{port}"
@@ -216,6 +227,7 @@ def main():
                     time.sleep(.2)
                 command("set", "viewport", str(args.width), str(args.height))
                 command("open", base + "/?t=" + session)
+                page_opened = True
                 wait("Enter your passphrase")
                 assert (scratch / "fake-vault-loaded").exists()
                 fill("Passphrase", "fictional-packaged-acceptance-only")
@@ -283,6 +295,7 @@ def main():
                 (output / "other-requests.json").write_text(json.dumps(other_requests, indent=2))
                 show_panel()
                 assert len([line for line in snap().splitlines() if 'checkbox "Include for posting"' in line and "checked=false" in line]) == 2
+                show_opinions(3)
                 command("screenshot", str(output / "provider-comparison.png"))
                 checks += ["packaged Anthropic and OpenAI structured responses", "independent disagreement display", "second opinions preserve accepted category and exclusions", "second opinions reuse requests"]
                 click("button", "Select all")
@@ -342,8 +355,26 @@ def main():
                 wait("Close Package (Excel)")
                 snap()
                 assert "Exports could not be prepared" not in command("get", "text", "body")["text"]
+                command("eval", "document.querySelector('.st-key-worksheet_actions').scrollIntoView({block:'center'})")
+                command("mouse", "move", "10", "10")
+                geometry = command("eval", "(() => {const bar=document.querySelector('.st-key-worksheet_actions'); return {overflow:document.documentElement.scrollWidth>innerWidth+1,buttons:Array.from(bar.querySelectorAll('button')).filter(b=>b.getBoundingClientRect().width>0).map(b=>{const p=b.querySelector('p')||b;const range=document.createRange();range.selectNodeContents(p);const r=b.getBoundingClientRect();return {label:b.textContent.trim(),lines:range.getClientRects().length,left:r.left,right:r.right,width:innerWidth};})};})()")['result']
+                (output / "worksheet-action-geometry.json").write_text(json.dumps(geometry,indent=2))
+                assert not geometry['overflow'] and len(geometry['buttons']) == 5, geometry
+                assert all(b['lines'] == 1 and b['left'] >= 0 and b['right'] <= b['width'] + 1 for b in geometry['buttons']), geometry
                 command("screenshot", str(output / "worksheet-exports.png"))
-                checks.append("frozen worksheet generates all three PDF/XLSX exports")
+                checks.append("worksheet generates all three PDF/XLSX exports")
+                checks.append("worksheet actions retain single-line labels and wrap within the viewport")
+                click("link", "Chart of Accounts", exact=False)
+                wait("4 accounts need a statement grouping.")
+                collapsed = command("eval", "Array.from(document.querySelectorAll('details')).find(d=>d.querySelector('summary')?.textContent.includes('View accounts and assign groupings')).open")['result']
+                assert collapsed is False
+                command("screenshot", str(output / "grouping-collapsed.png"))
+                command("find", "text", "View accounts and assign groupings (4)", "click")
+                body = command("get", "text", "body")['text']
+                for account in ('2000 — Credit Card', '4000 — Design Revenue', '6100 — Office Supplies', '6200 — Software'):
+                    assert account in body
+                command("screenshot", str(output / "grouping-expanded.png"))
+                checks.append("account grouping warning collapses to a count and expands into an account list")
                 click("link", "Import Transactions", exact=False)
                 click("radio", "Review & Categorize")
                 snap()
@@ -402,13 +433,13 @@ def main():
                 checks += ["book switch with identical client/account IDs resets consent and review state",
                            "second book receives no Jev result or entries and makes no new provider request"]
                 (output / "result.json").write_text(json.dumps({"checks": checks, "requests": requests,
-                    "source_sha256": hashes, "live": bool(args.key_file),
-                    "limitations": "Frozen server mode in Chromium with test-only fake vault; not native window, installed upgrade or Windows acceptance."}, indent=2))
-                print(f"Packaged Jev workflow: {len(checks)} checks passed")
+                    "source_sha256": hashes, "live": bool(args.key_file), "mode": "packaged" if app else "source", "viewport": {"width": args.width, "height": args.height},
+                    "limitations": "Chromium with test-only fake vault; not native window, installed upgrade or Windows acceptance. Source mode does not qualify packaging."}, indent=2))
+                print(f"{'Packaged' if app else 'Source'} Jev workflow: {len(checks)} checks passed")
             except Exception:
                 # Keep the original error even if a wedged browser cannot
                 # provide diagnostics. These reads never replay an action.
-                for parts in [("snapshot", "-i"), ("screenshot", str(output / "failure.png"))]:
+                for parts in ([("snapshot", "-i"), ("screenshot", str(output / "failure.png"))] if page_opened else []):
                     try:
                         command(*parts)
                     except Exception:

@@ -56,6 +56,8 @@ def main():
         command("eval", "Array.from(document.querySelectorAll('details')).filter(d => "
                 "d.querySelector('summary')?.textContent.includes('AI opinions')).forEach(d => {"
                 "if (!d.open) d.querySelector('summary').click(); })")
+        command("eval", "Array.from(document.querySelectorAll('summary')).find(s => "
+                "s.textContent.includes('AI opinions')).scrollIntoView({block:'start',behavior:'instant'})")
 
 
     def click(role, name):
@@ -122,7 +124,7 @@ def main():
             spacing = command("eval", "JSON.stringify((() => {const label=Array.from(document.querySelectorAll('strong')).find(e=>e.textContent==='Include');"
                 "const sort=Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Sort');"
                 "const caption=Array.from(document.querySelectorAll('[data-testid=stCaptionContainer]')).find(e=>e.textContent.includes('selected for actions'));"
-                "return {includeLines:label.getClientRects().length,toolbarToRows:caption.getBoundingClientRect().top-sort.getBoundingClientRect().bottom};})())")
+                "return {includeWidth:label.closest('[data-testid=stColumn]').getBoundingClientRect().width,includeRects:Array.from(label.getClientRects()).map(r=>({width:r.width,height:r.height})),includeFont:getComputedStyle(label).font,rowWidth:caption.getBoundingClientRect().width,includeLines:label.getClientRects().length,toolbarToRows:caption.getBoundingClientRect().top-sort.getBoundingClientRect().bottom};})())")
             (args.output / "row-spacing.json").write_text(spacing)
             spacing = json.loads(spacing)
             if isinstance(spacing, str): spacing = json.loads(spacing)
@@ -194,6 +196,15 @@ def main():
             command("screenshot", str((args.output / "provider-picker.png").resolve()))
             show_panel()
             show_opinions(3)
+            comparison = command("eval", "JSON.stringify((() => {const summary=Array.from(document.querySelectorAll('summary')).find(e=>e.textContent.includes('AI opinions (3)'));"
+                "const panel=summary.closest('details'); const caption=Array.from(document.querySelectorAll('[data-testid=stCaptionContainer]')).find(e=>e.textContent.includes('selected for actions'));"
+                "const sidebar=document.querySelector('[data-testid=stSidebar]'); return {opinionWidth:panel.getBoundingClientRect().width,rowWidth:caption.getBoundingClientRect().width,"
+                "insideColumn:!!panel.closest('[data-testid=stColumn]'),sidebarWidth:sidebar.getBoundingClientRect().width,overflow:document.documentElement.scrollWidth>innerWidth+1};})())")
+            (args.output / "comparison-geometry.json").write_text(comparison)
+            comparison = json.loads(comparison)
+            if isinstance(comparison, str): comparison = json.loads(comparison)
+            assert comparison['sidebarWidth'] >= 200 and not comparison['insideColumn'], comparison
+            assert comparison['opinionWidth'] >= comparison['rowWidth'] * .95 and not comparison['overflow'], comparison
             command("screenshot", str((args.output / "comparison.png").resolve()))
             click("radio", "Upload CSV")
             command("wait", "--text", "Upload Bank/Credit Card CSV File")
@@ -248,12 +259,25 @@ def main():
             check_account(False)
             assert "Synthetic transport calls: 3" in command("get", "text", "body")
             command("screenshot", str((args.output / "saved-review.png").resolve()))
+            command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.includes('Saved review ·')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+            command("find", "role", "checkbox", "check", "--name", "Discard the saved copy", "--exact")
+            command("find", "role", "checkbox", "check", "--name", "Replace the review currently in this window", "--exact")
+            click("button", "Revise saved copy externally")
+            command("wait", "--text", "External saved revisions: 1")
+            # The updated timestamp creates a fresh, collapsed disclosure.
+            command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.includes('Saved review ·')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+            state = snapshot()
+            assert 'checkbox "Discard the saved copy" [checked=false' in state, state
+            assert 'checkbox "Replace the review currently in this window" [checked=false' in state, state
+            assert 'button "Discard saved review" [disabled' in state, state
+            assert "Synthetic transport calls: 3" in command("get", "text", "body")
+            command("screenshot", str((args.output / "saved-revision-reset.png").resolve()))
             (args.output / "result.json").write_text(json.dumps({"passed": True, "viewport": {"width": args.width, "height": args.height}, "startup_timeout_seconds": args.startup_timeout, "checks": [
                 "consent", "separate inclusion", "acceptance", "request reuse", "navigation persistence",
                 "provider-off invalidation", "failure preservation", "immediate explicit retry",
-                "independent Anthropic opinion", "OpenAI opinion", "disagreement visibility", "second-opinion reuse", "model switch resets consent without a request", "panel fits viewport without horizontal overflow", "saved review resumes without a cloud call", "closed panels leave no flex gaps and Include header stays on one line"
+                "independent Anthropic opinion", "OpenAI opinion", "disagreement visibility", "second-opinion reuse", "model switch resets consent without a request", "panel fits viewport without horizontal overflow", "saved review resumes without a cloud call", "closed panels leave no flex gaps and Include header stays on one line", "AI comparisons use full row width with the sidebar open", "saved-copy revision change resets confirmations in the browser without a cloud call"
             ]}, indent=2) + "\n")
-            print("Jev browser review: 16 checks passed.")
+            print("Jev browser review: 18 checks passed.")
         except Exception:
             # Preserve the rendered state for diagnosing assertion or timing failures.
             for parts in ([("snapshot", "-i"), ("screenshot", str((args.output / "failure.png").resolve()))] if page_opened else []):
