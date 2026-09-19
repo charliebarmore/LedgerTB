@@ -125,3 +125,10 @@ particular, closing a session still loses edits made after its last explicit
 python -m pytest -q tests/test_import_workflow_scenarios.py \
   tests/test_import_review_drafts.py tests/test_worksheet_export_cache.py
 ```
+
+For guarded client/book/import transitions and the complete 250-row fictional
+month, use [the recoverable monthly-close guide](RECOVERABLE-MONTH-CLOSE-2026-09-19.md).
+It specifies independent expected cent balances, partial-post/restart/conflict/
+backup recovery checks, reconciliation and PDF/XLSX assertions, and an isolated
+fixture creation command. The fixture never opens real client books or the real
+credential vault.

@@ -1,0 +1,176 @@
+{
+  "date": "2026-09-19",
+  "baseline": "c647f7a",
+  "production_commit": "c4ab546",
+  "branch": "codex/jev-overnight",
+  "scope": "Local synthetic recoverable monthly close; not a release or live-provider qualification",
+  "functional_tests": {
+    "full_run_passed": 879,
+    "full_run_failed": 3,
+    "windows_skipped": 5,
+    "performance_deselected": 3,
+    "full_run_seconds": 373.64,
+    "failed_cases": "New test harness used AppTest SafeSessionState as a mapping; changed to public filtered_state",
+    "final_guard_passed": 10,
+    "final_guard_seconds": 18.29,
+    "unique_functional_passes_across_runs": 882,
+    "clean_single_full_run": false
+  },
+  "performance": {
+    "passed": 3,
+    "seconds": 36.02,
+    "existing_thresholds_unchanged": true
+  },
+  "monthly_close": {
+    "synthetic": true,
+    "source_rows": 250,
+    "posted_imports": 244,
+    "journal_entries": 248,
+    "trial_balance_cents": 1760000,
+    "net_income_cents": 752500,
+    "expected_balances_cents": {
+      "1000": [
+        1506500,
+        0
+      ],
+      "2000": [
+        0,
+        130000
+      ],
+      "2100": [
+        0,
+        30000
+      ],
+      "3000": [
+        0,
+        600000
+      ],
+      "3100": [
+        6000,
+        0
+      ],
+      "4000": [
+        0,
+        1000000
+      ],
+      "6100": [
+        71000,
+        0
+      ],
+      "6200": [
+        138000,
+        0
+      ],
+      "6300": [
+        1000,
+        0
+      ],
+      "6400": [
+        7500,
+        0
+      ],
+      "6500": [
+        30000,
+        0
+      ]
+    },
+    "reconciled_accounts": 2,
+    "backup_restored": true,
+    "integrity_check": "ok"
+  },
+  "month_test_seconds": 16.45,
+  "browser_month": {
+    "synthetic": true,
+    "journal_entries": 242,
+    "posted_imports": 241,
+    "other_client_entries": 0,
+    "integrity_check": "ok",
+    "saved_review_rows": 3,
+    "unsolved_categories_preserved": true,
+    "encrypted_header": true,
+    "abrupt_restart_recovered": true,
+    "provider_requests": 0
+  },
+  "frozen_mac": {
+    "checks": [
+      "packaged SQLCipher unlock and CSV import",
+      "explicit Jev request and human acceptance",
+      "acceptance preserves exclusion",
+      "rerun and repeated request reuse",
+      "offline failure preserves staged rows",
+      "failed result reuse and explicit recovery retry",
+      "packaged Anthropic and OpenAI structured responses",
+      "independent disagreement display",
+      "second opinions preserve accepted category and exclusions",
+      "second opinions reuse requests",
+      "bulk select/clear preserves posting exclusion",
+      "human posting creates one balanced integer-cent entry",
+      "excluded row is not posted",
+      "import identity and human audit attribution retained",
+      "CSV preview shows 81.58 disbursements",
+      "journal entry displays a balanced debit/credit table",
+      "worksheet generates all three PDF/XLSX exports",
+      "worksheet actions retain single-line labels and wrap within the viewport",
+      "account grouping warning collapses to a count and expands into an account list",
+      "encrypted saved review resumes after posting without a request or inclusion change",
+      "book switch with identical client/account IDs resets consent and review state",
+      "second book receives no Jev result or entries and makes no new provider request"
+    ],
+    "viewport": [
+      1360,
+      900
+    ],
+    "source_sha256": {
+      "config.py": "b71565128077dfb90a6f8a8bc4eb9fd6b2db405c8adfbf988a2452356770fa1a",
+      "pages/4_Import_Transactions.py": "19d026f233537adc0c6079771e5d0cddddd2baee76de78caf1ff6f0e4e290418",
+      "services/jev_categorization.py": "fb2a463722151f5dd571cf7beb706dd75eaeacb558bb4ae2cbe5f48816d7768a",
+      "utils/jev_review.py": "5fb98ac32d6a3481c1491a36ea2a0a3ea7f710309f94fd9decce1ee66ada2a54",
+      "utils/import_review.py": "775b8155472826f4a41884d34b8120f7c44416f6a1cdd2f3161e7499d3c86fb4",
+      "services/csv_import.py": "39c867237920e1d88d52ad88cd4e327e9a1c86e6d2d937116dae665e368d2390",
+      "pages/2_Journal_Entries.py": "469e221d4d80e3b1cd8d6f4febc4a5a03b62dcae232066a7dd97ca522c901a29",
+      "pages/7_Dashboard.py": "551d217479b2a8e22c88e0d54d47898673ef8bcd243e209340de4ffdd067a87c",
+      "pages/12_Firm_Settings.py": "ec5e7daaba8a66386bb468a0e3ec705fa8b1230150286877865aa22494c972ff",
+      "services/review_categorization.py": "17a52764f88d1c103a5809689960e0d2e53fd757428193ac0606f18dc0a21259",
+      "utils/ai_review.py": "d949e0ee86ba164468f470c1ed4639d0454f32b187fc041e2c45830202836706",
+      "utils/ui.py": "8410e109f89499300ece9dd959634a4db9dc608bc2a1793bfde0c68c7f76a080",
+      "services/import_review_drafts.py": "729b4c18a69a993c24eed8066cfdebdd969783c5f0348b19ac6e8d8d73485cea",
+      "utils/review_recovery.py": "5041b0496aab2949e66904260e5ba522c45f33b09a705b89d38ff81bb27de8e1",
+      "utils/recovery.py": "0bc518887829ade05cb45e4457deda7916341fd6420a0ef9b6f81889bec41008",
+      "services/worksheet_export.py": "549aeb2d1d141a676f0cb977569ae4be1953379675069ed947ec01c9dd6a4f5c",
+      "services/worksheet_export_cache.py": "5a385bc2ba2ad4ad4c2c1a48f1c36383163257753d6574add384f67e3f981e28",
+      "pages/1_Trial_Balance_Worksheet.py": "72c4bf0df04a29019f5586bdc857dba3355f8cc7a04f97d332b2155c039f94eb",
+      "pages/3_Chart_of_Accounts.py": "c0302051dd7e83dd5aa5e361184da9dbbb5f6ae2fdcc1a0d3b620857e7c42c18",
+      "database/migrations/026_import_review_drafts.sql": "2eb1469d8fd6fd86c7fe18a6e5b200d3225fb28d3f431c4f086acc78dd977ec5",
+      "utils/review_guard.py": "35e1e9a504f4d6621797f3002982508e29726200ff40d4fe896c232807df7803",
+      "utils/client_selector.py": "9ae49c12237a02ce5bbe3dab8b8126f4cdc97abc0ac9d3501c51be269a2068a5",
+      "pages/9_Data_Safety.py": "4894ce47a4a431055458c2786de6ecd8902d61701a0a7eea7b8ac5568c09262f"
+    },
+    "selfcheck_imports_without_failure": 52,
+    "selfcheck_exit": 1,
+    "selfcheck_only_failure": "Expected disabled real-vault backend: keyring.backends.fail.Keyring",
+    "native_startup": true,
+    "native_full_workflow": false
+  },
+  "installed_app": {
+    "path": "/Applications/LedgerTB.app",
+    "version": "1.7.2",
+    "plist_mtime_ns": 1788773329000000000,
+    "executable_mtime_ns": 1788773370000000000
+  },
+  "artifacts": "output/month-close-20260919/",
+  "guide": "docs/RECOVERABLE-MONTH-CLOSE-2026-09-19.md",
+  "paid_provider_requests": 0,
+  "real_client_ledgers_used": false,
+  "real_keychain_used_in_tests": false,
+  "pushed": false,
+  "released": false,
+  "installed": false,
+  "remaining_rollout": [
+    "Charlie synthetic walkthrough",
+    "independent CPA label adjudication",
+    "provider terms approval and approved live quality/usage/cost checks",
+    "real native credentials and installed upgrade",
+    "Windows native acceptance",
+    "separate release approval"
+  ]
+}

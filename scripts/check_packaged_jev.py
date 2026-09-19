@@ -52,7 +52,8 @@ def main():
                "services/review_categorization.py", "utils/ai_review.py", "utils/ui.py",
                "services/import_review_drafts.py", "utils/review_recovery.py", "utils/recovery.py",
                "services/worksheet_export.py", "services/worksheet_export_cache.py",
-               "pages/1_Trial_Balance_Worksheet.py", "pages/3_Chart_of_Accounts.py", "database/migrations/026_import_review_drafts.sql"]
+               "pages/1_Trial_Balance_Worksheet.py", "pages/3_Chart_of_Accounts.py", "database/migrations/026_import_review_drafts.sql",
+               "utils/review_guard.py", "utils/client_selector.py", "pages/9_Data_Safety.py"]
     hashes = {}
     for name in sources:
         actual = (bundle / name).read_bytes()
