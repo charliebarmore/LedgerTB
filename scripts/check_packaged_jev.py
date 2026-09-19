@@ -364,7 +364,9 @@ def main():
                 click("button", "Switch book…")
                 wait("Open a recent book")
                 click("combobox", "Recent books")
-                click("option", str(scratch / "Books/Maple.ledgertb"))
+                # Recent books stores canonical paths; macOS /var is a symlink
+                # to /private/var even when tempfile returns the shorter form.
+                click("option", str((scratch / "Books/Maple.ledgertb").resolve()))
                 click("button", "Open selected")
                 wait("Enter your passphrase")
                 fill("Passphrase", "fictional-packaged-acceptance-only")

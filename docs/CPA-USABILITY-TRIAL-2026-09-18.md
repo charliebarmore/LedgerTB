@@ -136,6 +136,41 @@ All browser/packaged fixtures use fake vaults and disposable encrypted books.
 Do not add `--key-file` for these simulated checks. Packaging and native preview
 remain local; do not replace `/Applications/LedgerTB.app`.
 
+## Suggested walkthrough of the separate preview
+
+The separate synthetic native window is open. To reopen it from the repository
+root, use the fixture launcher, which sets its isolated data directory and fake
+vault:
+
+```sh
+.macos-venv/bin/python output/usability-overnight-20260918/walkthrough/launch.py
+```
+
+Do not launch the disposable `.app` directly for this trial: the launcher supplies
+the isolation settings. Use
+`output/usability-overnight-20260918/walkthrough/books/synthetic-import.csv`,
+not a client book. Its providers and credential vault are simulated. Unlock with
+`fictional-packaged-acceptance-only`.
+
+1. Import the two-row CSV to Checking. Confirm disbursements of $81.58.
+2. In Review, exclude both rows. Select only Cedar Paper for actions and open
+   AI suggestions. Choose Jev, consent, request and expand the row's opinions.
+3. Accept Office Supplies. Confirm that posting inclusion is still unchecked.
+4. Use **Choose another AI** and explicitly request another provider's opinion.
+   The fixture deliberately demonstrates disagreement. Keep the supported
+   Office Supplies decision; simulated answers do not measure provider quality.
+5. **Save review for later**, clear the current list, then expand Saved review
+   and resume it. Check the retained category and exclusion decisions.
+6. Include only Cedar Paper and post. Verify one balanced $33.33 journal entry.
+   Resuming the older saved copy must identify the already-posted row as a
+   duplicate and leave it excluded. Discard the saved copy when finished.
+7. Open the Trial Balance Worksheet and inspect the worksheet Excel and both
+   close-package formats. Unchanged reruns reuse their prepared bytes; Refresh
+   explicitly rebuilds them.
+
+Saving a copy is intentional; edits made after that save remain session-only.
+The installed application and older preview windows are separate.
+
 ## Verification record
 
 - Initial partial-post regression: 2 failed / 1 passed before correction;
@@ -146,5 +181,108 @@ remain local; do not replace `/Applications/LedgerTB.app`.
 - Initial 1024×600 workflow: 13 checks passed before the final saved-review and
   retry-button changes. First final-browser attempt failed at fixture startup;
   retained under `output/usability-overnight-20260918/browser-final-small`.
-- Final-source full suite, performance, browser, packaging and preview evidence
-  will be recorded here after completion.
+- AI/recovery regression run: 31 passed (426.08 s). Focused migration,
+  process-interruption and export follow-up: 8 passed (18.54 s), using original
+  deadlines. A separate crash attempt timed out before passing on rerun.
+- First full run on the implemented source: 865 passed, 5 Windows-only skips,
+  2 timeouts, 3 performance cases deselected (1261.27 s). Failures were the
+  30-second accounting crash-worker startup and a 30-second journal book-switch
+  AppTest. Both passed with original limits in the 28-case follow-up (30.28 s),
+  which also verified the final test-vault backstop and retry-button behavior.
+  Final full run at `dc5f2f4`, including the process-wide backstop: **868 passed,
+  5 Windows-only skips, 3 performance cases deselected in 748.30 s**, using the
+  original deadlines. This clean run supersedes aggregate-only qualification;
+  earlier failed/interrupted runs remain available.
+- Performance: all 3 checks passed original thresholds (56.70 s). The 10,000-row
+  review rendered 50 controls in 2.794 s; the 50,000-row CSV parsed in 19.1441 s
+  and classified duplicates in 9.4986 s, at 44.92 MiB peak traced memory. All
+  identities and nine expected duplicates were retained. These are single
+  synthetic server-side observations on a contended Mac, not browser-paint or
+  production performance guarantees.
+- Small fictional export timing: initial rendering 0.156 s; unchanged-input
+  reuse 0.073 s, with zero of the three builders called on reuse. The test also
+  invalidated on posting, branding, visibility, period, book identity and client
+  naming changes, and verified a failed new build removes the old bundle.
+- The next small-window browser attempt reached all three simulated providers
+  and proved panel geometry (left 80, right 944, viewport 1024; no horizontal
+  overflow), then hit a harness race opening opinions before the result existed.
+  The harness now waits for the expected opinion count and success/failure state.
+  That attempt also exposed the remaining disabled other-provider Retry control,
+  now hidden unless a retry applies. Earlier failure artifacts are retained.
+- A further browser run reproduced a persistent focused help tooltip covering
+  the request button. Local `8eb8b62` removes those tooltip overlays, renames
+  the provider-switch action **Choose another AI**, and puts the retry-cost
+  reminder in a visible caption only after failure. All 26 affected review UI
+  tests passed afterward (120.38 s). The 868-test full run above precedes this
+  final label/help-presentation adjustment; accounting/request logic is unchanged.
+- At `8e3d734`, inactive panel wrappers also leave the layout and the Include
+  column remains one line at 1024 pixels. The complete source-browser journey
+  passed 16 checks at 1024×600 with the default 20-second startup allowance.
+  This small-window run precedes the saved-confirmation key fix below.
+- A new AppTest reproduced confirmation carrying to a newer saved revision
+  (1 failed before correction). Resume/Discard controls now use book, client and
+  displayed revision identities. The new test checks that both confirmations
+  reset on a new revision and client, and that neither saved copy is deleted.
+  All 26 recovery/import-state tests then passed (42.31 s). The 868-test full
+  run predates this bounded correction; its focused regression is separate.
+- Final larger-window browser, packaging and preview evidence follows below.
+
+
+## Final desktop evidence
+
+Source checkpoint: `8e3d734`. PyInstaller completed the isolated ad-hoc-signed
+build under `output/usability-overnight-20260918/dist/LedgerTB.app` (build log:
+`output/usability-overnight-20260918/build.log`). No new runtime dependency.
+
+- Final source browser: 16 checks passed at **1360×768**, including the
+  saved-confirmation fix, using the default startup allowance. The 1024×600
+  16-check result above verified the same final panel/column layout. Screenshots
+  and transcripts live in `final-browser-laptop/` and `final-browser-small/`
+  beneath the output directory.
+- Frozen selfcheck exited 1 with **only** `keyring backend: unexpected
+  packaged_fake_vault.Keyring`. The complete failure list implies all 51 imports,
+  SQLCipher requirement and Apple Vision OCR completed without reported failure.
+  This is the expected test-backend rejection, **not a passing release gate or
+  native credential acceptance**. The gate remains unchanged. See `selfcheck.log`.
+- Native PID 25822 opened the isolated LedgerTB unlock window at 1360×876 logical
+  pixels. Exact-PID window metadata and `walkthrough/native-startup.png` verify
+  startup; this does not claim a complete native-window walkthrough. The window
+  is left open with fresh fictional books for Charlie. Existing preview windows
+  and the installed v1.7.2 app remain separate.
+
+- Frozen-server Chromium walkthrough: **20 checks passed** at 1360×768 using
+  simulated Jev/Anthropic/OpenAI and a fake vault. This covers import totals,
+  comparison/reuse/failure/retry, selection/inclusion, a single balanced 3,333-cent
+  journal posting with human audit/import identity, all three worksheet export
+  formats, saved-copy recovery after posting without another request, and book
+  switching with intentionally identical client/account IDs. Both books remained
+  encrypted; the second had zero journal entries/imported transactions. The
+  harness verified 19 bundled source files against this checkout. Full evidence:
+  `output/usability-overnight-20260918/packaged-final/`.
+- The first packaged attempt reached posting, exports and recovery, then failed
+  a test selector expecting `/var/...` instead of macOS's canonical
+  `/private/var/...` recent-book path. The harness now resolves the expected path.
+  Its complete rerun passed; no application change or rebuild was required.
+  Earlier failure remains under `packaged/` and `packaged.log`.
+- Installed `/Applications/LedgerTB.app` remains v1.7.2; its Info.plist and
+  executable timestamps match the pre-build-check record. Nothing was pushed,
+  released or installed. The preview has a test-only fake-vault module and is
+  not a distributable release artifact.
+
+Machine-readable evidence: [cpa-usability-trial-2026-09-18.json](jev-evaluation-results/cpa-usability-trial-2026-09-18.json).
+Useful screenshots under `output/usability-overnight-20260918/`: source
+`final-browser-small/provider-picker.png`,
+`final-browser-laptop/comparison.png`, `final-browser-laptop/saved-review.png`;
+packaged `packaged-final/upload-totals.png`, `packaged-final/journal-table.png`,
+`packaged-final/saved-review-resumed.png`, `packaged-final/book-switched.png`;
+native `walkthrough/native-startup.png`. Earlier screenshot/failure attempts
+remain beside their logs, rather than being relabeled as passes.
+
+## Remaining rollout requirements
+
+Charlie can now use the isolated synthetic preview for a CPA usability trial.
+Live provider quality/cost qualification, independently adjudicated labels,
+provider terms review, real native credential/installed-upgrade acceptance and
+Windows native acceptance remain separate. No broader UI redesign or automatic
+multi-provider routing is included. Release approval is separate from this
+local trial checkpoint. Current decisions and next action belong in Notion.
