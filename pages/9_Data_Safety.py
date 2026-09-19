@@ -75,13 +75,25 @@ with _book_cols[0]:
 with _book_cols[1]:
     if st.button("Switch book…", help="Close this book and choose another "
                  "(shared-drive books included)"):
+        st.session_state['_review_book_switch_pending'] = True
+
+if st.session_state.get('_review_book_switch_pending'):
+    from utils.review_guard import confirm_transition
+    from utils.import_review import scope_import_state_to_client
+    decision = confirm_transition(client_id, 'book', 'switching books')
+    if decision == 'cancel':
+        st.session_state.pop('_review_book_switch_pending', None)
+        st.rerun()
+    if decision == 'continue':
+        scope_import_state_to_client(st.session_state, None, book=dbconn.DATABASE_PATH)
+        st.session_state.pop('_review_book_switch_pending', None)
         _bl.release(dbconn.DATABASE_PATH)
         dbconn.READ_ONLY = False
         dbconn.clear_active_key()
-        # Without this flag a remembered passphrase re-unlocks the same book
-        # on the very next run and the chooser never appears.
-        st.session_state["_switch_book"] = True
+        # Skip remembered-key reopening so the chooser appears.
+        st.session_state['_switch_book'] = True
         st.rerun()
+    st.stop()
 
 from utils import unlock as _unlock
 from utils.secure_store import get_secret as _gs
@@ -242,6 +254,10 @@ if backups:
         "Type RESTORE to replace the live database",
         placeholder="RESTORE",
     )
+    st.caption(
+        "Restoring clears this window's unsaved review and AI suggestions. "
+        "Save the review first to keep a copy in the pre-restore safety backup."
+    )
     if st.button("Restore selected backup", disabled=confirm != "RESTORE"):
         try:
             selected_record = next(
@@ -263,10 +279,18 @@ if backups:
                 )
 
             safety_copy = restore_backup(selected, audit=_record_restore)
-            st.success(f"Restore complete. Pre-restore safety copy: {safety_copy.name}")
+            from utils.import_review import scope_import_state_to_client
+            scope_import_state_to_client(st.session_state, None, book=dbconn.DATABASE_PATH)
+            st.session_state['restore_complete_message'] = (
+                f"Restore complete. Pre-restore safety copy: {safety_copy.name}. "
+                "Resume any saved review from the restored book before posting."
+            )
             st.rerun()
         except Exception as exc:
             st.error(f"Restore failed: {exc}")
+
+if message := st.session_state.pop('restore_complete_message', None):
+    st.success(message)
 
 st.divider()
 st.subheader("Book passphrase")

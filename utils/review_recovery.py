@@ -5,6 +5,7 @@ from database import connection as dbconn
 from services import import_review_drafts as drafts
 from utils.recovery import save_error_message
 from utils.client_context import book_scoped_key
+from utils.review_guard import mark_saved, review_is_dirty, save_current_review
 
 
 def _control_key(client_id, action, revision=""):
@@ -47,6 +48,7 @@ def render_saved_review(client_id, duplicate_check):
                         "The saved copy was removed in another window."
                     )
                 revision, rows = loaded
+                mark_saved(st.session_state, client_id, rows, revision)
                 duplicate_check(rows)
                 st.session_state.transactions_to_review = rows
                 st.session_state.review_saved_revision = revision
@@ -75,6 +77,7 @@ def render_saved_review(client_id, duplicate_check):
             try:
                 drafts.discard(client_id, info["revision"])
                 st.session_state.pop("review_saved_revision", None)
+                st.session_state.pop("_review_checkpoint", None)
                 st.session_state.review_saved_message = (
                     "Saved copy discarded. The current review is unchanged."
                 )
@@ -88,20 +91,16 @@ def render_saved_review(client_id, duplicate_check):
 
 
 def render_save_review(client_id, rows):
-    st.caption(
-        "Review edits stay in this window until you save a copy. Save before closing the app or switching books or clients."
-    )
+    if review_is_dirty(st.session_state, client_id):
+        st.caption("Unsaved changes · Save this review before closing the app.")
+    else:
+        st.caption("Saved in this encrypted book. Duplicate overrides are checked again on resume.")
     if st.button(
         "Save review for later", disabled=dbconn.READ_ONLY,
         key=_control_key(client_id, "save"),
     ):
         try:
-            revision = drafts.save(
-                client_id,
-                rows,
-                expected_revision=st.session_state.get("review_saved_revision"),
-            )
-            st.session_state.review_saved_revision = revision
+            save_current_review(client_id)
             st.session_state.review_saved_message = (
                 "Review saved in this encrypted book. No transactions were posted."
             )

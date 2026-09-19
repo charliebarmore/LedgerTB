@@ -75,7 +75,7 @@ def view_switcher(options, key, label="View"):
     current = st.session_state.get(key, options[0])
     if current not in options:
         current = options[0]
-    if st.session_state.get(shadow_key) != current:
+    if widget_key not in st.session_state or st.session_state.get(shadow_key) != current:
         st.session_state[widget_key] = current
 
     # ``st.html`` treats this as styling rather than Markdown content, keeping

@@ -5,6 +5,7 @@ provider responses and request caches never enter this table. A saved copy is
 not a posting instruction; normal validation and duplicate checks run on resume.
 """
 
+import hashlib
 import json
 import uuid
 from datetime import date, datetime
@@ -54,7 +55,7 @@ def summary(client_id):
         return dict(row) if row else None
 
 
-def save(client_id, rows, *, expected_revision=None):
+def _encode_rows(rows):
     if not rows or len(rows) > MAX_ROWS:
         raise ValueError("A saved review needs between 1 and 50,000 rows.")
     encoded = []
@@ -63,6 +64,23 @@ def save(client_id, rows, *, expected_revision=None):
         item["date"] = date.fromisoformat(str(row["date"])[:10]).isoformat()
         item["amount_cents"] = to_cents(row["amount"])
         encoded.append(item)
+    return encoded
+
+
+def content_fingerprint(rows):
+    """Compare saved evidence/decisions, ignoring widget IDs and display order."""
+    encoded = _encode_rows(rows)
+    for item in encoded:
+        item["include"] = bool(item.get("include", True))
+        item["is_transfer"] = bool(item.get("is_transfer", False))
+        item["selected_account_id"] = item.get("selected_account_id") or 0
+    items = sorted(json.dumps(item, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                   for item in encoded)
+    return hashlib.sha256(json.dumps(items).encode()).hexdigest()
+
+
+def save(client_id, rows, *, expected_revision=None):
+    encoded = _encode_rows(rows)
     payload = json.dumps(
         {"version": 1, "rows": encoded}, separators=(",", ":"), allow_nan=False
     )

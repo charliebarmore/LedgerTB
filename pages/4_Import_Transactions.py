@@ -44,6 +44,7 @@ from utils.ui import apply_default_on_change, is_parking_account, view_switcher,
 from utils import icons
 from utils.recovery import save_error_message
 from utils.review_recovery import render_saved_review, render_save_review
+from utils.review_guard import queue_replacement, render_pending_replacement, confirm_transition
 from utils.import_review import (
     classify_review_rows,
     ensure_row_ids,
@@ -81,6 +82,17 @@ scope_import_state_to_client(
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
+render_pending_replacement(client_id)
+if st.session_state.get('_review_clear_pending'):
+    decision = confirm_transition(client_id, 'clear', 'clearing this review')
+    if decision == 'cancel':
+        st.session_state.pop('_review_clear_pending', None)
+        st.rerun()
+    if decision == 'continue':
+        st.session_state.transactions_to_review = []
+        st.session_state.pop('_review_clear_pending', None)
+        st.rerun()
+    st.stop()
 if dbconn.READ_ONLY:
     st.info("Read-only book. You can inspect and prepare a review; posting and saved-book changes are disabled.")
 profile_message = st.session_state.pop("import_profile_message", None)
@@ -1018,15 +1030,6 @@ if selected_tab == "Upload CSV":
             else:
                 if st.button("Continue to review", type="primary"):
                     try:
-                        # Clear any previously parsed transactions to avoid duplicates
-                        st.session_state.transactions_to_review = []
-                        # Retire the previous batch's "What's next?" screen. It is
-                        # shown by Review & Categorize with an st.stop(), so a
-                        # leftover flag hides the rows just parsed behind a stale
-                        # success message from the import before this one.
-                        st.session_state.import_complete = False
-                        st.session_state.import_complete_msg = None
-
                         # Parse with source account column if in multi-account mode
                         transactions = CSVImporter.parse_csv(
                             content,
@@ -1100,24 +1103,7 @@ if selected_tab == "Upload CSV":
 
                                 duplicate_count = apply_duplicate_checks(transactions)
 
-                                st.session_state.transactions_to_review = transactions
-
-                                # Assign a stable per-transaction id so per-row widget
-                                # state survives re-sorting, then pre-populate selectbox
-                                # state with AI suggestions.
-                                ensure_row_ids(transactions)
-                                for t in transactions:
-                                    if 'suggested_account_id' in t and t['suggested_account_id']:
-                                        st.session_state[row_key("cat", t)] = t['suggested_account_id']
-
-                                # Show success message with duplicate warning if applicable
-                                if duplicate_count > 0:
-                                    st.warning(f"Found {duplicate_count} potential duplicate transaction(s) that have been auto-deselected.")
-                                st.success(f"Parsed {len(transactions)} transactions!")
-
-                                # Auto-navigate to Review tab
-                                st.session_state.import_active_tab = "Review & Categorize"
-                                st.rerun()
+                                queue_replacement(client_id, transactions, duplicate_count)
 
                     except Exception as e:
                         st.error(f"Error parsing file: {e}")
@@ -1374,23 +1360,8 @@ elif selected_tab == "Upload Statement":
                                 transaction["confidence"] = f"{match['confidence']:.0%}"
                                 transaction["reason"] = f"Learned pattern: {match['pattern']}"
 
-                        ensure_row_ids(review_transactions)
-                        for transaction in review_transactions:
-                            if transaction.get("suggested_account_id"):
-                                st.session_state[row_key("cat", transaction)] = transaction["suggested_account_id"]
-                        st.session_state.transactions_to_review = review_transactions
-                        st.session_state.import_active_tab = "Review & Categorize"
-                        # Same reason as the CSV path: a stale completion flag
-                        # would hide these rows behind the previous batch's
-                        # "What's next?" screen.
-                        st.session_state.import_complete = False
-                        st.session_state.import_complete_msg = None
-                        if duplicate_count:
-                            st.session_state.post_result = {
-                                "level": "warning",
-                                "text": f"{duplicate_count} potential duplicate(s) were auto-deselected.",
-                            }
-                        st.rerun()
+                        queue_replacement(client_id, review_transactions, duplicate_count)
+
                     except Exception as exc:
                         st.error(f"Could not prepare statement transactions: {exc}")
 
@@ -2083,7 +2054,7 @@ elif selected_tab == "Review & Categorize":
 
         with col2:
             if st.button("Clear review list"):
-                st.session_state.transactions_to_review = []
+                st.session_state['_review_clear_pending'] = True
                 st.rerun()
             _loaded_staged_ids = [
                 t["staged_id"] for t in transactions if t.get("staged_id")
@@ -2095,6 +2066,7 @@ elif selected_tab == "Review & Categorize":
                     "ids": _loaded_staged_ids,
                 }
                 st.rerun()
+
 
 
 elif selected_tab == "Import History":
