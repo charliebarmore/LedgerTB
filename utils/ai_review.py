@@ -137,8 +137,10 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
         enabled = bool(requested and consent and api_key)
         run = st.button(f'Ask {name} for suggestions', key='ai_review_run', disabled=not enabled)
         has_error = any(cache.get(k, {}).get('error') and cache[k].get('retryable', True) for k in requested)
-        retry = st.button(f'Retry failed {name} requests', key='ai_review_retry', disabled=not (enabled and has_error),
-                          help='Explicit retry may incur another charge, including after a timeout.')
+        retry = False
+        if has_error:
+            retry = st.button(f'Retry failed {name} requests', key='ai_review_retry', disabled=not enabled,
+                              help='Explicit retry may incur another charge, including after a timeout.')
         if run or retry:
             variant_id = f'{provider}:{model}'
             variants = st.session_state.setdefault('ai_review_variants', {})
@@ -173,7 +175,8 @@ def render_results(row, accounts, client_id, jev_prepared, other_prepared):
     if not count:
         return
     disagreement = len(set(opinions)) > 1
-    label = f'AI opinions ({count})' + (' · Disagree' if disagreement else '')
+    failed = bool(jev_result and jev_result.get('error')) or any(result.get('error') for _, _, result in current_results)
+    label = f'AI opinions ({count})' + (' · Disagree' if disagreement else '') + (' · Request failed' if failed else '')
     with st.expander(label):
         if len(set(opinions)) > 1:
             st.warning('AI opinions disagree. Review the evidence before choosing a category.')

@@ -108,6 +108,7 @@ def test_failure_and_custom_model_require_explicit_retry(monkeypatch, client_id,
     at.selectbox(key='ai_review_model_openai').set_value('Other model ID').run()
     assert at.button(key='ai_review_run').disabled
     at.text_input(key='ai_review_custom_openai').set_value('custom-json-model').run()
+    assert not any(b.key == 'ai_review_retry' for b in at.button)
     ask(at)
     assert len(calls) == 1
     at.run()

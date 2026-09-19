@@ -112,3 +112,16 @@ workflows and longer performance histories remain later extensions.
 See [Jev integration and synthetic comparison](JEV-CATEGORIZATION.md) for
 fake-vault/SQLCipher tests, the disposable browser fixture, opt-in live evaluation,
 request reuse guarantees, and remaining packaged-app acceptance.
+
+## Import-review usability and recovery
+
+See [the CPA usability trial guide](CPA-USABILITY-TRIAL-2026-09-18.md) for
+saved-review semantics, read-only behavior, worksheet export reuse, the fictional
+bank/card scenario matrix and isolated desktop verification commands. In
+particular, closing a session still loses edits made after its last explicit
+**Save review for later**; tests distinguish saved copies from transient edits.
+
+```sh
+python -m pytest -q tests/test_import_workflow_scenarios.py \
+  tests/test_import_review_drafts.py tests/test_worksheet_export_cache.py
+```

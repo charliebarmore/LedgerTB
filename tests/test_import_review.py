@@ -99,6 +99,9 @@ def test_client_switch_discards_only_volatile_import_state():
         "csv_uploader_nonce": 4,
         "statement_uploader_nonce": 2,
         "unrelated_setting": "keep",
+        "review_saved_revision": "previous-client-copy",
+        "review_resume_replace": True,
+        "review_discard_confirm": True,
     }
 
     assert scope_import_state_to_client(state, 2, book="firm.db") is True
@@ -116,7 +119,8 @@ def test_client_switch_discards_only_volatile_import_state():
         "transactions_to_review", "cat_row-a", "include_row-a",
         "_include_row-a_depends_on", "_csv_sign_convention_depends_on",
         "multi_assign_sign_convention", "csv_content", "document_bytes",
-        "statement_document_upload_2",
+        "statement_document_upload_2", "review_saved_revision",
+        "review_resume_replace", "review_discard_confirm",
     ):
         assert gone not in state, gone
 

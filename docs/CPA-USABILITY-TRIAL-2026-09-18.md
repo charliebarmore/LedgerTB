@@ -25,7 +25,8 @@ explicitly excluded rows leave the current list, as before.
 
 CSV and statement review edits are in session memory until **Save review for
 later**. Closing the app, losing its session or switching clients/books can lose
-unsaved edits. Assistant-proposed imported rows already have durable Pending
+unsaved edits. Starting a replacement import can also replace the current
+review; save first if you need to return to it. Assistant-proposed imported rows already have durable Pending
 records; their unsaved review edits have the same session limitation.
 
 The explicit saved copy:
@@ -56,7 +57,9 @@ The explicit saved copy:
 Crash tests terminate a child process without cleanup immediately before and
 immediately after commit. They establish process-interruption atomicity, not
 power-loss or hardware-failure resilience. Recovery tests never use the real
-keychain or client books.
+keychain or client books. The suite also forces dummy API environment values
+and an unavailable OS-vault backend before application imports, in addition to
+its per-test in-memory vault fixtures. This backstop survives fixture teardown.
 
 ## Read-only and storage failures
 

@@ -109,7 +109,9 @@ def main():
                 command("find", "role", "button", "click", "--name", f"Close {label}" if opened else label, "--exact")
                 state = snap()
 
-    def show_opinions():
+    def show_opinions(count=1, failed=False):
+        command("wait", "--fn", "Array.from(document.querySelectorAll('summary')).some(s => "
+                f"s.textContent.includes('AI opinions ({count})') && s.textContent.includes('Request failed') === {str(failed).lower()})")
         # Open the visible per-row disclosure; no application state is injected.
         command("eval", "Array.from(document.querySelectorAll('details')).filter(d => "
                 "d.querySelector('summary')?.textContent.includes('AI opinions')).forEach(d => {"
@@ -236,7 +238,7 @@ def main():
                 (scratch / "offline").touch()
                 click("button", "Ask Jev for suggestions")
                 snap()
-                show_opinions()
+                show_opinions(failed=True)
                 wait("TypeSafe could not be reached")
                 show_panel()
                 assert snap().count('checkbox "Include for posting"') == 2
@@ -268,7 +270,7 @@ def main():
                             f"Send the selected transaction information to {other_provider}", "--exact")
                     click("button", f"Ask {other_provider} for suggestions")
                     snap()
-                    show_opinions()
+                    show_opinions(2 if other_provider == "Anthropic" else 3)
                     wait("AI opinions disagree")
                     click("button", f"Ask {other_provider} for suggestions")
                     snap()
@@ -342,7 +344,7 @@ def main():
                 click("link", "Import Transactions", exact=False)
                 click("radio", "Review & Categorize")
                 snap()
-                command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.startsWith('Saved review')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+                command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.includes('Saved review ·')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
                 click("button", "Resume saved review")
                 wait("Saved review resumed")
                 state=snap()

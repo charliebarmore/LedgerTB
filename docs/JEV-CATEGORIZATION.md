@@ -543,3 +543,13 @@ Implementation follows the current [HTTP API](https://docs.typesafe.ai/api),
 [Choice consistency cookbook](https://docs.typesafe.ai/cookbooks/consistency_choice_cookbook)
 informed the explicit abstention route; its example thresholds were not adopted
 as permission to act.
+
+### CPA usability trial follow-up
+
+The September 18–19 follow-up adds in-page action panels, grouped provider
+opinions, explicit encrypted saved-review copies, focused recovery/read-only
+controls and worksheet export reuse. See
+[CPA usability trial behavior and verification](CPA-USABILITY-TRIAL-2026-09-18.md).
+Saved reviews contain accepted-choice hashes for normal stale-input validation;
+resuming does not send a provider request, and cloud consent/results are not
+persisted in the saved copy. Posting still requires the normal human review.

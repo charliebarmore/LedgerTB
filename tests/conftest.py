@@ -8,7 +8,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # falling back to the macOS credential vault. From a pytest process that read
 # can raise a Keychain authorization dialog no headless run can answer — the
 # suite hangs forever. A dummy env key short-circuits the vault entirely.
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-never-used")
+for provider_key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "TYPESAFE_API_KEY"):
+    os.environ[provider_key] = "test-key-never-used"
+# A process-wide backstop remains in force after a per-test monkeypatch is
+# undone (including when a timed-out UI worker finishes late). Child processes
+# inherit it unless their own explicitly fake fixture backend replaces it.
+os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
+import keyring
+from keyring.backends.fail import Keyring as UnavailableTestKeyring
+keyring.set_keyring(UnavailableTestKeyring())
 
 import pytest
 

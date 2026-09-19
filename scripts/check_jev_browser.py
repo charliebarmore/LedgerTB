@@ -45,7 +45,9 @@ def main():
                 command("find", "role", "button", "click", "--name", f"Close {label}" if opened else label, "--exact")
                 state = snapshot()
 
-    def show_opinions():
+    def show_opinions(count=1, failed=False):
+        command("wait", "--fn", "Array.from(document.querySelectorAll('summary')).some(s => "
+                f"s.textContent.includes('AI opinions ({count})') && s.textContent.includes('Request failed') === {str(failed).lower()})")
         # Open the visible per-row disclosure; no application state is injected.
         command("eval", "Array.from(document.querySelectorAll('details')).filter(d => "
                 "d.querySelector('summary')?.textContent.includes('AI opinions')).forEach(d => {"
@@ -139,7 +141,7 @@ def main():
             command("find", "role", "checkbox", "check", "--name", "Send the selected transaction information to Anthropic", "--exact")
             click("button", "Ask Anthropic for suggestions")
             snapshot()
-            show_opinions()
+            show_opinions(2)
             command("wait", "--text", "AI opinions disagree")
             check_account(True)
             assert 'Synthetic other-provider calls: 1' in command("get", "text", "body")
@@ -170,6 +172,7 @@ def main():
             assert geometry['left']>=0 and geometry['right']<=geometry['width']+1 and not geometry['overflow'], geometry
             command("screenshot", str((args.output / "provider-picker.png").resolve()))
             show_panel()
+            show_opinions(3)
             command("screenshot", str((args.output / "comparison.png").resolve()))
             click("radio", "Upload CSV")
             command("wait", "--text", "Upload Bank/Credit Card CSV File")
@@ -203,7 +206,7 @@ def main():
             snapshot()
             click("button", "Ask Jev for suggestions")
             snapshot()
-            show_opinions()
+            show_opinions(failed=True)
             command("wait", "--text", "could not be reached")
             state = snapshot()
             retry = next(line for line in state.splitlines() if 'button "Retry failed Jev requests"' in line)
@@ -218,7 +221,7 @@ def main():
             command("wait", "--text", "Review saved in this encrypted book")
             click("button", "Clear review list")
             command("wait", "--text", "No transactions to review")
-            command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.startsWith('Saved review')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+            command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.includes('Saved review ·')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
             click("button", "Resume saved review")
             command("wait", "--text", "Saved review resumed")
             check_account(False)
