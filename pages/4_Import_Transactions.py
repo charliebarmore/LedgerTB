@@ -1782,7 +1782,7 @@ elif selected_tab == "Review & Categorize":
                    f"Rows {row_start + 1}–{row_start + len(visible_rows)} of {len(transactions)}. "
                    "Only included rows post, across all pages.")
 
-        header_cols = st.columns([0.5, 0.9, 2.2, 1, 0.6, 2])
+        header_cols = st.columns([0.7, 0.9, 2.2, 1, 0.6, 2])
         with header_cols[0]:
             st.markdown("**Include**")
         with header_cols[1]:
@@ -1874,7 +1874,7 @@ elif selected_tab == "Review & Categorize":
                     transactions[i]["include"] = False
                     st.session_state[row_key("include", t)] = False
 
-            col0, col1, col2, col3, col4, col5 = st.columns([0.5, 0.9, 2.2, 1, 0.6, 2])
+            col0, col1, col2, col3, col4, col5 = st.columns([0.7, 0.9, 2.2, 1, 0.6, 2])
 
             include_key = row_key("include", t)
             with col0:

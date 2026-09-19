@@ -108,8 +108,13 @@ def review_action_panels():
                       key=f'review_action_toggle_{name}', width='stretch',
                       type='primary' if active == name else 'secondary',
                       on_click=toggle, args=(name,))
-    rules = ''.join(f'.st-key-review_panel_{name} {{ display: none; }}'
-                    for name in actions if name != active)
+    # Streamlit's zero-height layout wrapper still consumes a flex gap. Hide
+    # the observed wrapper too, while keeping every widget mounted in Python.
+    rules = ''.join(
+        f'.st-key-review_panel_{name}, '
+        f'[data-testid="stLayoutWrapper"]:has(> .st-key-review_panel_{name}) '
+        '{ display: none; }' for name in actions if name != active
+    )
     st.html('<style>' + rules + '</style>')
     return {name: st.container(key=f'review_panel_{name}', border=True) for name in actions}
 

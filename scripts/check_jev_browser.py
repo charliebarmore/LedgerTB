@@ -23,12 +23,16 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "output/jev-browser-review")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--startup-timeout", type=float, default=20, help="Fixture startup allowance; diagnostic increases do not establish startup performance")
+    parser.add_argument("--layout-only", action="store_true", help="Inspect initial panel layout without making a provider request")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     session = "jev-review-" + uuid.uuid4().hex[:10]
     namespace = "jv-" + session.rsplit("-", 1)[1][:8]
     cli = [args.agent_browser, "--namespace", namespace, "--session", session, "--pin-tab"]
     transcript = []
+    browser_started = False
+    page_opened = False
 
     def command(*parts):
         result = subprocess.run(cli + list(parts), capture_output=True, text=True, timeout=40)
@@ -98,7 +102,7 @@ def main():
         server = subprocess.Popen([sys.executable, str(ROOT / "scripts/jev_browser_fixture.py"),
                                    "--port", str(port)], stdout=log, stderr=log, cwd=ROOT)
         try:
-            deadline = time.monotonic() + 20
+            deadline = time.monotonic() + args.startup_timeout
             while True:
                 try:
                     with urlopen(f"http://127.0.0.1:{port}/_stcore/health", timeout=1) as response:
@@ -109,10 +113,27 @@ def main():
                 if server.poll() is not None or time.monotonic() > deadline:
                     raise AssertionError("Fixture failed to start; see server.log")
                 time.sleep(.1)
+            browser_started = True
             command("set", "viewport", str(args.width), str(args.height))
             command("open", f"http://127.0.0.1:{port}")
+            page_opened = True
             command("wait", "--text", "Select rows for actions")
             snapshot()
+            spacing = command("eval", "JSON.stringify((() => {const label=Array.from(document.querySelectorAll('strong')).find(e=>e.textContent==='Include');"
+                "const sort=Array.from(document.querySelectorAll('button')).find(e=>e.textContent.trim()==='Sort');"
+                "const caption=Array.from(document.querySelectorAll('[data-testid=stCaptionContainer]')).find(e=>e.textContent.includes('selected for actions'));"
+                "return {includeLines:label.getClientRects().length,toolbarToRows:caption.getBoundingClientRect().top-sort.getBoundingClientRect().bottom};})())")
+            (args.output / "row-spacing.json").write_text(spacing)
+            spacing = json.loads(spacing)
+            if isinstance(spacing, str): spacing = json.loads(spacing)
+            assert spacing['includeLines'] == 1 and 0 <= spacing['toolbarToRows'] <= 100, spacing
+            if args.layout_only:
+                layout = command("eval", "JSON.stringify(Array.from(document.querySelectorAll('[class*=st-key-review_panel_]')).map(el => {"
+                    "const result=[]; for(let p=el,i=0;p&&i<4;p=p.parentElement,i++){const r=p.getBoundingClientRect();"
+                    "result.push({tag:p.tagName,cls:p.className,testid:p.getAttribute('data-testid'),height:r.height,top:r.top,display:getComputedStyle(p).display});} return result;}))")
+                (args.output / "panel-layout.json").write_text(layout)
+                command("screenshot", str((args.output / "layout-initial.png").resolve()))
+                return
             click("combobox", "Selected rows")
             command("snapshot", "-i")
             click("option", "2026-01-01 | Cedar Paper: printer paper receipt | $-33.33")
@@ -227,20 +248,24 @@ def main():
             check_account(False)
             assert "Synthetic transport calls: 3" in command("get", "text", "body")
             command("screenshot", str((args.output / "saved-review.png").resolve()))
-            (args.output / "result.json").write_text(json.dumps({"passed": True, "checks": [
+            (args.output / "result.json").write_text(json.dumps({"passed": True, "viewport": {"width": args.width, "height": args.height}, "startup_timeout_seconds": args.startup_timeout, "checks": [
                 "consent", "separate inclusion", "acceptance", "request reuse", "navigation persistence",
                 "provider-off invalidation", "failure preservation", "immediate explicit retry",
-                "independent Anthropic opinion", "OpenAI opinion", "disagreement visibility", "second-opinion reuse", "model switch resets consent without a request", "panel fits viewport without horizontal overflow", "saved review resumes without a cloud call"
+                "independent Anthropic opinion", "OpenAI opinion", "disagreement visibility", "second-opinion reuse", "model switch resets consent without a request", "panel fits viewport without horizontal overflow", "saved review resumes without a cloud call", "closed panels leave no flex gaps and Include header stays on one line"
             ]}, indent=2) + "\n")
-            print("Jev browser review: 15 checks passed.")
+            print("Jev browser review: 16 checks passed.")
         except Exception:
             # Preserve the rendered state for diagnosing assertion or timing failures.
-            command("snapshot", "-i")
-            command("screenshot", str((args.output / "failure.png").resolve()))
+            for parts in ([("snapshot", "-i"), ("screenshot", str((args.output / "failure.png").resolve()))] if page_opened else []):
+                try:
+                    command(*parts)
+                except Exception:
+                    pass
             raise
         finally:
             try:
-                subprocess.run(cli + ["close"], capture_output=True, timeout=15)
+                if browser_started:
+                    subprocess.run(cli + ["close"], capture_output=True, timeout=40)
             except subprocess.TimeoutExpired:
                 pass
             finally:

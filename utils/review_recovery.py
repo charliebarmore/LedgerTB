@@ -4,6 +4,14 @@ import streamlit as st
 from database import connection as dbconn
 from services import import_review_drafts as drafts
 from utils.recovery import save_error_message
+from utils.client_context import book_scoped_key
+
+
+def _control_key(client_id, action, revision=""):
+    # A confirmation belongs to the displayed copy, not a later saved revision.
+    return book_scoped_key(
+        f"review_recovery_{client_id}_{action}_{revision}", dbconn.DATABASE_PATH
+    )
 
 
 def render_saved_review(client_id, duplicate_check):
@@ -23,12 +31,15 @@ def render_saved_review(client_id, duplicate_check):
         replace = (
             st.checkbox(
                 "Replace the review currently in this window",
-                key="review_resume_replace",
+                key=_control_key(client_id, "replace", info["revision"]),
             )
             if has_rows
             else True
         )
-        if st.button("Resume saved review", disabled=not replace, key="review_resume"):
+        if st.button(
+            "Resume saved review", disabled=not replace,
+            key=_control_key(client_id, "resume", info["revision"]),
+        ):
             try:
                 loaded = drafts.load(client_id)
                 if not loaded:
@@ -52,11 +63,14 @@ def render_saved_review(client_id, duplicate_check):
                     if isinstance(exc, drafts.ReviewConflict)
                     else save_error_message(exc)
                 )
-        confirm = st.checkbox("Discard the saved copy", key="review_discard_confirm")
+        confirm = st.checkbox(
+            "Discard the saved copy",
+            key=_control_key(client_id, "discard_confirm", info["revision"]),
+        )
         if st.button(
             "Discard saved review",
             disabled=dbconn.READ_ONLY or not confirm,
-            key="review_discard",
+            key=_control_key(client_id, "discard", info["revision"]),
         ):
             try:
                 drafts.discard(client_id, info["revision"])
@@ -77,7 +91,10 @@ def render_save_review(client_id, rows):
     st.caption(
         "Review edits stay in this window until you save a copy. Save before closing the app or switching books or clients."
     )
-    if st.button("Save review for later", disabled=dbconn.READ_ONLY, key="review_save"):
+    if st.button(
+        "Save review for later", disabled=dbconn.READ_ONLY,
+        key=_control_key(client_id, "save"),
+    ):
         try:
             revision = drafts.save(
                 client_id,

@@ -104,12 +104,12 @@ def test_saved_review_survives_new_session_without_request_or_duplicate_post(
     at.session_state["transactions_to_review"] = [row(accounts)]
     at.run()
     assert not at.exception
-    at.button(key="review_save").click().run()
+    next(b for b in at.button if b.label == "Save review for later").click().run()
     assert not at.exception and drafts.summary(client_id)["row_count"] == 1
     fresh, _ = page(monkeypatch, client_id, accounts, fake_credential_vault)
     fresh.session_state["transactions_to_review"] = []
     fresh.run()
-    fresh.button(key="review_resume").click().run()
+    next(b for b in fresh.button if b.label == "Resume saved review").click().run()
     assert not fresh.exception
     restored = fresh.session_state["transactions_to_review"][0]
     assert (
@@ -128,7 +128,7 @@ def test_saved_review_survives_new_session_without_request_or_duplicate_post(
     another, _ = page(monkeypatch, client_id, accounts, fake_credential_vault)
     another.session_state["transactions_to_review"] = []
     another.run()
-    another.button(key="review_resume").click().run()
+    next(b for b in another.button if b.label == "Resume saved review").click().run()
     assert not another.exception
     restored = another.session_state["transactions_to_review"][0]
     assert restored["is_duplicate"] and not restored["include"]
@@ -235,3 +235,37 @@ def test_old_readonly_book_without_review_table_remains_readable(
         cur.execute("DROP TABLE import_review_drafts")
     monkeypatch.setattr(dbconn, "READ_ONLY", True)
     assert drafts.summary(client_id) is None
+
+
+def test_saved_copy_confirmation_does_not_carry_to_another_revision_or_client(
+    client_id, accounts,
+):
+    from streamlit.testing.v1 import AppTest
+
+    second = Client(name="Other fictional saved review").save(seed_accounts=False)
+    revision = drafts.save(client_id, [row(accounts)])
+    drafts.save(second, [row(accounts)])
+    at = AppTest.from_string('''
+import streamlit as st
+from utils.review_recovery import render_saved_review
+render_saved_review(st.session_state.client_id, lambda rows: None)
+''')
+    at.session_state.client_id = client_id
+    at.session_state.transactions_to_review = [row(accounts)]
+    at.run()
+    next(c for c in at.checkbox if c.label == "Discard the saved copy").check().run()
+    next(c for c in at.checkbox if c.label == "Replace the review currently in this window").check().run()
+    assert not next(b for b in at.button if b.label == "Discard saved review").disabled
+    # A different window saved a new revision after the displayed confirmation.
+    drafts.save(client_id, [row(accounts)], expected_revision=revision)
+    at.run()
+    assert not at.exception
+    assert all(not c.value for c in at.checkbox)
+    assert all(b.disabled for b in at.button)
+    next(c for c in at.checkbox if c.label == "Discard the saved copy").check().run()
+    at.session_state.client_id = second
+    at.run()
+    assert not at.exception
+    assert all(not c.value for c in at.checkbox)
+    assert all(b.disabled for b in at.button)
+    assert drafts.summary(client_id) and drafts.summary(second)

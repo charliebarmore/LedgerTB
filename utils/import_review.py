@@ -172,6 +172,7 @@ _CLIENT_IMPORT_STATE_KEYS = {
 }
 
 _CLIENT_IMPORT_STATE_PREFIXES = (
+    "review_recovery_",
     "jev_",
     "ai_review_",
     "cat_",

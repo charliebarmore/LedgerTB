@@ -26,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app", type=Path, required=True)
+    parser.add_argument("--width", type=int, default=1360)
+    parser.add_argument("--height", type=int, default=768)
     parser.add_argument("--key-file", type=Path)
     parser.add_argument("--fixture-template", type=Path,
                         help="Copy a previously prepared synthetic fixture under output/ into a new disposable directory")
@@ -212,6 +214,7 @@ def main():
                         pass
                     assert time.monotonic() < deadline, "Packaged server did not start"
                     time.sleep(.2)
+                command("set", "viewport", str(args.width), str(args.height))
                 command("open", base + "/?t=" + session)
                 wait("Enter your passphrase")
                 assert (scratch / "fake-vault-loaded").exists()
