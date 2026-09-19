@@ -67,31 +67,24 @@ with tab1:
         if not AccountSubtype.is_canonical(account.type, account.subtype)
     ]
     if review_accounts:
-        preview_names = ", ".join(
-            f"{account.account_number} {account.name}"
-            for account in review_accounts[:4]
-        )
-        if len(review_accounts) > 4:
-            preview_names += f", and {len(review_accounts) - 4} more"
         st.warning(
             f"{len(review_accounts)} account"
             f"{'s' if len(review_accounts) != 1 else ''} need"
-            f"{'' if len(review_accounts) != 1 else 's'} a statement "
-            f"grouping: {preview_names}. Until one is assigned, these "
-            "accounts appear under an \"Unclassified\" heading on financial "
-            "statements and their cash activity shows a review warning on "
-            "the cash flow statement. Assign groupings in \"Review "
-            "statement subtypes\" just below."
+            f"{'' if len(review_accounts) != 1 else 's'} a statement grouping."
         )
         with st.expander(
-            f"Review statement subtypes ({len(review_accounts)})",
+            f"View accounts and assign groupings ({len(review_accounts)})",
             expanded=False,
         ):
+            for account in review_accounts:
+                inactive = " (inactive)" if not account.is_active else ""
+                st.text(f"• {account.account_number} — {account.name}{inactive}")
             st.caption(
-                "These accounts have a blank or older subtype. Select accounts "
-                "of one type and assign the financial-statement grouping they "
-                "should use. Existing values remain unchanged until you apply one."
+                'Until grouped, these accounts appear as "Unclassified" on '
+                "financial statements and their cash activity needs review."
             )
+            st.markdown("**Assign groupings**")
+            st.caption("Select accounts of the same type, choose a grouping, then apply it.")
             for review_type in AccountType.ALL:
                 type_review = [
                     account for account in review_accounts

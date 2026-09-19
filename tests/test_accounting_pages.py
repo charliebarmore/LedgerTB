@@ -177,7 +177,7 @@ def test_chart_of_accounts_uses_correct_plural_labels(
     assert "Liabilitys" not in labels
     assert "Equitys" not in labels
     assert any(
-        "Review statement subtypes" in expander.label
+        "View accounts and assign groupings" in expander.label
         for expander in page.expander
     )
 
@@ -1629,7 +1629,11 @@ def test_chart_of_accounts_warns_about_unresolved_subtypes(
     warnings = " ".join(str(item.value) for item in page.warning)
     assert "need a statement grouping" in warnings or \
         "needs a statement grouping" in warnings
-    assert "3100 Owner's Capital" in warnings
+    review = next(
+        expander for expander in page.expander
+        if "View accounts and assign groupings" in expander.label
+    )
+    assert any("3100 — Owner's Capital" in item.value for item in review.text)
 
 
 def test_readonly_journal_disables_entry_and_correction_actions(client_id,accounts,monkeypatch):
