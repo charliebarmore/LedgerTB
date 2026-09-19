@@ -91,6 +91,11 @@ def main():
         settled()
         return command("snapshot", "-i")
 
+    def open_saved_review():
+        snapshot()
+        command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.includes('Saved review ·')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+        return snapshot()
+
     def check_account(selected):
         state = snapshot()
         assert re.search(r'checkbox "Include for posting".*checked=false', state), state
@@ -253,19 +258,23 @@ def main():
             command("wait", "--text", "Review saved in this encrypted book")
             click("button", "Clear review list")
             command("wait", "--text", "No transactions to review")
-            command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.includes('Saved review ·')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+            open_saved_review()
             click("button", "Resume saved review")
             command("wait", "--text", "Saved review resumed")
             check_account(False)
             assert "Synthetic transport calls: 3" in command("get", "text", "body")
             command("screenshot", str((args.output / "saved-review.png").resolve()))
-            command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.includes('Saved review ·')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+            open_saved_review()
             command("find", "role", "checkbox", "check", "--name", "Discard the saved copy", "--exact")
+            open_saved_review()
             command("find", "role", "checkbox", "check", "--name", "Replace the review currently in this window", "--exact")
+            state = open_saved_review()
+            assert 'checkbox "Discard the saved copy" [checked=true' in state, state
+            assert 'checkbox "Replace the review currently in this window" [checked=true' in state, state
             click("button", "Revise saved copy externally")
             command("wait", "--text", "External saved revisions: 1")
             # The updated timestamp creates a fresh, collapsed disclosure.
-            command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.includes('Saved review ·')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+            open_saved_review()
             state = snapshot()
             assert 'checkbox "Discard the saved copy" [checked=false' in state, state
             assert 'checkbox "Replace the review currently in this window" [checked=false' in state, state

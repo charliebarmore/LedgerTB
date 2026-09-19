@@ -366,6 +366,8 @@ def main():
                 checks.append("worksheet actions retain single-line labels and wrap within the viewport")
                 click("link", "Chart of Accounts", exact=False)
                 wait("4 accounts need a statement grouping.")
+                snap()
+                command("wait", "--fn", "Array.from(document.querySelectorAll('summary')).some(s=>s.textContent.includes('View accounts and assign groupings'))")
                 collapsed = command("eval", "Array.from(document.querySelectorAll('details')).find(d=>d.querySelector('summary')?.textContent.includes('View accounts and assign groupings')).open")['result']
                 assert collapsed is False
                 command("screenshot", str(output / "grouping-collapsed.png"))
