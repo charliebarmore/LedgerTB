@@ -45,7 +45,10 @@ def main():
     sources = ["config.py", "pages/4_Import_Transactions.py", "services/jev_categorization.py",
                "utils/jev_review.py", "utils/import_review.py", "services/csv_import.py",
                "pages/2_Journal_Entries.py", "pages/7_Dashboard.py", "pages/12_Firm_Settings.py",
-               "services/review_categorization.py", "utils/ai_review.py"]
+               "services/review_categorization.py", "utils/ai_review.py", "utils/ui.py",
+               "services/import_review_drafts.py", "utils/review_recovery.py", "utils/recovery.py",
+               "services/worksheet_export.py", "services/worksheet_export_cache.py",
+               "pages/1_Trial_Balance_Worksheet.py", "database/migrations/026_import_review_drafts.sql"]
     hashes = {}
     for name in sources:
         actual = (bundle / name).read_bytes()
@@ -101,11 +104,17 @@ def main():
     def show_panel(wanted=None):
         state = snap()
         for label in ("Select rows for actions", "AI suggestions", "Change category", "Sort"):
-            line = next((line for line in state.splitlines() if f'button "{label}"' in line), "")
-            opened = "expanded=true" in line
-            if line and opened != (label == wanted):
-                command("find", "role", "button", "click", "--name", label, "--exact")
+            opened = f'button "Close {label}"' in state
+            if opened != (label == wanted):
+                command("find", "role", "button", "click", "--name", f"Close {label}" if opened else label, "--exact")
                 state = snap()
+
+    def show_opinions():
+        # Open the visible per-row disclosure; no application state is injected.
+        command("eval", "Array.from(document.querySelectorAll('details')).filter(d => "
+                "d.querySelector('summary')?.textContent.includes('AI opinions')).forEach(d => {"
+                "if (!d.open) d.querySelector('summary').click(); })")
+
 
     def click(role, name, exact=True):
         if name in ("Selected rows", "Select all", "Clear selection"):
@@ -226,6 +235,8 @@ def main():
                 check("Send the selected transaction information to TypeSafe")
                 (scratch / "offline").touch()
                 click("button", "Ask Jev for suggestions")
+                snap()
+                show_opinions()
                 wait("TypeSafe could not be reached")
                 show_panel()
                 assert snap().count('checkbox "Include for posting"') == 2
@@ -235,6 +246,8 @@ def main():
                 assert len(failed_requests) == 1 and not failed_requests[0]["network_attempted"]
                 (scratch / "offline").unlink()
                 click("button", "Retry failed Jev requests")
+                snap()
+                show_opinions()
                 wait("Suggested account:")
                 click("button", "Accept account suggestion")
                 wait("Account accepted.")
@@ -254,6 +267,8 @@ def main():
                     command("find", "role", "checkbox", "check", "--name",
                             f"Send the selected transaction information to {other_provider}", "--exact")
                     click("button", f"Ask {other_provider} for suggestions")
+                    snap()
+                    show_opinions()
                     wait("AI opinions disagree")
                     click("button", f"Ask {other_provider} for suggestions")
                     snap()
@@ -275,6 +290,8 @@ def main():
                 show_panel()
                 assert len([line for line in snap().splitlines() if 'checkbox "Include for posting"' in line and "checked=false" in line]) == 2
                 checks.append("bulk select/clear preserves posting exclusion")
+                click("button", "Save review for later")
+                wait("Review saved in this encrypted book")
                 # Include only the accepted first row through the actual checkbox.
                 first = next(line for line in snap().splitlines() if 'checkbox "Include for posting"' in line)
                 command("check", "@" + re.search(r"ref=(e\d+)", first)[1])
@@ -313,6 +330,26 @@ def main():
                 command("wait", '[data-testid="stDataFrame"]')
                 command("screenshot", str(output / "journal-table.png"))
                 checks += ["CSV preview shows 81.58 disbursements", "journal entry displays a balanced debit/credit table"]
+
+                click("link", "Trial Balance Worksheet", exact=False)
+                wait("Export Excel")
+                wait("Close Package (PDF)")
+                wait("Close Package (Excel)")
+                snap()
+                assert "Exports could not be prepared" not in command("get", "text", "body")["text"]
+                command("screenshot", str(output / "worksheet-exports.png"))
+                checks.append("frozen worksheet generates all three PDF/XLSX exports")
+                click("link", "Import Transactions", exact=False)
+                click("radio", "Review & Categorize")
+                snap()
+                command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.startsWith('Saved review')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+                click("button", "Resume saved review")
+                wait("Saved review resumed")
+                state=snap()
+                assert len([line for line in state.splitlines() if 'checkbox "Include for posting"' in line and "checked=false" in line])==2
+                assert len((scratch / "requests.jsonl").read_text().splitlines())==2
+                command("screenshot", str(output / "saved-review-resumed.png"))
+                checks.append("encrypted saved review resumes after posting without a request or inclusion change")
 
                 # Both fixture books deliberately have client ID 1 and the same
                 # account IDs. Switching must still reset consent/review state.

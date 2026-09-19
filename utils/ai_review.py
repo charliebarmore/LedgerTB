@@ -169,20 +169,26 @@ def render_results(row, accounts, client_id, jev_prepared, other_prepared):
             current_results.append((v, key, result))
             if not result.get('error'):
                 opinions.append((result['outcome'], result['account_id']))
-    if len(set(opinions)) > 1:
-        st.warning('AI opinions disagree. Review the evidence before choosing a category.')
-    render_jev_result(row, accounts, client_id, jev_prepared)
-    names = {a.id: a.display_name() for a in jev.eligible_accounts(accounts, client_id)}
-    for variant, key, result in current_results:
-        name = ai.PROVIDERS[variant['provider']]
-        st.text(f"{name} · {result.get('model', variant['model'])}")
-        if result.get('error'):
-            st.warning(result['error'] + ' Staged work is unchanged.')
-            continue
-        if result['outcome'] == 'account':
-            st.caption(f"Suggested account: {names[result['account_id']]}")
-            st.button(f'Accept {name} suggestion', key=f'ai_review_accept_{uid}_{key}', on_click=accept_other,
-                      args=(row, result['account_id'], key, variant['provider'], variant['model']))
-        else:
-            st.info(jev.OUTCOMES[result['outcome']])
-        st.text(result['reason'])
+    count = len(current_results) + bool(jev_result)
+    if not count:
+        return
+    disagreement = len(set(opinions)) > 1
+    label = f'AI opinions ({count})' + (' · Disagree' if disagreement else '')
+    with st.expander(label):
+        if len(set(opinions)) > 1:
+            st.warning('AI opinions disagree. Review the evidence before choosing a category.')
+        render_jev_result(row, accounts, client_id, jev_prepared)
+        names = {a.id: a.display_name() for a in jev.eligible_accounts(accounts, client_id)}
+        for variant, key, result in current_results:
+            name = ai.PROVIDERS[variant['provider']]
+            st.text(f"{name} · {result.get('model', variant['model'])}")
+            if result.get('error'):
+                st.warning(result['error'] + ' Staged work is unchanged.')
+                continue
+            if result['outcome'] == 'account':
+                st.caption(f"Suggested account: {names[result['account_id']]}")
+                st.button(f'Accept {name} suggestion', key=f'ai_review_accept_{uid}_{key}', on_click=accept_other,
+                          args=(row, result['account_id'], key, variant['provider'], variant['model']))
+            else:
+                st.info(jev.OUTCOMES[result['outcome']])
+            st.text(result['reason'])

@@ -373,6 +373,8 @@ def _selfcheck() -> int:
             "models.recurring_entry", "services.recurring_entries",
             "services.categorization", "services.jev_categorization", "utils.jev_review",
             "services.review_categorization", "utils.ai_review",
+            "services.import_review_drafts", "utils.review_recovery", "utils.recovery",
+            "services.worksheet_export", "services.worksheet_export_cache",
             "urllib.request", "certifi", "services.document_import", "pypdfium2", "PIL",
             "keyring", "version", "utils.desktop_window"]
     failed = []

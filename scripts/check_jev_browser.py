@@ -21,6 +21,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent-browser", default=str(ROOT / "tests/browser-tools/node_modules/.bin/agent-browser"))
     parser.add_argument("--output", type=Path, default=ROOT / "output/jev-browser-review")
+    parser.add_argument("--width", type=int, default=1280)
+    parser.add_argument("--height", type=int, default=720)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     session = "jev-review-" + uuid.uuid4().hex[:10]
@@ -38,11 +40,17 @@ def main():
     def show_panel(wanted=None):
         state = snapshot()
         for label in ("Select rows for actions", "AI suggestions", "Change category", "Sort"):
-            line = next((line for line in state.splitlines() if f'button "{label}"' in line), "")
-            opened = "expanded=true" in line
-            if line and opened != (label == wanted):
-                command("find", "role", "button", "click", "--name", label, "--exact")
+            opened = f'button "Close {label}"' in state
+            if opened != (label == wanted):
+                command("find", "role", "button", "click", "--name", f"Close {label}" if opened else label, "--exact")
                 state = snapshot()
+
+    def show_opinions():
+        # Open the visible per-row disclosure; no application state is injected.
+        command("eval", "Array.from(document.querySelectorAll('details')).filter(d => "
+                "d.querySelector('summary')?.textContent.includes('AI opinions')).forEach(d => {"
+                "if (!d.open) d.querySelector('summary').click(); })")
+
 
     def click(role, name):
         if name in ("Selected rows", "Select all", "Clear selection"):
@@ -53,8 +61,19 @@ def main():
             show_panel()
         if role == "button":
             command("wait", "--fn", "Array.from(document.querySelectorAll('button')).some(b => "
-                    f"(b.textContent.trim() === {json.dumps(name)} || "
-                    f"b.getAttribute('aria-label') === {json.dumps(name)}) && !b.disabled)")
+                    f"(b.textContent.trim() === {json.dumps(name)} || b.getAttribute('aria-label') === {json.dumps(name)}) && !b.disabled)")
+            # Rerenders can move a button above the visible viewport. Center it
+            # before the ordinary pointer click; never force through an overlay.
+            command("eval", "Array.from(document.querySelectorAll('button')).find(b => "
+                    f"b.textContent.trim() === {json.dumps(name)} || b.getAttribute('aria-label') === {json.dumps(name)})"
+                    ".scrollIntoView({block: 'center', behavior: 'instant'})")
+            # Scrolling can leave the pointer over Retry and open its help
+            # tooltip across Ask. Move to the observed empty sidebar margin.
+            command("mouse", "move", "10", "10")
+            command("wait", "--fn", "Array.from(document.querySelectorAll('button')).some(b => {"
+                    f"if (b.textContent.trim() !== {json.dumps(name)} && b.getAttribute('aria-label') !== {json.dumps(name)}) return false;"
+                    "const r = b.getBoundingClientRect(); return !b.disabled && "
+                    "b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); })")
         command("find", "role", role, "click", "--name", name, "--exact")
 
     def settled():
@@ -88,6 +107,7 @@ def main():
                 if server.poll() is not None or time.monotonic() > deadline:
                     raise AssertionError("Fixture failed to start; see server.log")
                 time.sleep(.1)
+            command("set", "viewport", str(args.width), str(args.height))
             command("open", f"http://127.0.0.1:{port}")
             command("wait", "--text", "Select rows for actions")
             snapshot()
@@ -102,6 +122,8 @@ def main():
             command("find", "role", "checkbox", "check", "--name", "Send the selected transaction information to TypeSafe", "--exact")
             snapshot()
             click("button", "Ask Jev for suggestions")
+            snapshot()
+            show_opinions()
             command("wait", "--text", "Suggested account:")
             check_account(False)
             click("button", "Accept account suggestion")
@@ -116,6 +138,8 @@ def main():
             assert 'Synthetic other-provider calls: 0' in command("get", "text", "body")
             command("find", "role", "checkbox", "check", "--name", "Send the selected transaction information to Anthropic", "--exact")
             click("button", "Ask Anthropic for suggestions")
+            snapshot()
+            show_opinions()
             command("wait", "--text", "AI opinions disagree")
             check_account(True)
             assert 'Synthetic other-provider calls: 1' in command("get", "text", "body")
@@ -136,6 +160,14 @@ def main():
             state = snapshot()
             assert any('checkbox "Send the selected transaction information to OpenAI"' in line and 'checked=false' in line for line in state.splitlines()), state
             assert 'Synthetic other-provider calls: 2' in command("get", "text", "body")
+            command("find", "role", "combobox", "fill", "gpt-4o-mini", "--name", "Model", "--exact")
+            command("press", "Tab")
+            geometry = command("eval", "(() => { const p = document.querySelector('.st-key-review_panel_ai'); "
+                               "const r = p.getBoundingClientRect(); return JSON.stringify({left:r.left,right:r.right,width:innerWidth,"
+                               "overflow:document.documentElement.scrollWidth>innerWidth+1}); })()")
+            (args.output / "panel-geometry.json").write_text(geometry)
+            geometry = json.loads(json.loads(geometry)) if isinstance(json.loads(geometry),str) else json.loads(geometry)
+            assert geometry['left']>=0 and geometry['right']<=geometry['width']+1 and not geometry['overflow'], geometry
             command("screenshot", str((args.output / "provider-picker.png").resolve()))
             show_panel()
             command("screenshot", str((args.output / "comparison.png").resolve()))
@@ -170,6 +202,8 @@ def main():
             command("wait", "--text", "Synthetic failure mode: on")
             snapshot()
             click("button", "Ask Jev for suggestions")
+            snapshot()
+            show_opinions()
             command("wait", "--text", "could not be reached")
             state = snapshot()
             retry = next(line for line in state.splitlines() if 'button "Retry failed Jev requests"' in line)
@@ -180,12 +214,22 @@ def main():
             command("wait", "--text", "Synthetic transport calls: 3")
             check_account(False)
             command("screenshot", str((args.output / "final.png").resolve()))
+            click("button", "Save review for later")
+            command("wait", "--text", "Review saved in this encrypted book")
+            click("button", "Clear review list")
+            command("wait", "--text", "No transactions to review")
+            command("eval", "Array.from(document.querySelectorAll('details')).filter(d => d.querySelector('summary')?.textContent.startsWith('Saved review')).forEach(d => {if(!d.open)d.querySelector('summary').click();})")
+            click("button", "Resume saved review")
+            command("wait", "--text", "Saved review resumed")
+            check_account(False)
+            assert "Synthetic transport calls: 3" in command("get", "text", "body")
+            command("screenshot", str((args.output / "saved-review.png").resolve()))
             (args.output / "result.json").write_text(json.dumps({"passed": True, "checks": [
                 "consent", "separate inclusion", "acceptance", "request reuse", "navigation persistence",
                 "provider-off invalidation", "failure preservation", "immediate explicit retry",
-                "independent Anthropic opinion", "OpenAI opinion", "disagreement visibility", "second-opinion reuse", "model switch resets consent without a request"
+                "independent Anthropic opinion", "OpenAI opinion", "disagreement visibility", "second-opinion reuse", "model switch resets consent without a request", "panel fits viewport without horizontal overflow", "saved review resumes without a cloud call"
             ]}, indent=2) + "\n")
-            print("Jev browser review: 13 checks passed.")
+            print("Jev browser review: 15 checks passed.")
         except Exception:
             # Preserve the rendered state for diagnosing assertion or timing failures.
             command("snapshot", "-i")

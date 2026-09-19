@@ -40,8 +40,10 @@ from database import init_database
 from database import connection as dbconn
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
-from utils.ui import apply_default_on_change, is_parking_account, view_switcher
+from utils.ui import apply_default_on_change, is_parking_account, view_switcher, review_action_panels
 from utils import icons
+from utils.recovery import save_error_message
+from utils.review_recovery import render_saved_review, render_save_review
 from utils.import_review import (
     classify_review_rows,
     ensure_row_ids,
@@ -79,6 +81,8 @@ scope_import_state_to_client(
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
+if dbconn.READ_ONLY:
+    st.info("Read-only book. You can inspect and prepare a review; posting and saved-book changes are disabled.")
 profile_message = st.session_state.pop("import_profile_message", None)
 if profile_message:
     st.success(profile_message)
@@ -332,7 +336,7 @@ if selected_tab == "Upload CSV":
                         )
                         new_acct_desc = st.text_input("Description (optional)", placeholder="e.g., ****1234")
 
-                        if st.form_submit_button("Add Account", type="primary"):
+                        if st.form_submit_button("Add Account", type="primary", disabled=dbconn.READ_ONLY):
                             if new_acct_number and new_acct_name:
                                 try:
                                     new_account = Account(
@@ -813,7 +817,7 @@ if selected_tab == "Upload CSV":
                     action_columns = st.columns([1, 1, 1])
                     with action_columns[0]:
                         if selected_profile and st.button(
-                            "Update selected format", key="update_csv_import_profile"
+                            "Update selected format", key="update_csv_import_profile", disabled=dbconn.READ_ONLY
                         ):
                             try:
                                 profile = build_import_profile(selected_profile.id)
@@ -827,7 +831,7 @@ if selected_tab == "Upload CSV":
                             except ValueError as exc:
                                 st.error(str(exc))
                     with action_columns[1]:
-                        if st.button("Save as new format", key="save_csv_import_profile"):
+                        if st.button("Save as new format", key="save_csv_import_profile", disabled=dbconn.READ_ONLY):
                             try:
                                 profile = build_import_profile()
                                 profile.save()
@@ -847,7 +851,7 @@ if selected_tab == "Upload CSV":
                             ):
                                 if st.button(
                                     "Remove selected format",
-                                    key="remove_csv_import_profile",
+                                    key="remove_csv_import_profile", disabled=dbconn.READ_ONLY,
                                 ):
                                     st.session_state.confirm_profile_delete_id = (
                                         selected_profile.id
@@ -857,7 +861,7 @@ if selected_tab == "Upload CSV":
                                 st.warning(f'Remove "{selected_profile.name}"?')
                                 confirm_col, cancel_col = st.columns(2)
                                 with confirm_col:
-                                    if st.button("Remove", key="confirm_remove_csv_profile"):
+                                    if st.button("Remove", key="confirm_remove_csv_profile", disabled=dbconn.READ_ONLY):
                                         ImportProfile.delete(
                                             client_id, selected_profile.id
                                         )
@@ -1404,6 +1408,8 @@ elif selected_tab == "Review & Categorize":
             st.error("Errors: " + '; '.join(_pr['errors']))
         st.session_state.post_result = None
 
+    render_saved_review(client_id, apply_duplicate_checks)
+
     # Check if import just completed - show "What's next?" prompt
     if st.session_state.get('import_complete'):
         st.success(st.session_state.get('import_complete_msg', 'Import complete!'))
@@ -1456,7 +1462,7 @@ elif selected_tab == "Review & Categorize":
                     }
                 st.rerun()
         with _sc3:
-            if st.button("Dismiss staged", key="dismiss_staged_imports",
+            if st.button("Dismiss staged", key="dismiss_staged_imports", disabled=dbconn.READ_ONLY,
                          width="stretch"):
                 st.session_state.confirm_dismiss_staged = {
                     "client_id": client_id,
@@ -1479,7 +1485,7 @@ elif selected_tab == "Review & Categorize":
         _dc1, _dc2, _dc3 = st.columns([1, 1, 3])
         with _dc1:
             if st.button("Confirm dismissal", type="primary",
-                         key="confirm_dismiss_staged_button"):
+                         key="confirm_dismiss_staged_button", disabled=dbconn.READ_ONLY):
                 try:
                     _dismissed = ImportedTransaction.dismiss_pending(
                         client_id, _dismiss_ids)
@@ -1601,7 +1607,7 @@ elif selected_tab == "Review & Categorize":
                     st.error(st.session_state.pop("quick_add_account_error"))
                 b1, b2, _ = st.columns([1, 1, 4])
                 with b1:
-                    st.button("Create account", type="primary",
+                    st.button("Create account", type="primary", disabled=dbconn.READ_ONLY,
                               key=f"newacct_save_{target_key}",
                               on_click=_create_quick_account, args=(target_key,))
                 with b2:
@@ -1684,29 +1690,27 @@ elif selected_tab == "Review & Categorize":
                         st.session_state[row_key("include", t)] = False
                     st.rerun()
 
-        action_select, action_ai, action_bulk, action_sort = st.columns([3, 2, 2, 1.5])
+        action_panels = review_action_panels()
         bulk_by_uid = {t["uid"]: t for t in transactions}
         st.session_state["bulk_rows"] = [uid for uid in st.session_state.get("bulk_rows", []) if uid in bulk_by_uid]
-        with action_select:
-            with st.popover("Select rows for actions", width="stretch"):
-                st.caption("Selection is for suggestions and category changes. Use Include to choose what posts.")
-                sel_col1, sel_col2 = st.columns(2)
-                with sel_col1:
-                    if st.button("Clear selection", key="deselect_bulk"):
-                        st.session_state["bulk_rows"] = []
-                        st.rerun()
-                with sel_col2:
-                    if st.button("Select all", key="select_bulk"):
-                        st.session_state["bulk_rows"] = list(bulk_by_uid)
-                        st.rerun()
-                st.multiselect(
-                    "Selected rows", options=list(bulk_by_uid), key="bulk_rows",
-                    format_func=lambda uid: f"{bulk_by_uid[uid]['date']} | {bulk_by_uid[uid]['description']} | ${bulk_by_uid[uid]['amount']:,.2f}",
-                )
-        with action_sort:
-            with st.popover("Sort", width="stretch"):
-                sort_by = st.selectbox("Sort by", options=["Date", "Description", "Amount"], key="sort_by")
-                sort_order = st.selectbox("Order", options=["Ascending", "Descending"], key="sort_order")
+        with action_panels["select"]:
+            st.caption("Selection is for suggestions and category changes. Use Include to choose what posts.")
+            sel_col1, sel_col2 = st.columns(2)
+            with sel_col1:
+                if st.button("Clear selection", key="deselect_bulk"):
+                    st.session_state["bulk_rows"] = []
+                    st.rerun()
+            with sel_col2:
+                if st.button("Select all", key="select_bulk"):
+                    st.session_state["bulk_rows"] = list(bulk_by_uid)
+                    st.rerun()
+            st.multiselect(
+                "Selected rows", options=list(bulk_by_uid), key="bulk_rows",
+                format_func=lambda uid: f"{bulk_by_uid[uid]['date']} | {bulk_by_uid[uid]['description']} | ${bulk_by_uid[uid]['amount']:,.2f}",
+            )
+        with action_panels["sort"]:
+            sort_by = st.selectbox("Sort by", options=["Date", "Description", "Amount"], key="sort_by")
+            sort_order = st.selectbox("Order", options=["Ascending", "Descending"], key="sort_order")
 
         # Apply sorting
         reverse = (sort_order == "Descending")
@@ -1720,9 +1724,8 @@ elif selected_tab == "Review & Categorize":
         # Update session state with sorted order
         st.session_state.transactions_to_review = transactions
 
-        with action_ai:
-            with st.popover("AI suggestions", width="stretch"):
-                render_controls(transactions, all_accounts, client_id, jev_prepared, other_prepared)
+        with action_panels["ai"]:
+            render_controls(transactions, all_accounts, client_id, jev_prepared, other_prepared)
 
         def _apply_bulk(uncategorized_only):
             account_id = st.session_state.get("bulk_account_select")
@@ -1738,32 +1741,31 @@ elif selected_tab == "Review & Categorize":
                 "Transfer rows require an asset or liability account."
             )
 
-        with action_bulk:
-            with st.popover("Change category", width="stretch"):
-                col1, col2, col3 = st.container(), st.container(), st.container()
-                with col1:
-                    bulk_account = st.selectbox(
-                        "Account to apply", options=category_option_ids,
-                        format_func=category_label, key="bulk_account_select", index=None,
-                        placeholder="Type an account number or name",
-                    )
-                with col2:
-                    st.button("Apply to Selected", on_click=_apply_bulk, args=(False,))
-                with col3:
-                    st.button("Apply to Uncategorized", on_click=_apply_bulk, args=(True,),
-                              help="Apply only to selected rows that have no category.")
+        with action_panels["bulk"]:
+            col1, col2, col3 = st.container(), st.container(), st.container()
+            with col1:
+                bulk_account = st.selectbox(
+                    "Account to apply", options=category_option_ids,
+                    format_func=category_label, key="bulk_account_select", index=None,
+                    placeholder="Type an account number or name",
+                )
+            with col2:
+                st.button("Apply to Selected", on_click=_apply_bulk, args=(False,))
+            with col3:
+                st.button("Apply to Uncategorized", on_click=_apply_bulk, args=(True,),
+                          help="Apply only to selected rows that have no category.")
 
-                # The bulk dropdown can create an account too.
-                if st.session_state.get("bulk_account_select") == ADD_NEW_ACCOUNT:
-                    render_quick_add_form("bulk_account_select")
+            # The bulk dropdown can create an account too.
+            if st.session_state.get("bulk_account_select") == ADD_NEW_ACCOUNT:
+                render_quick_add_form("bulk_account_select")
 
-                # Show bulk result message if any
-                if st.session_state.get('bulk_result'):
-                    st.info(st.session_state.bulk_result)
-                    st.session_state.bulk_result = None
+            # Show bulk result message if any
+            if st.session_state.get('bulk_result'):
+                st.info(st.session_state.bulk_result)
+                st.session_state.bulk_result = None
 
-                if st.session_state.get('quick_add_account_msg'):
-                    st.success(st.session_state.pop('quick_add_account_msg'))
+            if st.session_state.get('quick_add_account_msg'):
+                st.success(st.session_state.pop('quick_add_account_msg'))
 
         # Review each transaction - header row
         st.divider()
@@ -1983,10 +1985,11 @@ elif selected_tab == "Review & Categorize":
 
         st.divider()
 
+        render_save_review(client_id, transactions)
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            if st.button("Post Transactions", type="primary"):
+            if st.button("Post Transactions", type="primary", disabled=dbconn.READ_ONLY):
                 plan = classify_review_rows(
                     transactions,
                     is_included=lambda t: st.session_state.get(row_key("include", t), t.get('include', True)),
@@ -2015,7 +2018,7 @@ elif selected_tab == "Review & Categorize":
                         created += 1
 
                     except Exception as e:
-                        errors.append(f"{t['description'][:30]}: {e}")
+                        errors.append(f"{t['description'][:30]}: {save_error_message(e)}")
                         failed.append(t)  # keep failed rows so they can be retried
 
                 # Kept in the review list: included-but-uncategorized + failed rows.
@@ -2023,11 +2026,14 @@ elif selected_tab == "Review & Categorize":
                 uncategorized = len(plan.uncategorized)
                 skipped = len(plan.excluded)
 
+                if created == 0:
+                    remaining = transactions
+
                 # A run that posted nothing at all is a mistake, not a finished
                 # import — every row was deselected or blocked. Discarding the
                 # batch there means re-uploading to try again, so keep the rows
                 # and say what happened instead.
-                if created == 0 and skipped:
+                if created == 0 and skipped == len(transactions):
                     st.session_state.transactions_to_review = transactions
                     st.session_state.post_result = {
                         'level': 'warning',
@@ -2079,7 +2085,7 @@ elif selected_tab == "Review & Categorize":
                 t["staged_id"] for t in transactions if t.get("staged_id")
             ]
             if (_loaded_staged_ids
-                    and st.button("Dismiss staged rows", key="dismiss_loaded_staged")):
+                    and st.button("Dismiss staged rows", key="dismiss_loaded_staged", disabled=dbconn.READ_ONLY)):
                 st.session_state.confirm_dismiss_staged = {
                     "client_id": client_id,
                     "ids": _loaded_staged_ids,
@@ -2258,7 +2264,7 @@ elif selected_tab == "Import History":
                     "Undo import and review again",
                     type="primary",
                     key=f"reverse_import_batch_{selected_batch}",
-                    disabled=(not preview.can_reverse or not reversal_reason or not confirmed),
+                    disabled=(dbconn.READ_ONLY or not preview.can_reverse or not reversal_reason or not confirmed),
                 ):
                     try:
                         result = reverse_import_batch(
@@ -2426,6 +2432,6 @@ elif selected_tab == "Learned Patterns":
                 st.caption(f"Used {rule['times_used']}x")
 
             with col4:
-                if st.button("Delete", key=f"del_rule_{rule['id']}"):
+                if st.button("Delete", key=f"del_rule_{rule['id']}", disabled=dbconn.READ_ONLY):
                     PatternLearner.delete_rule(rule['id'], client_id)
                     st.rerun()

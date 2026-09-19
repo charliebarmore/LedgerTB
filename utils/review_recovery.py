@@ -1,0 +1,97 @@
+"""Explicit saved-review controls. No cloud requests or posting side effects."""
+
+import streamlit as st
+from database import connection as dbconn
+from services import import_review_drafts as drafts
+from utils.recovery import save_error_message
+
+
+def render_saved_review(client_id, duplicate_check):
+    info = drafts.summary(client_id)
+    message = st.session_state.pop("review_saved_message", None)
+    if message:
+        st.success(message)
+    if not info:
+        return
+    with st.expander(
+        f"Saved review · {info['row_count']} row{'s' if info['row_count'] != 1 else ''} · {info['saved_at'].replace('T', ' ')}"
+    ):
+        st.caption(
+            "This is the last copy you saved in this encrypted book. Later edits and posting do not update it. Resuming checks current import history again; it never sends information to AI."
+        )
+        has_rows = bool(st.session_state.get("transactions_to_review"))
+        replace = (
+            st.checkbox(
+                "Replace the review currently in this window",
+                key="review_resume_replace",
+            )
+            if has_rows
+            else True
+        )
+        if st.button("Resume saved review", disabled=not replace, key="review_resume"):
+            try:
+                loaded = drafts.load(client_id)
+                if not loaded:
+                    raise drafts.ReviewConflict(
+                        "The saved copy was removed in another window."
+                    )
+                revision, rows = loaded
+                duplicate_check(rows)
+                st.session_state.transactions_to_review = rows
+                st.session_state.review_saved_revision = revision
+                st.session_state.import_complete = False
+                st.session_state.import_complete_msg = None
+                st.session_state.bulk_rows = []
+                st.session_state.review_saved_message = (
+                    "Saved review resumed. Check the included rows before posting."
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(
+                    str(exc)
+                    if isinstance(exc, drafts.ReviewConflict)
+                    else save_error_message(exc)
+                )
+        confirm = st.checkbox("Discard the saved copy", key="review_discard_confirm")
+        if st.button(
+            "Discard saved review",
+            disabled=dbconn.READ_ONLY or not confirm,
+            key="review_discard",
+        ):
+            try:
+                drafts.discard(client_id, info["revision"])
+                st.session_state.pop("review_saved_revision", None)
+                st.session_state.review_saved_message = (
+                    "Saved copy discarded. The current review is unchanged."
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(
+                    str(exc)
+                    if isinstance(exc, drafts.ReviewConflict)
+                    else save_error_message(exc)
+                )
+
+
+def render_save_review(client_id, rows):
+    st.caption(
+        "Review edits stay in this window until you save a copy. Save before closing the app or switching books or clients."
+    )
+    if st.button("Save review for later", disabled=dbconn.READ_ONLY, key="review_save"):
+        try:
+            revision = drafts.save(
+                client_id,
+                rows,
+                expected_revision=st.session_state.get("review_saved_revision"),
+            )
+            st.session_state.review_saved_revision = revision
+            st.session_state.review_saved_message = (
+                "Review saved in this encrypted book. No transactions were posted."
+            )
+            st.rerun()
+        except Exception as exc:
+            st.error(
+                str(exc)
+                if isinstance(exc, drafts.ReviewConflict)
+                else save_error_message(exc)
+            )

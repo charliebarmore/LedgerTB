@@ -12,8 +12,7 @@ This page displays a comprehensive trial balance worksheet with columns for:
 import streamlit as st
 import sys
 from pathlib import Path
-from datetime import date, datetime
-from io import BytesIO
+from datetime import date
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -25,7 +24,7 @@ from utils.client_selector import render_client_selector
 from utils.ui import apply_default_on_change
 from utils.unlock import require_unlock
 from utils import icons
-from utils.export import set_excel_literal
+from utils.recovery import save_error_message
 from utils.fiscal_dates import fiscal_year_ending_year
 from models.client import Client
 from models.fiscal_period import FiscalPeriod
@@ -33,12 +32,8 @@ from models.reports import ReportGenerator
 from models.journal_entry import JournalEntry, JournalEntryLine
 from models.account import Account
 from models.audit_log import AuditLog
-from services.close_package import (
-    build_close_package,
-    build_close_package_pdf,
-    consistent_export_window,
-    load_close_package_snapshot,
-)
+from services.worksheet_export_cache import worksheet_exports
+
 from services.preferences import get_date_format
 
 
@@ -73,6 +68,7 @@ if worksheet_scope.changed:
         "last_year",
         "show_aje_form",
         "aje_prefill_account",
+        "_worksheet_exports",
     ):
         st.session_state.pop(key, None)
 
@@ -85,6 +81,8 @@ if not client:
 
 st.title("Trial Balance Worksheet")
 st.caption(f"Viewing: **{client.name}**")
+if dbconn.READ_ONLY:
+    st.info("Read-only book. You can view the worksheet; year setup, closing and journal changes are disabled.")
 
 # Period Selection
 st.markdown("---")
@@ -110,9 +108,13 @@ with col1:
                 pass
 
     # Add current year if not present
-    if current_year not in available_years:
+    if current_year not in available_years and not dbconn.READ_ONLY:
         FiscalPeriod.ensure_periods_exist(client_id, current_year, fiscal_year_end)
         available_years.add(current_year)
+
+    if not available_years:
+        st.info("No fiscal year has been set up. Reopen with editing access to add a year.")
+        st.stop()
 
     # Allow user to add other years (show last 5 years as options).
     # bottom-align so the "Add Year" popover lines up with the selectbox box
@@ -141,7 +143,7 @@ with col1:
                     key=worksheet_key("add_year_select"),
                 )
                 if st.button(
-                    "Add Fiscal Year", key=worksheet_key("add_year_btn")
+                    "Add Fiscal Year", key=worksheet_key("add_year_btn"), disabled=dbconn.READ_ONLY
                 ):
                     FiscalPeriod.generate_periods(client_id, new_year, fiscal_year_end)
                     st.success(f"Added FY {new_year}")
@@ -150,7 +152,8 @@ with col1:
                 st.info("All recent years are already available")
 
     # Ensure periods exist for selected year
-    FiscalPeriod.ensure_periods_exist(client_id, selected_year, fiscal_year_end)
+    if not dbconn.READ_ONLY:
+        FiscalPeriod.ensure_periods_exist(client_id, selected_year, fiscal_year_end)
 
 # Get periods for selected year
 all_periods = FiscalPeriod.get_all(client_id)
@@ -274,7 +277,7 @@ if year_period:
             st.warning(f"FY {selected_year} is closed. Entries in this year are locked.")
         with lock_cols[1]:
             if st.button(
-                "Reopen year", key=worksheet_key("reopen_year"),
+                "Reopen year", key=worksheet_key("reopen_year"), disabled=dbconn.READ_ONLY,
                 width="stretch",
             ):
                 FiscalPeriod.set_closed(year_period.id, False, client_id)
@@ -308,7 +311,7 @@ if year_period:
             if st.button(
                 "Close fiscal year", key=worksheet_key("close_year"),
                 type="primary",
-                disabled=(not explicitly_confirmed or not warnings_acknowledged or
+                disabled=(dbconn.READ_ONLY or not explicitly_confirmed or not warnings_acknowledged or
                           not exception_reason_complete),
             ):
                 try:
@@ -323,6 +326,8 @@ if year_period:
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
+                except Exception as exc:
+                    st.error(save_error_message(exc))
 
 st.markdown("---")
 
@@ -346,7 +351,7 @@ if not rows:
     with col1:
         if st.button(
             "+ Add AJE", type="primary",
-            key=worksheet_key("add_aje_empty"),
+            key=worksheet_key("add_aje_empty"), disabled=dbconn.READ_ONLY,
         ):
             st.session_state.show_aje_form = True
             st.session_state.aje_prefill_account = None
@@ -509,133 +514,34 @@ else:
 st.markdown("---")
 
 # Action buttons
+exports = None
+if rows:
+    try:
+        exports = worksheet_exports(st.session_state, client_id, period_start, period_end, show_all=show_all)
+    except Exception:
+        st.warning("Exports could not be prepared. Your worksheet is unchanged. Try Refresh again.")
+if dbconn.READ_ONLY and rows:
+    st.caption("Downloads from a read-only session are not added to the book’s audit history.")
 btn_cols = st.columns([1, 1, 1, 1, 3])
 
 with btn_cols[0]:
     if st.button(
-        "+ Add AJE", type="primary", key=worksheet_key("add_aje_btn")
+        "+ Add AJE", type="primary", key=worksheet_key("add_aje_btn"), disabled=dbconn.READ_ONLY
     ):
         st.session_state.show_aje_form = True
         st.session_state.aje_prefill_account = None
 
 with btn_cols[1]:
     # Export to Excel with formulas
-    if rows:
-        # Create Excel with formulas
-        output = BytesIO()
-        with st.spinner("Generating Excel..."):
-            import openpyxl
-            from openpyxl.styles import Font, Alignment, Border, Side
-
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Trial Balance Worksheet"
-
-            # Header
-            set_excel_literal(ws['A1'], f"Trial Balance Worksheet - {client.name}")
-            ws['A1'].font = Font(bold=True, size=14)
-            set_excel_literal(
-                ws['A2'],
-                f"Period: {period_start.strftime('%m/%d/%Y')} - {period_end.strftime('%m/%d/%Y')}",
-            )
-            set_excel_literal(
-                ws['A3'], f"Generated: {datetime.now().strftime('%m/%d/%Y %H:%M')}",
-            )
-
-            # Column headers starting at row 5
-            headers = ['Acct #', 'Account Name', 'Type', 'Beg Bal Dr', 'Beg Bal Cr',
-                       'Debits', 'Credits', 'Unadj TB Dr', 'Unadj TB Cr',
-                       'AJE Dr', 'AJE Cr', 'Adj TB Dr', 'Adj TB Cr',
-                       'PY Final Dr', 'PY Final Cr']
-
-            for col_idx, header in enumerate(headers, 1):
-                cell = set_excel_literal(ws.cell(row=5, column=col_idx), header)
-                cell.font = Font(bold=True)
-                cell.alignment = Alignment(horizontal='center')
-
-            # Data rows starting at row 6. Keep accounts that existed only in
-            # PY (for example a closed P&L account) visible with blank current
-            # columns rather than silently dropping their comparison.
-            data_start_row = 6
-            export_rows = [(row, py_by_account.get(row.account_number, {}))
-                           for row in rows]
-            export_rows.extend(
-                (None, comparison_row)
-                for comparison_row in py_comparison['accounts']
-                if comparison_row['account_number'] not in current_account_numbers
-                and (comparison_row.get('prior_debit') or
-                     comparison_row.get('prior_credit'))
-            )
-            for row_idx, (row, comparison_row) in enumerate(
-                export_rows, data_start_row
-            ):
-                set_excel_literal(
-                    ws.cell(row=row_idx, column=1),
-                    row.account_number if row else comparison_row['account_number'],
-                )
-                set_excel_literal(
-                    ws.cell(row=row_idx, column=2),
-                    row.account_name if row else comparison_row['name'],
-                )
-                set_excel_literal(
-                    ws.cell(row=row_idx, column=3),
-                    row.account_type if row else comparison_row['type'],
-                )
-                ws.cell(row=row_idx, column=4,
-                        value=row.beginning_dr if row and row.beginning_dr > 0 else None)
-                ws.cell(row=row_idx, column=5,
-                        value=row.beginning_cr if row and row.beginning_cr > 0 else None)
-                ws.cell(row=row_idx, column=6,
-                        value=row.period_debits if row and row.period_debits > 0 else None)
-                ws.cell(row=row_idx, column=7,
-                        value=row.period_credits if row and row.period_credits > 0 else None)
-                # Unadjusted TB uses formulas
-                ws.cell(row=row_idx, column=8, value=f"=MAX(D{row_idx}-E{row_idx}+F{row_idx}-G{row_idx},0)")
-                ws.cell(row=row_idx, column=9, value=f"=MAX(E{row_idx}-D{row_idx}+G{row_idx}-F{row_idx},0)")
-                ws.cell(row=row_idx, column=10,
-                        value=row.aje_debits if row and row.aje_debits > 0 else None)
-                ws.cell(row=row_idx, column=11,
-                        value=row.aje_credits if row and row.aje_credits > 0 else None)
-                # Adjusted TB uses formulas
-                ws.cell(row=row_idx, column=12, value=f"=MAX(H{row_idx}-I{row_idx}+J{row_idx}-K{row_idx},0)")
-                ws.cell(row=row_idx, column=13, value=f"=MAX(I{row_idx}-H{row_idx}+K{row_idx}-J{row_idx},0)")
-                ws.cell(row=row_idx, column=14,
-                        value=comparison_row.get('prior_debit') or None)
-                ws.cell(row=row_idx, column=15,
-                        value=comparison_row.get('prior_credit') or None)
-
-            # Totals row with formulas
-            totals_row = data_start_row + len(export_rows)
-            set_excel_literal(ws.cell(row=totals_row, column=1), "TOTALS")
-            ws.cell(row=totals_row, column=1).font = Font(bold=True)
-
-            for col_idx in range(4, 16):
-                col_letter = openpyxl.utils.get_column_letter(col_idx)
-                ws.cell(row=totals_row, column=col_idx, value=f"=SUM({col_letter}{data_start_row}:{col_letter}{totals_row-1})")
-                ws.cell(row=totals_row, column=col_idx).font = Font(bold=True)
-
-            # Format number columns
-            for row in ws.iter_rows(min_row=data_start_row, max_row=totals_row, min_col=4, max_col=15):
-                for cell in row:
-                    cell.number_format = '#,##0.00'
-
-            # Adjust column widths
-            ws.column_dimensions['A'].width = 10
-            ws.column_dimensions['B'].width = 30
-            ws.column_dimensions['C'].width = 10
-            for col in ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
-                        'N', 'O']:
-                ws.column_dimensions[col].width = 12
-
-            wb.save(output)
-            output.seek(0)
+    if exports:
+        output = exports["worksheet"]
 
         st.download_button(
             label="Export Excel",
             data=output,
             file_name=f"TB_Worksheet_{client.name}_{period_end.strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            on_click=AuditLog.log_event,
+            on_click=None if dbconn.READ_ONLY else AuditLog.log_event,
             args=(client_id, "EXPORT", "trial_balance_worksheet_export", {
                 "format": "xlsx", "period_start": period_start,
                 "period_end": period_end, "row_count": len(rows),
@@ -647,22 +553,10 @@ with btn_cols[2]:
     # final TB, all transactions, AJEs, and cash-account activity.
     # PDF is the file/record copy; the Excel workbook is for further work.
     # (Replaced the old attest-claw bridge export.)
-    if rows:
-        with consistent_export_window():
-            export_rows, _ = ReportGenerator.trial_balance_worksheet(
-                client_id, period_start, period_end
-            )
-            export_snapshot = load_close_package_snapshot(
-                client_id, period_start, period_end
-            )
-            pdf = build_close_package_pdf(
-                client_id, client.name, period_start, period_end, export_rows,
-                snapshot=export_snapshot,
-            )
-            package = build_close_package(
-                client_id, client.name, period_start, period_end, export_rows,
-                snapshot=export_snapshot,
-            )
+    if exports:
+        pdf = exports["pdf"]
+        package = exports["package"]
+        export_rows = exports["close_rows"]
         st.download_button(
             label="Close Package (PDF)",
             data=pdf,
@@ -671,7 +565,7 @@ with btn_cols[2]:
             help="One PDF: summary with tie-outs, income statement, balance "
                  "sheet, final trial balance, transactions, adjusting entries, "
                  "receipts & disbursements",
-            on_click=AuditLog.log_event,
+            on_click=None if dbconn.READ_ONLY else AuditLog.log_event,
             args=(client_id, "EXPORT", "close_package_export", {
                 "format": "pdf",
                 "period_start": period_start, "period_end": period_end,
@@ -684,7 +578,7 @@ with btn_cols[2]:
             file_name=f"ClosePackage_{client.name}_{period_end.strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             help="Same package as an Excel workbook, one sheet per report",
-            on_click=AuditLog.log_event,
+            on_click=None if dbconn.READ_ONLY else AuditLog.log_event,
             args=(client_id, "EXPORT", "close_package_export", {
                 "format": "xlsx",
                 "period_start": period_start, "period_end": period_end,
@@ -694,6 +588,7 @@ with btn_cols[2]:
 
 with btn_cols[3]:
     if st.button("Refresh", key=worksheet_key("refresh_btn")):
+        st.session_state.pop("_worksheet_exports", None)
         st.rerun()
 
 # AJE Entry Form (modal-like experience)
@@ -804,7 +699,7 @@ if st.session_state.get('show_aje_form', False):
         submit_cols = st.columns([1, 1, 4])
 
         with submit_cols[0]:
-            submitted = st.form_submit_button("Save AJE", type="primary")
+            submitted = st.form_submit_button("Save AJE", type="primary", disabled=dbconn.READ_ONLY)
 
         with submit_cols[1]:
             if st.form_submit_button("Cancel"):
@@ -864,5 +759,5 @@ if st.session_state.get('show_aje_form', False):
                 st.session_state.show_aje_form = False
                 st.session_state.aje_prefill_account = None
                 st.rerun()
-            except ValueError as e:
-                st.error(str(e))
+            except Exception as e:
+                st.error(save_error_message(e))

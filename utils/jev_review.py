@@ -96,8 +96,10 @@ def render_jev_review(transactions, accounts, client_id, prepared, *, chosen=Non
             st.info("Some selected evidence is too long for Jev and will remain for local review.")
     run = st.button("Ask Jev for suggestions", disabled=not (chosen and consent and api_key), key="jev_run")
     has_error = any(cache.get(k, {}).get("error") and cache[k].get("retryable", True) for k in requested)
-    retry = st.button("Retry failed Jev requests", disabled=not (has_error and consent and api_key), key="jev_retry",
-                      help="Wait after a rate limit. A retry may incur another charge, including after a timeout.")
+    retry = False
+    if has_error:
+        retry = st.button("Retry failed Jev requests", disabled=not (consent and api_key), key="jev_retry",
+                          help="Wait after a rate limit. A retry may incur another charge, including after a timeout.")
     if run or retry:
         st.session_state["jev_known_rows"] = sorted(set(st.session_state.get("jev_known_rows", ())) | set(chosen))
         with st.spinner("Jev is reviewing the selected information..."):

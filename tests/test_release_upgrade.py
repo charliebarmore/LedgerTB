@@ -22,7 +22,7 @@ def _restore_audit(conn):
                    new_values={"restored_from": "synthetic prior-release book"})
 
 
-@pytest.mark.parametrize("last_migration", [23, 24])
+@pytest.mark.parametrize("last_migration", [23, 24, 25])
 def test_populated_prior_schema_upgrades_and_restores_without_rewriting_history(
     db, tmp_path, monkeypatch, last_migration,
 ):
@@ -92,7 +92,7 @@ def test_populated_prior_schema_upgrades_and_restores_without_rewriting_history(
                     assert actual[:len(expected)] == expected
                 else:
                     assert actual == expected, table
-            assert cur.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 25
+            assert cur.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 26
 
     assert_history()
     restore_backup(backup.database_path, tmp_path / "backups", audit=_restore_audit)

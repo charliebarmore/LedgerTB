@@ -1630,3 +1630,20 @@ def test_chart_of_accounts_warns_about_unresolved_subtypes(
     assert "need a statement grouping" in warnings or \
         "needs a statement grouping" in warnings
     assert "3100 Owner's Capital" in warnings
+
+
+def test_readonly_journal_disables_entry_and_correction_actions(client_id,accounts,monkeypatch):
+    from database import connection as dbconn
+    _select_client(monkeypatch,client_id)
+    post_transaction(client_id,dict(date=date(2026,1,1),amount=-12.34,description='Fictional read-only import'),
+                     accounts['expense'],accounts['cash'],batch_id='readonly')
+    monkeypatch.setattr(dbconn,'READ_ONLY',True)
+    page=AppTest.from_file(page_path('pages/2_Journal_Entries.py'),default_timeout=60)
+    page.session_state['journal_active_tab']='New Entry'
+    page.run()
+    assert not page.exception
+    assert next(b for b in page.button if b.label=='Save Entry').disabled
+    page.session_state['journal_active_tab']='View Entries'
+    page.run()
+    assert not page.exception
+    assert next(b for b in page.button if b.label=='Change category').disabled

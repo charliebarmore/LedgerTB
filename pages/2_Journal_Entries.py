@@ -25,6 +25,7 @@ from utils.client_context import (
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
+from utils.recovery import save_error_message
 from constants import EntryType
 from utils.fiscal_dates import fiscal_year_bounds
 from utils.dates import display_date
@@ -82,6 +83,8 @@ date_format = get_date_format()
 client_id = render_client_selector()
 
 st.title("Journal Entries")
+if dbconn.READ_ONLY:
+    st.info("Read-only book. Journal entries can be viewed, but editing and posting are disabled.")
 
 # Quick link to Trial Balance Worksheet
 st.page_link("pages/1_Trial_Balance_Worksheet.py", label="Back to Trial Balance Worksheet", icon=icons.TRIAL_BALANCE)
@@ -324,7 +327,7 @@ def render_delete_control(entry_id: int):
     """Require a second, explicit action before permanently deleting an entry."""
     confirmation_key = "confirm_delete_entry_id"
     if st.session_state.get(confirmation_key) != entry_id:
-        if st.button("Delete", key=f"delete_entry_{entry_id}"):
+        if st.button("Delete", key=f"delete_entry_{entry_id}", disabled=dbconn.READ_ONLY):
             st.session_state[confirmation_key] = entry_id
             st.rerun()
         return
@@ -332,7 +335,7 @@ def render_delete_control(entry_id: int):
     st.warning("Permanently delete this entry?")
     confirm_col, cancel_col = st.columns(2)
     with confirm_col:
-        if st.button("Confirm delete", key=f"confirm_delete_entry_{entry_id}"):
+        if st.button("Confirm delete", key=f"confirm_delete_entry_{entry_id}", disabled=dbconn.READ_ONLY):
             try:
                 JournalEntry.delete(entry_id, client_id=client_id)
                 st.session_state.pop(confirmation_key, None)
@@ -340,6 +343,8 @@ def render_delete_control(entry_id: int):
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
+            except Exception as exc:
+                st.error(save_error_message(exc))
     with cancel_col:
         if st.button("Cancel", key=f"cancel_delete_entry_{entry_id}"):
             st.session_state.pop(confirmation_key, None)
@@ -369,12 +374,12 @@ def render_entry_lines(entry):
 def render_entry_controls(entry: JournalEntry, import_link: dict | None):
     if import_link:
         st.caption("Imported posting")
-        if st.button("Change category", key=f"correct_import_{entry.id}"):
+        if st.button("Change category", key=f"correct_import_{entry.id}", disabled=dbconn.READ_ONLY):
             st.session_state.correct_import_entry_id = entry.id
             st.rerun()
         return
 
-    if st.button("Edit", key=f"edit_entry_{entry.id}"):
+    if st.button("Edit", key=f"edit_entry_{entry.id}", disabled=dbconn.READ_ONLY):
         load_entry_for_edit(entry)
         # Land the user on the form, or the click appears to do nothing.
         st.session_state.journal_active_tab = "New Entry"
@@ -477,7 +482,7 @@ if correction_entry_id:
                 if st.button(
                     "Post correction",
                     type="primary",
-                    disabled=not target_account_id or not reason.strip(),
+                    disabled=dbconn.READ_ONLY or not target_account_id or not reason.strip(),
                     key=f"post_correction_{correction_entry_id}",
                 ):
                     try:
@@ -495,6 +500,8 @@ if correction_entry_id:
                         st.rerun()
                     except ValueError as exc:
                         st.error(str(exc))
+                    except Exception as exc:
+                        st.error(save_error_message(exc))
             with cancel_col:
                 if st.button("Cancel", key=f"cancel_correction_{correction_entry_id}"):
                     st.session_state.pop("correct_import_entry_id", None)
@@ -717,7 +724,7 @@ if active_view == "New Entry":
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Save Entry", type="primary"):
+        if st.button("Save Entry", type="primary", disabled=dbconn.READ_ONLY):
             # Validate and save
             lines = []
             for line in st.session_state.je_lines:
@@ -770,7 +777,7 @@ if active_view == "New Entry":
                     reset_entry_form()
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error saving entry: {e}")
+                    st.error(save_error_message(e))
 
     with col2:
         if st.button("Clear Form"):
@@ -1086,7 +1093,7 @@ elif active_view == "Reverse Entry":
         )
         if st.button(
             "Post reversal", type="primary",
-            disabled=not confirmed or bool(pending_corrections),
+            disabled=dbconn.READ_ONLY or not confirmed or bool(pending_corrections),
             key="post_reversal",
         ):
             try:
@@ -1098,6 +1105,8 @@ elif active_view == "Reverse Entry":
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
+            except Exception as exc:
+                st.error(save_error_message(exc))
 
 
 elif active_view == "Templates & recurring":
@@ -1217,7 +1226,7 @@ if active_view == "Drafts":
                         try:
                             _entry_id = d.approve()
                         except Exception as exc:
-                            st.error(f"Could not post the draft: {exc}")
+                            st.error(save_error_message(exc))
                         else:
                             result = (
                                 f"Draft #{d.id} posted as journal entry #{_entry_id}."
