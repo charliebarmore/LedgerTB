@@ -290,5 +290,5 @@ def test_restore_clears_obsolete_review_only_after_success(client_id, accounts, 
     monkeypatch.setattr(backups, 'restore_backup', original)
     next(b for b in at.button if b.label == 'Restore selected backup').click().run()
     assert not at.exception
-    assert not at.session_state.filtered_state.get('transactions_to_review')
-    assert not at.session_state.filtered_state.get('jev_results')
+    assert 'transactions_to_review' not in at.session_state or not at.session_state['transactions_to_review']
+    assert 'jev_results' not in at.session_state or not at.session_state['jev_results']

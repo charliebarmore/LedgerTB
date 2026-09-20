@@ -44,7 +44,7 @@ jobs:
         shell: bash
         run: |
           mapfile -d '' tracked_files < <(git ls-files -z)
-          detect-secrets-hook -- "${tracked_files[@]}"
+          detect-secrets-hook --baseline .secrets.baseline -- "${tracked_files[@]}"
 
       - name: Audit release dependencies
         run: |

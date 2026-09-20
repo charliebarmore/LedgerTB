@@ -30,3 +30,18 @@ technical details.
 
 For ordinary bugs and feature requests that do not expose data or cross a
 security boundary, use the public GitHub issue tracker instead.
+
+## Secret scanning
+
+CI scans every tracked file with detect-secrets 1.5.0. `.secrets.baseline`
+contains individually reviewed false positives: content/commit hashes in
+synthetic evaluation evidence, two local artifact paths, and explicit dummy
+credentials in test fixtures. Entries match a value fingerprint and filename;
+they do not exempt directories or suppress new values. No real credential is
+approved for the baseline. Review each new finding before adding an exception;
+do not blindly regenerate it to make CI pass.
+
+The local gitleaks hook retains its default rules. Its additional exception
+requires both the exact `.secrets.baseline` path and a `hashed_secret` field
+containing a 40-character SHA-1 fingerprint; other fields and files remain
+scanned. This prevents the scanner's own fingerprints being mistaken for keys.

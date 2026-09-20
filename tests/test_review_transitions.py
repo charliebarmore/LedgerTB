@@ -9,6 +9,18 @@ def button(at, label):
     return next(b for b in at.button if b.label == label)
 
 
+def snapshot(at):
+    """Use public keyed access across pinned and open-range AppTest versions."""
+    rows = at.session_state['transactions_to_review']
+    state = {'transactions_to_review': rows}
+    for row in rows:
+        for kind in ('include', 'xfer', 'cat'):
+            key = row_key(kind, row)
+            if key in at.session_state:
+                state[key] = at.session_state[key]
+    return review_snapshot(state)
+
+
 def csv_page(monkeypatch, client_id, accounts, fake_credential_vault):
     at, row = page(monkeypatch, client_id, accounts, fake_credential_vault)
     at.session_state['import_active_tab'] = 'Upload CSV'
@@ -46,7 +58,7 @@ from utils.review_guard import mark_saved, review_is_dirty, review_snapshot
 
 def test_replacement_cancel_preserves_old_review_and_import(monkeypatch, client_id, accounts, fake_credential_vault):
     at, _ = csv_page(monkeypatch, client_id, accounts, fake_credential_vault)
-    original = review_snapshot(at.session_state.filtered_state)
+    original = snapshot(at)
     button(at, 'Continue to review').click().run()
     assert not at.exception
     assert at.session_state['transactions_to_review'] == original
@@ -71,7 +83,7 @@ def test_replacement_saves_old_copy_before_installing_candidate(monkeypatch, cli
 @pytest.mark.parametrize('failure', ['conflict', 'storage'])
 def test_save_failure_blocks_replacement(monkeypatch, client_id, accounts, fake_credential_vault, failure):
     at, _ = csv_page(monkeypatch, client_id, accounts, fake_credential_vault)
-    old = review_snapshot(at.session_state.filtered_state)
+    old = snapshot(at)
     if failure == 'conflict':
         revision = drafts.save(client_id, [dict(old[0], description='Other window copy')])
     else:
@@ -156,7 +168,7 @@ def test_client_cancel_resets_selector_and_save_stays_with_old_client(monkeypatc
     assert not at.exception and at.session_state['selected_client_id'] == second
     assert drafts.load(client_id)[1][0]['description'] == 'Unfinished fictional review'
     assert drafts.summary(second) is None
-    assert not at.session_state.filtered_state.get('transactions_to_review')
+    assert 'transactions_to_review' not in at.session_state or not at.session_state['transactions_to_review']
     assert JournalEntry.count(client_id) == JournalEntry.count(second) == 0
 
 
