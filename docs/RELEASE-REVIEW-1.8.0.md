@@ -24,8 +24,8 @@ Keep failed runs and distinguish source/browser/frozen/native acceptance.
 | Browser import/provider/recovery/export/book isolation | Both initial and patched 1.8.0 bundles passed all 22 checks at 1360×768 with simulated providers |
 | Native close/cancel/quit, recovery and posting | Actual Cocoa/WebKit source window passed close-Cancel preservation, application quit/reopen, separate saved/recovery copies, resume and selective posting |
 | Native reconciliation and PDF/XLSX save/cancel | Reconciliation opened with the correct -$33.33 balance; clearing/completion unverified. Excel opened a real NSSavePanel; save/cancel and PDF dialog acceptance unverified |
-| Signed/notarized Mac artifact and installed upgrade | Clean candidate signed with Developer ID and secure timestamp; strict signature verification passes outside the sandbox. Apple submission approved by Charlie; installed app remains untouched |
-| Windows pinned tests, frozen runtime and installer | Pending on candidate source |
+| Signed/notarized Mac artifact and installed upgrade | Developer ID signature, secure timestamp, accepted Apple notarization, stapled ticket validation and Gatekeeper acceptance pass. Installed upgrade remains unverified; installed app untouched |
+| Windows pinned tests, frozen runtime and installer | 901 passed, two POSIX-only skips in 1465.90s; encryption, build, frozen selfcheck, compressed routes, window shutdown and Inno installer all passed |
 | Windows native install/upgrade/save dialogs | Requires a suitable Windows desktop |
 
 Artifacts for this pass: `output/release-candidate-20260920/`. Earlier evidence
@@ -60,8 +60,10 @@ Both platform locks now use 2.12.0, the matching pair required by package
 metadata. The Mac environment matches all 90 pins and passes `pip check`.
 [Security CI passes on a351c3e](https://github.com/charliebarmore/LedgerTB/actions/runs/35531639095),
 including both lockfile audits, tracked-file secret scanning and workflow audit.
-[Final Windows qualification](https://github.com/charliebarmore/LedgerTB/actions/runs/35531662865)
-remains in progress. [Final Linux tests and browser acceptance passed](https://github.com/charliebarmore/LedgerTB/actions/runs/35531639105).
+[Final Windows qualification passed](https://github.com/charliebarmore/LedgerTB/actions/runs/35531662865):
+901 tests passed, two POSIX-only checks skipped and three performance checks
+deselected in 1465.90s. All seven build/runtime/installer signals and both artifact
+uploads passed. [Final Linux tests and browser acceptance passed](https://github.com/charliebarmore/LedgerTB/actions/runs/35531639105).
 
 Scanner review identified 389 commit/content hashes, two artifact paths and 15
 synthetic credential lines. The detect-secrets baseline matches value and path;
@@ -89,6 +91,18 @@ the Python app subsequently timed out after 26,379 seconds despite a requested
 10-second limit. This is a tool failure, not evidence of an application hang.
 No native reconciliation completion or PDF/Excel save/cancel pass is claimed.
 Use the remaining walkthrough below on the disposable fixture before release.
+The task-owned native acceptance window was closed after preserving evidence;
+prior user previews remain untouched. Reopen the existing fictional book with:
+
+```sh
+.macos-venv/bin/python scripts/native_pilot_driver.py \
+  --data-dir output/release-candidate-20260920/native-books \
+  --output output/release-candidate-20260920/manual-walkthrough
+```
+
+Unlock with `fictional-packaged-acceptance-only`. This source fixture uses a fake
+vault; it does not establish acceptance of the signed app’s real credential vault.
+Keep exports inside its `manual-walkthrough/downloads/` directory.
 
 1. Finish the Checking reconciliation at -$33.33: clear the sole Cedar entry,
    save, verify zero difference, acknowledge and complete.
@@ -105,11 +119,26 @@ candidate is `output/release-candidate-20260920/dist-final/LedgerTB.app`.
 `acceptance-final/LedgerTB.app` is a separate modified test copy and must never
 be distributed. Production contains no fake-vault backend or `.env` files;
 `source-provenance-final.json` records its 132 matched files and lock fingerprints.
-The signed 113 MiB archive `LedgerTB-1.8.0-notary.zip` has SHA-256
+The signed 105,073,373-byte archive `LedgerTB-1.8.0-notary.zip` has SHA-256
 `a47d923d6cd4b4a73fdb049d1636b51ecfaa4b133593d54e303419671aee7346`.
 Automatic approval review initially blocked the Apple upload; Charlie explicitly
-approved it later on September 20. Notarization outcome and the post-stapling
-archive hash must be recorded before distribution. No release is published.
+approved it later on September 20. Submission
+`ce953e33-d251-4290-be94-f3aeb514bb46` is Accepted. Stapling/validation succeeded
+and Gatekeeper reports `accepted`, `source=Notarized Developer ID`.
+The final distribution archive is `LedgerTB-1.8.0-macos-arm64.zip` (105,079,255 bytes),
+SHA-256 `7bb1bfe143f057ebdbe80c33970ba3b440917ec7166513743f55148586748ef2`.
+The extracted archive also passes strict signature verification, ticket validation
+and Gatekeeper assessment; all 132 recorded source/config/legal hashes match.
+No release is published.
+
+The Windows installer from that same source and CI run is
+`windows-final/LedgerTB-1.8.0-windows-x64-setup.exe` (79,750,025 bytes), SHA-256
+`4374221b0e3bf80d21e3d89b50f4a2e0dec488400b37213336673887334f2bf0`.
+Its PE certificate table is empty: this installer is unsigned. CI qualification
+and a scripted artifact download do not establish browser-download, SmartScreen,
+native install/upgrade or save-dialog acceptance on a user's Windows desktop.
+Ship the installer, not the diagnostic Windows bundle ZIP. Both final artifact
+hashes are retained locally in `SHA256SUMS` and `artifact-manifest.json`.
 
 The sandbox prevented OCR and Developer ID verification. Repeating those checks
 outside it, while keeping the credential vault disabled, passed OCR/signature
