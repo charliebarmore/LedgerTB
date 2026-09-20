@@ -1,0 +1,172 @@
+{
+  "business_context": "Fictional Cedar Design Studio, a service business. Buys paper, office supplies and software for client design work. No inventory resale. All examples are synthetic. Do not assume purchases are business-related without evidence.",
+  "accounts": [
+    {
+      "number": "6100",
+      "name": "Office Supplies",
+      "type": "Expense"
+    },
+    {
+      "number": "6200",
+      "name": "Software Subscriptions",
+      "type": "Expense"
+    },
+    {
+      "number": "6300",
+      "name": "Business Meals",
+      "type": "Expense"
+    },
+    {
+      "number": "6400",
+      "name": "Travel",
+      "type": "Expense"
+    },
+    {
+      "number": "6900",
+      "name": "Miscellaneous Expense",
+      "type": "Expense"
+    },
+    {
+      "number": "4000",
+      "name": "Design Service Revenue",
+      "type": "Revenue"
+    },
+    {
+      "number": "4900",
+      "name": "Other Income",
+      "type": "Revenue"
+    }
+  ],
+  "training_patterns": [
+    [
+      "CEDAR PAPER",
+      "6100"
+    ],
+    [
+      "PIXELCLOUD",
+      "6200"
+    ],
+    [
+      "HARBOR CAFE",
+      "6300"
+    ],
+    [
+      "WINGJET",
+      "6400"
+    ]
+  ],
+  "cases": [
+    {
+      "id": "clear_supplies",
+      "kind": "control",
+      "description": "CEDAR PAPER \u2014 receipt: printer paper for studio",
+      "amount": -43.21,
+      "expected": "6100"
+    },
+    {
+      "id": "clear_software",
+      "kind": "control",
+      "description": "PIXELCLOUD monthly studio design software subscription",
+      "amount": -29.99,
+      "expected": "6200"
+    },
+    {
+      "id": "clear_revenue",
+      "kind": "control",
+      "description": "Client paid invoice for completed design services",
+      "amount": 800,
+      "expected": "4000"
+    },
+    {
+      "id": "ambiguous_market",
+      "kind": "ambiguous_merchant",
+      "description": "MEGAMART MARKETPLACE",
+      "amount": -187.32,
+      "expected": "insufficient_information"
+    },
+    {
+      "id": "ambiguous_wallet",
+      "kind": "ambiguous_merchant",
+      "description": "PAYWALLET *JUNIPER",
+      "amount": -95,
+      "expected": "insufficient_information"
+    },
+    {
+      "id": "ambiguous_cafe",
+      "kind": "missing_receipt",
+      "description": "HARBOR CAFE; no receipt or business purpose available",
+      "amount": -82,
+      "expected": "insufficient_information"
+    },
+    {
+      "id": "transfer_savings",
+      "kind": "transfer",
+      "description": "Online transfer from business checking to business savings",
+      "amount": -2500,
+      "expected": "transfer_review"
+    },
+    {
+      "id": "card_payment",
+      "kind": "transfer",
+      "description": "Payment of company credit card balance from checking",
+      "amount": -1300,
+      "expected": "transfer_review"
+    },
+    {
+      "id": "owner_funding",
+      "kind": "transfer",
+      "description": "Owner capital contribution into company checking",
+      "amount": 5000,
+      "expected": "transfer_review"
+    },
+    {
+      "id": "refund_supplies",
+      "kind": "refund",
+      "description": "CEDAR PAPER refund for returned business printer paper originally booked to Office Supplies",
+      "amount": 43.21,
+      "expected": "6100"
+    },
+    {
+      "id": "refund_travel",
+      "kind": "refund",
+      "description": "WINGJET refund for cancelled business flight originally booked to Travel",
+      "amount": 280,
+      "expected": "6400"
+    },
+    {
+      "id": "refund_unknown",
+      "kind": "refund",
+      "description": "REFUND MEGAMART; original purchase and receipt unavailable",
+      "amount": 61,
+      "expected": "insufficient_information"
+    },
+    {
+      "id": "mixed_office_personal",
+      "kind": "mixed_purchase",
+      "description": "CEDAR PAPER receipt: $40 studio paper plus $30 owner's personal school supplies",
+      "amount": -70,
+      "expected": "split_required"
+    },
+    {
+      "id": "mixed_categories",
+      "kind": "mixed_purchase",
+      "description": "MEGAMART receipt: $50 office stationery and $100 annual design software license",
+      "amount": -150,
+      "expected": "split_required"
+    },
+    {
+      "id": "missing_paper_receipt",
+      "kind": "missing_receipt",
+      "description": "CEDAR PAPER; receipt missing, buyer cannot confirm whether business stationery or personal gifts",
+      "amount": -110,
+      "expected": "insufficient_information"
+    },
+    {
+      "id": "missing_flight_purpose",
+      "kind": "missing_receipt",
+      "description": "WINGJET; flight booking, purpose unknown, could be personal vacation or business travel",
+      "amount": -340,
+      "expected": "insufficient_information"
+    }
+  ]
+}

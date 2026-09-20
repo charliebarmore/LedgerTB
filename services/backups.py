@@ -511,6 +511,8 @@ def _restore_backup_locked(database_path: Path, backup_dir: Optional[Path] = Non
         conn = db_connection.open_keyed(temp)
         try:
             create_tables(conn)
+            from services.book_generation import rotate
+            rotate(conn)
             audit(conn)
             conn.commit()
         finally:

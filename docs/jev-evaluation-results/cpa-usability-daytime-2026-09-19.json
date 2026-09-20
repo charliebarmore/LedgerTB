@@ -1,0 +1,136 @@
+{
+  "date": "2026-09-19",
+  "recorded_at": "2026-09-19T11:17:22.641018+00:00",
+  "source_commit": "841f44d",
+  "harness_commits": [
+    "d5fe150",
+    "63cd281"
+  ],
+  "branch": "codex/jev-overnight",
+  "functional": {
+    "tests": "875",
+    "skipped": "5",
+    "failures": "0",
+    "errors": "0",
+    "time": "767.935"
+  },
+  "performance": {
+    "tests": "3",
+    "skipped": "0",
+    "failures": "0",
+    "errors": "0",
+    "time": "42.254"
+  },
+  "browser_runs": {
+    "review-small-final": {
+      "checks": 18,
+      "viewport": {
+        "width": 1024,
+        "height": 600
+      },
+      "artifact": "output/daytime-usability-20260919/review-small-final/result.json"
+    },
+    "review-laptop-settled": {
+      "checks": 18,
+      "viewport": {
+        "width": 1360,
+        "height": 768
+      },
+      "artifact": "output/daytime-usability-20260919/review-laptop-settled/result.json"
+    },
+    "source-laptop-final": {
+      "checks": 22,
+      "viewport": {
+        "width": 1360,
+        "height": 768
+      },
+      "artifact": "output/daytime-usability-20260919/source-laptop-final/result.json"
+    },
+    "packaged-small-settled": {
+      "checks": 22,
+      "viewport": {
+        "width": 1024,
+        "height": 600
+      },
+      "artifact": "output/daytime-usability-20260919/packaged-small-settled/result.json",
+      "bundled_source_files_matching_checkout": 20,
+      "posted_integer_cents": 3333,
+      "encrypted": true
+    },
+    "packaged-laptop-final": {
+      "checks": 22,
+      "viewport": {
+        "width": 1360,
+        "height": 768
+      },
+      "artifact": "output/daytime-usability-20260919/packaged-laptop-final/result.json",
+      "bundled_source_files_matching_checkout": 20,
+      "posted_integer_cents": 3333,
+      "encrypted": true
+    }
+  },
+  "browser": {
+    "agent_browser": "0.36.0",
+    "chrome_for_testing": "149.0.7827.55",
+    "headed": true,
+    "webmcp": false
+  },
+  "preview": {
+    "app": "output/daytime-usability-20260919/dist/LedgerTB.app",
+    "launcher": "output/daytime-usability-20260919/walkthrough/launch.py",
+    "native_startup": [
+      {
+        "pid": 48055,
+        "id": 125276,
+        "title": "",
+        "bounds": {
+          "X": 0.0,
+          "Height": 500.0,
+          "Y": 580.0,
+          "Width": 500.0
+        },
+        "onscreen": false
+      },
+      {
+        "pid": 48055,
+        "id": 125274,
+        "title": "LedgerTB",
+        "bounds": {
+          "X": -1640.0,
+          "Height": 900.0,
+          "Y": 60.0,
+          "Width": 1360.0
+        },
+        "onscreen": true
+      }
+    ]
+  },
+  "installed_app": {
+    "unchanged": true,
+    "baseline": {
+      "path": "/Applications/LedgerTB.app",
+      "version": "1.7.2",
+      "plist_mtime_ns": 1788773329000000000,
+      "executable_mtime_ns": 1788773370000000000
+    },
+    "current": {
+      "path": "/Applications/LedgerTB.app",
+      "version": "1.7.2",
+      "plist_mtime_ns": 1788773329000000000,
+      "executable_mtime_ns": 1788773370000000000
+    }
+  },
+  "selfcheck": {
+    "exit_code": 1,
+    "only_failure": "keyring backend: unexpected packaged_fake_vault.Keyring",
+    "imports_without_reported_failure": 51,
+    "release_gate_pass": false
+  },
+  "limits": [
+    "Fictional data and simulated providers only; no live accuracy, latency or cost qualification.",
+    "Native startup verified separately from frozen-server Chromium workflows.",
+    "No real keychain, installed upgrade or Windows acceptance.",
+    "Failed browser attempts and harness synchronization corrections retained in artifact directory.",
+    "No push, publication, release or installed-app replacement."
+  ]
+}

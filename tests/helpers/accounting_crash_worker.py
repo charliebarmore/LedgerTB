@@ -18,6 +18,7 @@ from utils import secure_store
 
 if __name__ == "__main__":
     config = json.loads(Path(sys.argv[1]).read_text())
+    Path(sys.argv[1]).with_suffix('.ready').write_text('Fixture imports complete\n')
     dbc.set_active_key(config["key"])
     secure_store.get_secret = lambda *a: None
     original_write = AuditLog.write

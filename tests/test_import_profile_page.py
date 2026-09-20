@@ -156,3 +156,26 @@ def test_chart_of_accounts_csv_is_intercepted(client_id, accounts, monkeypatch):
     page.checkbox(key="csv_coa_override").check().run()
     assert not page.exception
     assert any(sb.key == "csv_date_column" for sb in page.selectbox)
+
+
+def test_upload_totals_match_review_amounts(client_id, accounts, monkeypatch):
+    content = ('Date,Description,Amount\n2026-09-01,Cedar Paper,-33.33\n'
+               '2026-09-02,Unknown marketplace,-48.25\n')
+    page = _page(monkeypatch, client_id, accounts['cash'], content=content)
+    assert not page.exception
+    metrics = {m.label: m.value for m in page.metric}
+    assert metrics['Total disbursements'] == '$81.58'
+    assert metrics['Total receipts'] == '$0.00'
+    assert metrics['Net change'] == '$-81.58'
+
+
+def test_confirm_resets_when_amount_interpretation_changes(client_id, accounts, monkeypatch):
+    page = _page(monkeypatch, client_id, accounts['cash'],
+                 content='Date,Description,Amount\n2026-09-01,Paper,-33.33\n')
+    page.checkbox(key='csv_confirm').check().run()
+    assert page.checkbox(key='csv_confirm').value
+    page.selectbox(key='csv_sign_convention').set_value('flip').run()
+    assert not page.exception
+    assert not page.checkbox(key='csv_confirm').value
+    assert next(b for b in page.button if b.label == 'Continue to review').disabled
+    assert next(m for m in page.metric if m.label == 'Net change').value == '$33.33'

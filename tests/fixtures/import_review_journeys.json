@@ -1,0 +1,11 @@
+[
+  {"description":"Cedar Paper receipt: office-only printer paper", "amount_cents":-3333,"source":"cash","outcome":"expense","post":true},
+  {"description":"Blue Finch customer invoice payment", "amount_cents":25000,"source":"cash","outcome":"revenue","post":true},
+  {"description":"Cedar Paper refund for returned office paper", "amount_cents":1234,"source":"cash","outcome":"expense","post":true},
+  {"description":"Maple Card purchase: documented office toner", "amount_cents":-7654,"source":"credit_card","outcome":"expense","post":true},
+  {"description":"Maple Card refund: returned office toner", "amount_cents":2000,"source":"credit_card","outcome":"expense","post":true},
+  {"description":"Transfer from checking to company credit card", "amount_cents":-15000,"source":"cash","outcome":"transfer_review","manual":"credit_card","post":true},
+  {"description":"Unknown marketplace; no receipt or business purpose", "amount_cents":-4825,"source":"cash","outcome":"insufficient_information","post":false},
+  {"description":"Mixed groceries and office supplies; separate allocation needed", "amount_cents":-9100,"source":"credit_card","outcome":"split_required","post":false},
+  {"description":"Owner contribution into business checking", "amount_cents":50000,"source":"cash","outcome":"insufficient_information","manual":"equity","post":true}
+]

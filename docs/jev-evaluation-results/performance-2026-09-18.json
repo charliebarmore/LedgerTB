@@ -1,0 +1,38 @@
+{
+  "source_commit": "87aa093",
+  "results": "3 passed; original thresholds unchanged",
+  "review": {
+    "rows": 10000,
+    "rendered_row_controls": 50,
+    "pages": 200,
+    "app_test_render_seconds": 0.599,
+    "cloud_input_preparations": 0,
+    "provider_calls": 0
+  },
+  "baselines": [
+    {
+      "case": "10k journal entries",
+      "metrics": {
+        "audit_count_seconds": 0.0096,
+        "audit_page_render_seconds": 0.2078,
+        "fixture_seconds": 0.1995,
+        "journal_page_render_seconds": 0.2015,
+        "last_page_query_seconds": 0.0134,
+        "summary_seconds": 0.0181
+      }
+    },
+    {
+      "case": "50k CSV",
+      "metrics": {
+        "csv_bytes": 2972359,
+        "duplicate_classification_seconds": 4.0641,
+        "known_duplicates": 9,
+        "parse_seconds": 8.3349,
+        "peak_mib": 45.05,
+        "rows": 50000
+      }
+    }
+  ],
+  "artifact": "output/jev-overnight-20260917/final-performance-tests.log",
+  "qualification": "Single serial fixture measurements, not production workload calibration or browser paint/startup timing. Earlier heavily contended attempts failed timing checks and are retained."
+}

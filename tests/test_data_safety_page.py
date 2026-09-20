@@ -264,3 +264,31 @@ def test_a_successful_rotation_reports_what_it_checked(db, monkeypatch):
     captions = " ".join(c.value for c in at.caption)
     assert "the old one" in captions and "does not" in captions
     assert verify_passphrase(dbconn.DATABASE_PATH, "a-recorded-passphrase") is True
+
+
+def test_restore_clears_obsolete_review_only_after_success(client_id, accounts, monkeypatch):
+    from database import connection as dbconn
+    from services import backups
+    from utils.import_review import ensure_row_ids
+    import utils.client_selector as selector
+    _patched(monkeypatch)
+    monkeypatch.setattr(selector, 'render_client_selector', lambda: client_id)
+    backups.create_backup()
+    at = AppTest.from_file(page_path('pages/9_Data_Safety.py'), default_timeout=30)
+    at.session_state['_import_state_client_id'] = (str(dbconn.DATABASE_PATH), client_id)
+    at.session_state['transactions_to_review'] = ensure_row_ids([dict(date='2026-01-01', description='Review after backup', amount=-10, bank_account_id=accounts['cash'])])
+    at.session_state['jev_results'] = {'obsolete': 'opinion'}
+    at.run()
+    next(t for t in at.text_input if t.label == 'Type RESTORE to replace the live database').input('RESTORE').run()
+    original = backups.restore_backup
+    def fail(*a, **kw):
+        raise OSError('Synthetic failed restore')
+    monkeypatch.setattr(backups, 'restore_backup', fail)
+    next(b for b in at.button if b.label == 'Restore selected backup').click().run()
+    assert not at.exception and at.error
+    assert len(at.session_state['transactions_to_review']) == 1
+    monkeypatch.setattr(backups, 'restore_backup', original)
+    next(b for b in at.button if b.label == 'Restore selected backup').click().run()
+    assert not at.exception
+    assert 'transactions_to_review' not in at.session_state or not at.session_state['transactions_to_review']
+    assert 'jev_results' not in at.session_state or not at.session_state['jev_results']

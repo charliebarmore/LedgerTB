@@ -18,10 +18,12 @@ from models.import_profile import (
 from models.transaction import ImportedTransaction
 from services.csv_import import (
     CSVImporter, SIGN_CONVENTIONS, apply_sign_convention, default_sign_convention,
-    summarize_import_amounts,
+    summarize_csv_preview,
 )
 from services.import_verification import check_row_continuity, verify_against_source
 from services.categorization import CategorizationService
+from utils.jev_review import prepare_jev_review
+from utils.ai_review import current_config, prepare_other_reviews, render_controls, render_results
 from services.pattern_learning import PatternLearner
 from services.posting import post_transaction
 from services.import_identity import classify_import_duplicates, hash_source
@@ -38,13 +40,20 @@ from database import init_database
 from database import connection as dbconn
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
-from utils.ui import apply_default_on_change, is_parking_account, view_switcher
+from utils.ui import apply_default_on_change, is_parking_account, view_switcher, review_action_panels
 from utils import icons
+from utils.recovery import save_error_message
+from utils.review_recovery import render_saved_review, render_save_review
+from utils.review_guard import queue_replacement, render_pending_replacement, confirm_transition
+from utils.review_lifecycle import (protect_restored_book, checkpoint_active_review,
+                                    render_recovery_copies, conflicting_saved_review)
 from utils.import_review import (
     classify_review_rows,
     ensure_row_ids,
     row_key,
     scope_import_state_to_client,
+    reconcile_review_rows,
+    apply_bulk_category,
 )
 
 # Initialize database
@@ -75,6 +84,22 @@ scope_import_state_to_client(
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
+protect_restored_book()
+checkpoint_active_review()
+render_pending_replacement(client_id)
+if st.session_state.get('_review_clear_pending'):
+    decision = confirm_transition(client_id, 'clear', 'clearing this review')
+    if decision == 'cancel':
+        st.session_state.pop('_review_clear_pending', None)
+        st.rerun()
+    if decision == 'continue':
+        st.session_state.transactions_to_review = []
+        checkpoint_active_review()
+        st.session_state.pop('_review_clear_pending', None)
+        st.rerun()
+    st.stop()
+if dbconn.READ_ONLY:
+    st.info("Read-only book. You can inspect and prepare a review; posting and saved-book changes are disabled.")
 profile_message = st.session_state.pop("import_profile_message", None)
 if profile_message:
     st.success(profile_message)
@@ -328,7 +353,7 @@ if selected_tab == "Upload CSV":
                         )
                         new_acct_desc = st.text_input("Description (optional)", placeholder="e.g., ****1234")
 
-                        if st.form_submit_button("Add Account", type="primary"):
+                        if st.form_submit_button("Add Account", type="primary", disabled=dbconn.READ_ONLY):
                             if new_acct_number and new_acct_name:
                                 try:
                                     new_account = Account(
@@ -494,387 +519,390 @@ if selected_tab == "Upload CSV":
             # Auto-detect columns
             detected = CSVImporter.detect_columns(columns)
 
-            if not multi_account_mode:
-                matched_profile = ImportProfile.match_for_columns(
-                    saved_profiles, columns
-                )
-                profile_by_id = {profile.id: profile for profile in saved_profiles}
-                # Profile ids are positive database integers, so zero is a
-                # stable visible sentinel. Streamlit renders a ``None`` option
-                # as a blank selectbox even when format_func supplies a label.
-                auto_profile_id = 0
-                profile_options = [auto_profile_id, *profile_by_id]
-                profile_versions = tuple(
-                    (profile.id, profile.updated_at.isoformat())
-                    for profile in saved_profiles
-                )
-                profile_choice_context = (
-                    selected_bank,
-                    hash_source(content.encode("utf-8")),
-                    profile_versions,
-                )
-                if (
-                    st.session_state.get("_csv_profile_choice_context")
-                    != profile_choice_context
-                ):
-                    st.session_state._csv_profile_choice_context = (
-                        profile_choice_context
+            with st.expander("Import settings · columns, signs and saved formats",
+                             expanded=not (detected["date"] and detected["description"]
+                                           and (detected["amount"] or detected["debit"] or detected["credit"]))):
+                if not multi_account_mode:
+                    matched_profile = ImportProfile.match_for_columns(
+                        saved_profiles, columns
                     )
-                    st.session_state.csv_import_profile_id = (
-                        matched_profile.id if matched_profile else auto_profile_id
+                    profile_by_id = {profile.id: profile for profile in saved_profiles}
+                    # Profile ids are positive database integers, so zero is a
+                    # stable visible sentinel. Streamlit renders a ``None`` option
+                    # as a blank selectbox even when format_func supplies a label.
+                    auto_profile_id = 0
+                    profile_options = [auto_profile_id, *profile_by_id]
+                    profile_versions = tuple(
+                        (profile.id, profile.updated_at.isoformat())
+                        for profile in saved_profiles
                     )
-                if st.session_state.get("csv_import_profile_id") not in profile_options:
-                    st.session_state.csv_import_profile_id = auto_profile_id
-
-                profile_col, sign_col = st.columns(2)
-                with profile_col:
-                    selected_profile_id = st.selectbox(
-                        "Import Format",
-                        options=profile_options,
-                        format_func=lambda profile_id: (
-                            profile_by_id[profile_id].name
-                            if profile_id != auto_profile_id
-                            else "Auto-detect (no saved format)"
-                        ),
-                        key="csv_import_profile_id",
-                        help=(
-                            "Formats are matched from the complete set and order of "
-                            "CSV column headers. Choose one manually to override."
-                        ),
+                    profile_choice_context = (
+                        selected_bank,
+                        hash_source(content.encode("utf-8")),
+                        profile_versions,
                     )
-                    selected_profile = profile_by_id.get(selected_profile_id)
-
-                profile_version = (
-                    selected_profile.updated_at.isoformat()
-                    if selected_profile
-                    else None
-                )
-                apply_default_on_change(
-                    "csv_sign_convention",
-                    depends_on=(selected_bank, selected_profile_id, profile_version),
-                    default_value=(
-                        selected_profile.sign_convention
-                        if selected_profile
-                        else default_sign_convention(
-                            selected_account.type if selected_account else None
+                    if (
+                        st.session_state.get("_csv_profile_choice_context")
+                        != profile_choice_context
+                    ):
+                        st.session_state._csv_profile_choice_context = (
+                            profile_choice_context
                         )
-                    ),
-                )
-                with sign_col:
-                    sign_convention = st.selectbox(
-                        "Sign Convention",
-                        options=list(SIGN_CONVENTIONS.keys()),
-                        format_func=lambda x: SIGN_CONVENTIONS[x],
-                        key="csv_sign_convention",
-                        help=(
-                            "Loaded from the selected format, or inferred from the "
-                            "account type when no format matches."
+                        st.session_state.csv_import_profile_id = (
+                            matched_profile.id if matched_profile else auto_profile_id
+                        )
+                    if st.session_state.get("csv_import_profile_id") not in profile_options:
+                        st.session_state.csv_import_profile_id = auto_profile_id
+
+                    profile_col, sign_col = st.columns(2)
+                    with profile_col:
+                        selected_profile_id = st.selectbox(
+                            "Import Format",
+                            options=profile_options,
+                            format_func=lambda profile_id: (
+                                profile_by_id[profile_id].name
+                                if profile_id != auto_profile_id
+                                else "Auto-detect (no saved format)"
+                            ),
+                            key="csv_import_profile_id",
+                            help=(
+                                "Formats are matched from the complete set and order of "
+                                "CSV column headers. Choose one manually to override."
+                            ),
+                        )
+                        selected_profile = profile_by_id.get(selected_profile_id)
+
+                    profile_version = (
+                        selected_profile.updated_at.isoformat()
+                        if selected_profile
+                        else None
+                    )
+                    apply_default_on_change(
+                        "csv_sign_convention",
+                        depends_on=(selected_bank, selected_profile_id, profile_version),
+                        default_value=(
+                            selected_profile.sign_convention
+                            if selected_profile
+                            else default_sign_convention(
+                                selected_account.type if selected_account else None
+                            )
                         ),
                     )
+                    with sign_col:
+                        sign_convention = st.selectbox(
+                            "Sign Convention",
+                            options=list(SIGN_CONVENTIONS.keys()),
+                            format_func=lambda x: SIGN_CONVENTIONS[x],
+                            key="csv_sign_convention",
+                            help=(
+                                "Loaded from the selected format, or inferred from the "
+                                "account type when no format matches."
+                            ),
+                        )
 
-                if matched_profile and selected_profile_id == matched_profile.id:
-                    st.caption(
-                        f'Automatically matched saved format **{matched_profile.name}** '
-                        "from this file's columns."
+                    if matched_profile and selected_profile_id == matched_profile.id:
+                        st.caption(
+                            f'Automatically matched saved format **{matched_profile.name}** '
+                            "from this file's columns."
+                        )
+                    elif selected_profile:
+                        st.caption(f"Using saved format **{selected_profile.name}**.")
+                    elif saved_profiles:
+                        st.info(
+                            "No saved format matched these columns. Review the detected "
+                            "mapping, select a format manually, or save this as a new format."
+                        )
+
+                resolved_mapping = {
+                    "applied": False,
+                    "missing": [],
+                    "date_column": detected["date"] or columns[0],
+                    "description_column": detected["description"] or columns[0],
+                    "amount_format": (
+                        AMOUNT_FORMAT_SINGLE
+                        if detected["amount"]
+                        else AMOUNT_FORMAT_SEPARATE
+                    ),
+                    "amount_column": detected["amount"],
+                    "debit_column": detected["debit"],
+                    "credit_column": detected["credit"],
+                }
+                if selected_profile and not multi_account_mode:
+                    resolved_mapping = selected_profile.resolve_columns(columns, detected)
+
+                # Keyed mapping widgets retain their own value. Reapply defaults only
+                # when the file, account, or saved profile changes; ordinary reruns
+                # must preserve the user's deliberate edits.
+                mapping_context = (
+                    hash_source(content.encode("utf-8")),
+                    selected_bank,
+                    selected_profile.id if selected_profile else None,
+                    selected_profile.updated_at.isoformat() if selected_profile else None,
+                )
+                if st.session_state.get("_csv_mapping_context") != mapping_context:
+                    st.session_state._csv_mapping_context = mapping_context
+                    st.session_state.csv_date_column = resolved_mapping["date_column"]
+                    st.session_state.csv_description_column = resolved_mapping[
+                        "description_column"
+                    ]
+                    st.session_state.csv_amount_format = (
+                        "Single Amount Column"
+                        if resolved_mapping["amount_format"] == AMOUNT_FORMAT_SINGLE
+                        else "Separate Debit/Credit Columns"
                     )
-                elif selected_profile:
-                    st.caption(f"Using saved format **{selected_profile.name}**.")
-                elif saved_profiles:
-                    st.info(
-                        "No saved format matched these columns. Review the detected "
-                        "mapping, select a format manually, or save this as a new format."
+                    st.session_state.csv_amount_column = (
+                        resolved_mapping["amount_column"] or columns[0]
+                    )
+                    st.session_state.csv_debit_column = (
+                        resolved_mapping["debit_column"] or "(none)"
+                    )
+                    st.session_state.csv_credit_column = (
+                        resolved_mapping["credit_column"] or "(none)"
+                    )
+                    st.session_state.csv_source_account_column = (
+                        "(none - assign all to one account)"
                     )
 
-            resolved_mapping = {
-                "applied": False,
-                "missing": [],
-                "date_column": detected["date"] or columns[0],
-                "description_column": detected["description"] or columns[0],
-                "amount_format": (
-                    AMOUNT_FORMAT_SINGLE
-                    if detected["amount"]
-                    else AMOUNT_FORMAT_SEPARATE
-                ),
-                "amount_column": detected["amount"],
-                "debit_column": detected["debit"],
-                "credit_column": detected["credit"],
-            }
-            if selected_profile and not multi_account_mode:
-                resolved_mapping = selected_profile.resolve_columns(columns, detected)
-
-            # Keyed mapping widgets retain their own value. Reapply defaults only
-            # when the file, account, or saved profile changes; ordinary reruns
-            # must preserve the user's deliberate edits.
-            mapping_context = (
-                hash_source(content.encode("utf-8")),
-                selected_bank,
-                selected_profile.id if selected_profile else None,
-                selected_profile.updated_at.isoformat() if selected_profile else None,
-            )
-            if st.session_state.get("_csv_mapping_context") != mapping_context:
-                st.session_state._csv_mapping_context = mapping_context
-                st.session_state.csv_date_column = resolved_mapping["date_column"]
-                st.session_state.csv_description_column = resolved_mapping[
-                    "description_column"
-                ]
-                st.session_state.csv_amount_format = (
-                    "Single Amount Column"
-                    if resolved_mapping["amount_format"] == AMOUNT_FORMAT_SINGLE
-                    else "Separate Debit/Credit Columns"
-                )
-                st.session_state.csv_amount_column = (
-                    resolved_mapping["amount_column"] or columns[0]
-                )
-                st.session_state.csv_debit_column = (
-                    resolved_mapping["debit_column"] or "(none)"
-                )
-                st.session_state.csv_credit_column = (
-                    resolved_mapping["credit_column"] or "(none)"
-                )
-                st.session_state.csv_source_account_column = (
-                    "(none - assign all to one account)"
-                )
-
-            # A single amount column plus date and description is the common
-            # case and needs no decision from the user — summarize it and keep
-            # the controls available but out of the way. Separate debit/credit
-            # columns still require choosing the radio below, so that counts as
-            # unresolved and stays visible.
-            mapping_is_clear = bool(
-                resolved_mapping["date_column"]
-                and resolved_mapping["description_column"]
-                and (
-                    resolved_mapping["amount_column"]
-                    if resolved_mapping["amount_format"] == AMOUNT_FORMAT_SINGLE
-                    else resolved_mapping["debit_column"]
-                    or resolved_mapping["credit_column"]
-                )
-            )
-
-            if mapping_is_clear:
-                if resolved_mapping["applied"]:
-                    amount_summary = (
+                # A single amount column plus date and description is the common
+                # case and needs no decision from the user — summarize it and keep
+                # the controls available but out of the way. Separate debit/credit
+                # columns still require choosing the radio below, so that counts as
+                # unresolved and stays visible.
+                mapping_is_clear = bool(
+                    resolved_mapping["date_column"]
+                    and resolved_mapping["description_column"]
+                    and (
                         resolved_mapping["amount_column"]
                         if resolved_mapping["amount_format"] == AMOUNT_FORMAT_SINGLE
-                        else "/".join(
-                            column
-                            for column in (
-                                resolved_mapping["debit_column"],
-                                resolved_mapping["credit_column"],
-                            )
-                            if column
-                        )
+                        else resolved_mapping["debit_column"]
+                        or resolved_mapping["credit_column"]
                     )
-                    st.caption(
-                        "Saved mapping applied — "
-                        f"date: **{resolved_mapping['date_column']}**, "
-                        f"description: **{resolved_mapping['description_column']}**, "
-                        f"amount: **{amount_summary}**"
-                    )
-                else:
-                    st.caption(
-                        f"Detected columns — date: **{resolved_mapping['date_column']}**, "
-                        f"description: **{resolved_mapping['description_column']}**, "
-                        f"amount: **{resolved_mapping['amount_column'] or 'debit/credit'}**"
-                    )
-                mapping_area = st.expander("Change column mapping", expanded=False)
-            else:
-                st.subheader("Column Mapping")
-                st.caption("Some columns could not be detected — map them to the required fields.")
-                mapping_area = st.container()
-
-            if selected_profile and resolved_mapping["missing"]:
-                missing_columns = ", ".join(resolved_mapping["missing"])
-                st.warning(
-                    "The saved column mapping was not applied because this file is missing: "
-                    f"{missing_columns}. The saved sign setting remains active; review the "
-                    "detected columns, then update the profile if this is the bank's new format."
                 )
 
-            with mapping_area:
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    date_col = st.selectbox(
-                        "Date Column",
-                        options=columns,
-                        key="csv_date_column",
-                    )
-
-                    desc_col = st.selectbox(
-                        "Description Column",
-                        options=columns,
-                        key="csv_description_column",
-                    )
-
-                    # Source account column for multi-account mode
-                    if multi_account_mode:
-                        source_account_col_selection = st.selectbox(
-                            "Source Account Column",
-                            options=["(none - assign all to one account)"] + columns,
-                            index=0,
-                            key="csv_source_account_column",
-                            help="Column that identifies which account each transaction is from. Select 'none' if your CSV doesn't have this."
+                if mapping_is_clear:
+                    if resolved_mapping["applied"]:
+                        amount_summary = (
+                            resolved_mapping["amount_column"]
+                            if resolved_mapping["amount_format"] == AMOUNT_FORMAT_SINGLE
+                            else "/".join(
+                                column
+                                for column in (
+                                    resolved_mapping["debit_column"],
+                                    resolved_mapping["credit_column"],
+                                )
+                                if column
+                            )
                         )
-                        if source_account_col_selection == "(none - assign all to one account)":
-                            source_account_col = None
-                        else:
-                            source_account_col = source_account_col_selection
-
-                with col2:
-                    amount_type = st.radio(
-                        "Amount Format",
-                        options=["Single Amount Column", "Separate Debit/Credit Columns"],
-                        key="csv_amount_format",
-                    )
-
-                    if amount_type == "Single Amount Column":
-                        amount_col = st.selectbox(
-                            "Amount Column",
-                            options=columns,
-                            key="csv_amount_column",
+                        st.caption(
+                            "Saved mapping applied — "
+                            f"date: **{resolved_mapping['date_column']}**, "
+                            f"description: **{resolved_mapping['description_column']}**, "
+                            f"amount: **{amount_summary}**"
                         )
-                        debit_col = None
-                        credit_col = None
                     else:
-                        amount_col = None
-                        debit_col = st.selectbox(
-                            "Debit/Withdrawal Column",
-                            options=['(none)'] + columns,
-                            key="csv_debit_column",
+                        st.caption(
+                            f"Detected columns — date: **{resolved_mapping['date_column']}**, "
+                            f"description: **{resolved_mapping['description_column']}**, "
+                            f"amount: **{resolved_mapping['amount_column'] or 'debit/credit'}**"
                         )
-                        credit_col = st.selectbox(
-                            "Credit/Deposit Column",
-                            options=['(none)'] + columns,
-                            key="csv_credit_column",
+                    mapping_area = st.expander("Change column mapping", expanded=False)
+                else:
+                    st.subheader("Column Mapping")
+                    st.caption("Some columns could not be detected — map them to the required fields.")
+                    mapping_area = st.container()
+
+                if selected_profile and resolved_mapping["missing"]:
+                    missing_columns = ", ".join(resolved_mapping["missing"])
+                    st.warning(
+                        "The saved column mapping was not applied because this file is missing: "
+                        f"{missing_columns}. The saved sign setting remains active; review the "
+                        "detected columns, then update the profile if this is the bank's new format."
+                    )
+
+                with mapping_area:
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        date_col = st.selectbox(
+                            "Date Column",
+                            options=columns,
+                            key="csv_date_column",
                         )
-                        if debit_col == '(none)':
+
+                        desc_col = st.selectbox(
+                            "Description Column",
+                            options=columns,
+                            key="csv_description_column",
+                        )
+
+                        # Source account column for multi-account mode
+                        if multi_account_mode:
+                            source_account_col_selection = st.selectbox(
+                                "Source Account Column",
+                                options=["(none - assign all to one account)"] + columns,
+                                index=0,
+                                key="csv_source_account_column",
+                                help="Column that identifies which account each transaction is from. Select 'none' if your CSV doesn't have this."
+                            )
+                            if source_account_col_selection == "(none - assign all to one account)":
+                                source_account_col = None
+                            else:
+                                source_account_col = source_account_col_selection
+
+                    with col2:
+                        amount_type = st.radio(
+                            "Amount Format",
+                            options=["Single Amount Column", "Separate Debit/Credit Columns"],
+                            key="csv_amount_format",
+                        )
+
+                        if amount_type == "Single Amount Column":
+                            amount_col = st.selectbox(
+                                "Amount Column",
+                                options=columns,
+                                key="csv_amount_column",
+                            )
                             debit_col = None
-                        if credit_col == '(none)':
                             credit_col = None
+                        else:
+                            amount_col = None
+                            debit_col = st.selectbox(
+                                "Debit/Withdrawal Column",
+                                options=['(none)'] + columns,
+                                key="csv_debit_column",
+                            )
+                            credit_col = st.selectbox(
+                                "Credit/Deposit Column",
+                                options=['(none)'] + columns,
+                                key="csv_credit_column",
+                            )
+                            if debit_col == '(none)':
+                                debit_col = None
+                            if credit_col == '(none)':
+                                credit_col = None
 
-            if not multi_account_mode:
-                st.markdown("#### Saved Import Format")
-                suggested_name = (
-                    Path(st.session_state.get("csv_filename") or "CSV export")
-                    .stem.replace("_", " ").replace("-", " ").strip()
-                    or "CSV export"
-                )
-                name_context = (
-                    selected_bank,
-                    hash_source(content.encode("utf-8")),
-                    selected_profile.id if selected_profile else None,
-                    selected_profile.name if selected_profile else None,
-                )
-                if st.session_state.get("_csv_profile_name_context") != name_context:
-                    st.session_state._csv_profile_name_context = name_context
-                    st.session_state.csv_import_profile_name = (
-                        selected_profile.name if selected_profile else suggested_name[:80]
+                if not multi_account_mode:
+                    st.markdown("**Save this format (optional)**")
+                    suggested_name = (
+                        Path(st.session_state.get("csv_filename") or "CSV export")
+                        .stem.replace("_", " ").replace("-", " ").strip()
+                        or "CSV export"
                     )
+                    name_context = (
+                        selected_bank,
+                        hash_source(content.encode("utf-8")),
+                        selected_profile.id if selected_profile else None,
+                        selected_profile.name if selected_profile else None,
+                    )
+                    if st.session_state.get("_csv_profile_name_context") != name_context:
+                        st.session_state._csv_profile_name_context = name_context
+                        st.session_state.csv_import_profile_name = (
+                            selected_profile.name if selected_profile else suggested_name[:80]
+                        )
 
-                profile_name = st.text_input(
-                    "Format Name",
-                    key="csv_import_profile_name",
-                    max_chars=80,
-                    placeholder="e.g., Bank website download",
-                    help=(
-                        "Use a name that distinguishes where this export came from. "
-                        "Names must be unique within this account."
-                    ),
-                )
-
-                def build_import_profile(profile_id=None):
-                    return ImportProfile(
-                        id=profile_id,
-                        client_id=client_id,
-                        bank_account_id=selected_bank,
-                        name=profile_name,
-                        date_column=date_col,
-                        description_column=desc_col,
-                        amount_format=(
-                            AMOUNT_FORMAT_SINGLE
-                            if amount_type == "Single Amount Column"
-                            else AMOUNT_FORMAT_SEPARATE
+                    profile_name = st.text_input(
+                        "Format Name",
+                        key="csv_import_profile_name",
+                        max_chars=80,
+                        placeholder="e.g., Bank website download",
+                        help=(
+                            "Use a name that distinguishes where this export came from. "
+                            "Names must be unique within this account."
                         ),
-                        amount_column=amount_col,
-                        debit_column=debit_col,
-                        credit_column=credit_col,
-                        sign_convention=sign_convention,
-                        header_signature=ImportProfile.signature_for_columns(columns),
                     )
 
-                action_columns = st.columns([1, 1, 1])
-                with action_columns[0]:
-                    if selected_profile and st.button(
-                        "Update selected format", key="update_csv_import_profile"
-                    ):
-                        try:
-                            profile = build_import_profile(selected_profile.id)
-                            profile.save()
-                            st.session_state.pop("_csv_mapping_context", None)
-                            st.session_state.pop("_csv_profile_choice_context", None)
-                            st.session_state.import_profile_message = (
-                                f'Updated import format "{profile.name}".'
-                            )
-                            st.rerun()
-                        except ValueError as exc:
-                            st.error(str(exc))
-                with action_columns[1]:
-                    if st.button("Save as new format", key="save_csv_import_profile"):
-                        try:
-                            profile = build_import_profile()
-                            profile.save()
-                            st.session_state.pop("_csv_mapping_context", None)
-                            st.session_state.pop("_csv_profile_choice_context", None)
-                            st.session_state.import_profile_message = (
-                                f'Saved new import format "{profile.name}".'
-                            )
-                            st.rerun()
-                        except ValueError as exc:
-                            st.error(str(exc))
-                with action_columns[2]:
-                    if selected_profile:
-                        if (
-                            st.session_state.get("confirm_profile_delete_id")
-                            != selected_profile.id
+                    def build_import_profile(profile_id=None):
+                        return ImportProfile(
+                            id=profile_id,
+                            client_id=client_id,
+                            bank_account_id=selected_bank,
+                            name=profile_name,
+                            date_column=date_col,
+                            description_column=desc_col,
+                            amount_format=(
+                                AMOUNT_FORMAT_SINGLE
+                                if amount_type == "Single Amount Column"
+                                else AMOUNT_FORMAT_SEPARATE
+                            ),
+                            amount_column=amount_col,
+                            debit_column=debit_col,
+                            credit_column=credit_col,
+                            sign_convention=sign_convention,
+                            header_signature=ImportProfile.signature_for_columns(columns),
+                        )
+
+                    action_columns = st.columns([1, 1, 1])
+                    with action_columns[0]:
+                        if selected_profile and st.button(
+                            "Update selected format", key="update_csv_import_profile", disabled=dbconn.READ_ONLY
                         ):
-                            if st.button(
-                                "Remove selected format",
-                                key="remove_csv_import_profile",
-                            ):
-                                st.session_state.confirm_profile_delete_id = (
-                                    selected_profile.id
+                            try:
+                                profile = build_import_profile(selected_profile.id)
+                                profile.save()
+                                st.session_state.pop("_csv_mapping_context", None)
+                                st.session_state.pop("_csv_profile_choice_context", None)
+                                st.session_state.import_profile_message = (
+                                    f'Updated import format "{profile.name}".'
                                 )
                                 st.rerun()
-                        else:
-                            st.warning(f'Remove "{selected_profile.name}"?')
-                            confirm_col, cancel_col = st.columns(2)
-                            with confirm_col:
-                                if st.button("Remove", key="confirm_remove_csv_profile"):
-                                    ImportProfile.delete(
-                                        client_id, selected_profile.id
-                                    )
-                                    st.session_state.pop(
-                                        "confirm_profile_delete_id", None
-                                    )
-                                    st.session_state.pop("_csv_mapping_context", None)
-                                    st.session_state.pop(
-                                        "_csv_profile_choice_context", None
-                                    )
-                                    st.session_state.import_profile_message = (
-                                        f'Removed import format "{selected_profile.name}".'
+                            except ValueError as exc:
+                                st.error(str(exc))
+                    with action_columns[1]:
+                        if st.button("Save as new format", key="save_csv_import_profile", disabled=dbconn.READ_ONLY):
+                            try:
+                                profile = build_import_profile()
+                                profile.save()
+                                st.session_state.pop("_csv_mapping_context", None)
+                                st.session_state.pop("_csv_profile_choice_context", None)
+                                st.session_state.import_profile_message = (
+                                    f'Saved new import format "{profile.name}".'
+                                )
+                                st.rerun()
+                            except ValueError as exc:
+                                st.error(str(exc))
+                    with action_columns[2]:
+                        if selected_profile:
+                            if (
+                                st.session_state.get("confirm_profile_delete_id")
+                                != selected_profile.id
+                            ):
+                                if st.button(
+                                    "Remove selected format",
+                                    key="remove_csv_import_profile", disabled=dbconn.READ_ONLY,
+                                ):
+                                    st.session_state.confirm_profile_delete_id = (
+                                        selected_profile.id
                                     )
                                     st.rerun()
-                            with cancel_col:
-                                if st.button("Cancel", key="cancel_remove_csv_profile"):
-                                    st.session_state.pop(
-                                        "confirm_profile_delete_id", None
-                                    )
-                                    st.rerun()
-                st.caption(
-                    "Formats are private to this client and account. They store the "
-                    "CSV header, column mapping, and sign setting—not transaction data."
-                )
+                            else:
+                                st.warning(f'Remove "{selected_profile.name}"?')
+                                confirm_col, cancel_col = st.columns(2)
+                                with confirm_col:
+                                    if st.button("Remove", key="confirm_remove_csv_profile", disabled=dbconn.READ_ONLY):
+                                        ImportProfile.delete(
+                                            client_id, selected_profile.id
+                                        )
+                                        st.session_state.pop(
+                                            "confirm_profile_delete_id", None
+                                        )
+                                        st.session_state.pop("_csv_mapping_context", None)
+                                        st.session_state.pop(
+                                            "_csv_profile_choice_context", None
+                                        )
+                                        st.session_state.import_profile_message = (
+                                            f'Removed import format "{selected_profile.name}".'
+                                        )
+                                        st.rerun()
+                                with cancel_col:
+                                    if st.button("Cancel", key="cancel_remove_csv_profile"):
+                                        st.session_state.pop(
+                                            "confirm_profile_delete_id", None
+                                        )
+                                        st.rerun()
+                    st.caption(
+                        "Formats are private to this client and account. They store the "
+                        "CSV header, column mapping, and sign setting—not transaction data."
+                    )
 
             # When multi-account mode is on but no source column selected, show single account selector
             if multi_account_mode and source_account_col is None:
@@ -948,7 +976,7 @@ if selected_tab == "Upload CSV":
 
             # Confirmation section
             st.divider()
-            st.subheader("Confirm Import")
+            st.subheader("Check totals")
 
             # Summary figures only. The rows themselves are already shown in
             # full and scrollable further up, so repeating a first-3/last-3
@@ -962,19 +990,17 @@ if selected_tab == "Upload CSV":
             # against a statement. The detected date column is already reported
             # by the column-mapping summary above, so it is not repeated here.
             summary = None
-            if amount_col and amount_col in parsed_df.columns:
+            if multi_account_mode and source_account_col:
+                st.caption("Review totals by source account on the next step; each account has its own sign convention.")
+            else:
                 try:
-                    amounts = (parsed_df[amount_col].astype(str)
-                               .str.replace(',', '').str.replace('$', '')
-                               .str.replace('(', '-').str.replace(')', ''))
-                    amounts = pd.to_numeric(amounts, errors='coerce').dropna()
-                    summary = summarize_import_amounts(
-                        amounts.tolist(),
-                        sign_convention,
-                        selected_account.type if selected_account else None,
+                    summary = summarize_csv_preview(
+                        parsed_df, amount_column=amount_col, debit_column=debit_col,
+                        credit_column=credit_col, sign_convention=sign_convention,
+                        account_type=selected_account.type if selected_account else None,
                     )
-                except Exception:
-                    summary = None
+                except (ValueError, TypeError, ArithmeticError):
+                    st.warning("Totals are unavailable because an amount could not be read. Check the file and column mapping before continuing.")
 
             if summary:
                 col1, col2, col3, col4 = st.columns(4)
@@ -989,26 +1015,26 @@ if selected_tab == "Upload CSV":
             else:
                 st.metric("Total Rows", total_rows)
 
+            # A changed file or interpretation requires a fresh human check.
+            apply_default_on_change(
+                "csv_confirm",
+                depends_on=(hash_source(content.encode("utf-8")), selected_bank,
+                            date_col, desc_col, amount_col, debit_col, credit_col,
+                            sign_convention, source_account_col,
+                            tuple(sorted(st.session_state.get("account_mapping", {}).items()))),
+                default_value=False,
+            )
             # Confirmation checkbox
             confirmed = st.checkbox(
-                "I have reviewed the CSV data and column mappings above and confirm they are correct",
+                "The account, columns and totals are correct",
                 key="csv_confirm"
             )
 
             if not confirmed:
-                st.info("Please review the data above and check the confirmation box to proceed.")
+                st.button("Continue to review", type="primary", disabled=True)
             else:
-                if st.button("Parse Transactions", type="primary"):
+                if st.button("Continue to review", type="primary"):
                     try:
-                        # Clear any previously parsed transactions to avoid duplicates
-                        st.session_state.transactions_to_review = []
-                        # Retire the previous batch's "What's next?" screen. It is
-                        # shown by Review & Categorize with an st.stop(), so a
-                        # leftover flag hides the rows just parsed behind a stale
-                        # success message from the import before this one.
-                        st.session_state.import_complete = False
-                        st.session_state.import_complete_msg = None
-
                         # Parse with source account column if in multi-account mode
                         transactions = CSVImporter.parse_csv(
                             content,
@@ -1082,24 +1108,7 @@ if selected_tab == "Upload CSV":
 
                                 duplicate_count = apply_duplicate_checks(transactions)
 
-                                st.session_state.transactions_to_review = transactions
-
-                                # Assign a stable per-transaction id so per-row widget
-                                # state survives re-sorting, then pre-populate selectbox
-                                # state with AI suggestions.
-                                ensure_row_ids(transactions)
-                                for t in transactions:
-                                    if 'suggested_account_id' in t and t['suggested_account_id']:
-                                        st.session_state[row_key("cat", t)] = t['suggested_account_id']
-
-                                # Show success message with duplicate warning if applicable
-                                if duplicate_count > 0:
-                                    st.warning(f"Found {duplicate_count} potential duplicate transaction(s) that have been auto-deselected.")
-                                st.success(f"Parsed {len(transactions)} transactions!")
-
-                                # Auto-navigate to Review tab
-                                st.session_state.import_active_tab = "Review & Categorize"
-                                st.rerun()
+                                queue_replacement(client_id, transactions, duplicate_count)
 
                     except Exception as e:
                         st.error(f"Error parsing file: {e}")
@@ -1356,23 +1365,8 @@ elif selected_tab == "Upload Statement":
                                 transaction["confidence"] = f"{match['confidence']:.0%}"
                                 transaction["reason"] = f"Learned pattern: {match['pattern']}"
 
-                        ensure_row_ids(review_transactions)
-                        for transaction in review_transactions:
-                            if transaction.get("suggested_account_id"):
-                                st.session_state[row_key("cat", transaction)] = transaction["suggested_account_id"]
-                        st.session_state.transactions_to_review = review_transactions
-                        st.session_state.import_active_tab = "Review & Categorize"
-                        # Same reason as the CSV path: a stale completion flag
-                        # would hide these rows behind the previous batch's
-                        # "What's next?" screen.
-                        st.session_state.import_complete = False
-                        st.session_state.import_complete_msg = None
-                        if duplicate_count:
-                            st.session_state.post_result = {
-                                "level": "warning",
-                                "text": f"{duplicate_count} potential duplicate(s) were auto-deselected.",
-                            }
-                        st.rerun()
+                        queue_replacement(client_id, review_transactions, duplicate_count)
+
                     except Exception as exc:
                         st.error(f"Could not prepare statement transactions: {exc}")
 
@@ -1389,6 +1383,9 @@ elif selected_tab == "Review & Categorize":
         if _pr.get('errors'):
             st.error("Errors: " + '; '.join(_pr['errors']))
         st.session_state.post_result = None
+
+    render_saved_review(client_id, apply_duplicate_checks)
+    render_recovery_copies(client_id, apply_duplicate_checks)
 
     # Check if import just completed - show "What's next?" prompt
     if st.session_state.get('import_complete'):
@@ -1442,7 +1439,7 @@ elif selected_tab == "Review & Categorize":
                     }
                 st.rerun()
         with _sc3:
-            if st.button("Dismiss staged", key="dismiss_staged_imports",
+            if st.button("Dismiss staged", key="dismiss_staged_imports", disabled=dbconn.READ_ONLY,
                          width="stretch"):
                 st.session_state.confirm_dismiss_staged = {
                     "client_id": client_id,
@@ -1465,7 +1462,7 @@ elif selected_tab == "Review & Categorize":
         _dc1, _dc2, _dc3 = st.columns([1, 1, 3])
         with _dc1:
             if st.button("Confirm dismissal", type="primary",
-                         key="confirm_dismiss_staged_button"):
+                         key="confirm_dismiss_staged_button", disabled=dbconn.READ_ONLY):
                 try:
                     _dismissed = ImportedTransaction.dismiss_pending(
                         client_id, _dismiss_ids)
@@ -1587,7 +1584,7 @@ elif selected_tab == "Review & Categorize":
                     st.error(st.session_state.pop("quick_add_account_error"))
                 b1, b2, _ = st.columns([1, 1, 4])
                 with b1:
-                    st.button("Create account", type="primary",
+                    st.button("Create account", type="primary", disabled=dbconn.READ_ONLY,
                               key=f"newacct_save_{target_key}",
                               on_click=_create_quick_account, args=(target_key,))
                 with b2:
@@ -1601,21 +1598,38 @@ elif selected_tab == "Review & Categorize":
             if 'include' not in t:
                 t['include'] = True
 
+        transfer_ids = {a.id for a in all_accounts if a.type in ('Asset', 'Liability')}
+        reconcile_review_rows(transactions, st.session_state, set(account_options), transfer_ids)
+
+        # Reconcile previously accepted Jev categories independently of the
+        # currently selected provider, before category controls or posting.
+        provider, review_model = current_config(st.session_state)
+        jev_prepared = prepare_jev_review(
+            transactions, all_accounts, client_id, dbconn.DATABASE_PATH,
+            client.categorization_context(), st.session_state,
+            include_unaccepted=provider != "off",
+        )
+
+        other_prepared = prepare_other_reviews(
+            transactions, all_accounts, client_id, dbconn.DATABASE_PATH,
+            client.categorization_context(), st.session_state, provider, review_model,
+        )
+
         # Summary and bulk actions
         included_count = sum(1 for t in transactions if t.get('include', True))
-        uncategorized_count = sum(1 for t in transactions if not t.get('selected_account_id') and 'suggested_account_id' not in t)
+        uncategorized_count = sum(1 for t in transactions if not t.get('selected_account_id'))
         duplicate_count = sum(1 for t in transactions if t.get('is_duplicate', False))
 
-        col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+        col1, col2, col3, col4, col5 = st.columns([1, 1.25, 1.1, 1, 1.6])
         with col1:
             st.metric("Total", len(transactions))
         with col2:
-            st.metric("Selected", included_count)
+            st.metric("Included", included_count)
         with col3:
             parked_count = sum(
                 1 for t in transactions
                 if is_parking_account(account_options.get(
-                    st.session_state.get(row_key("cat", t)), ""))
+                    t.get("selected_account_id"), ""))
             )
             if parked_count:
                 st.metric("Uncategorized", uncategorized_count,
@@ -1629,9 +1643,9 @@ elif selected_tab == "Review & Categorize":
             else:
                 st.metric("Duplicates", 0)
         with col5:
-            subcol1, subcol2 = st.columns(2)
+            subcol1, subcol2 = st.container(), st.container()
             with subcol1:
-                if st.button("Select All", key="select_all_top"):
+                if st.button("Include All", key="select_all_top"):
                     for t in transactions:
                         # An overridden duplicate is selectable; no reason needed.
                         # An exact re-import of an already-posted source row never
@@ -1647,29 +1661,33 @@ elif selected_tab == "Review & Categorize":
                         st.session_state[row_key("include", t)] = bool(duplicate_allowed)
                     st.rerun()
             with subcol2:
-                if st.button("Deselect All", key="deselect_all_top"):
+                if st.button("Exclude All", key="deselect_all_top"):
                     for t in transactions:
                         t['include'] = False
                         st.session_state[row_key("include", t)] = False
                     st.rerun()
 
-        # Sorting options
-        st.divider()
-        sort_col1, sort_col2, sort_col3 = st.columns([1, 1, 3])
-        with sort_col1:
-            sort_by = st.selectbox(
-                "Sort by",
-                options=["Date", "Description", "Amount"],
-                index=0,
-                key="sort_by"
+        action_panels = review_action_panels()
+        bulk_by_uid = {t["uid"]: t for t in transactions}
+        st.session_state["bulk_rows"] = [uid for uid in st.session_state.get("bulk_rows", []) if uid in bulk_by_uid]
+        with action_panels["select"]:
+            st.caption("Selection is for suggestions and category changes. Use Include to choose what posts.")
+            sel_col1, sel_col2 = st.columns(2)
+            with sel_col1:
+                if st.button("Clear selection", key="deselect_bulk"):
+                    st.session_state["bulk_rows"] = []
+                    st.rerun()
+            with sel_col2:
+                if st.button("Select all", key="select_bulk"):
+                    st.session_state["bulk_rows"] = list(bulk_by_uid)
+                    st.rerun()
+            st.multiselect(
+                "Selected rows", options=list(bulk_by_uid), key="bulk_rows",
+                format_func=lambda uid: f"{bulk_by_uid[uid]['date']} | {bulk_by_uid[uid]['description']} | ${bulk_by_uid[uid]['amount']:,.2f}",
             )
-        with sort_col2:
-            sort_order = st.selectbox(
-                "Order",
-                options=["Ascending", "Descending"],
-                index=0,
-                key="sort_order"
-            )
+        with action_panels["sort"]:
+            sort_by = st.selectbox("Sort by", options=["Date", "Description", "Amount"], key="sort_by")
+            sort_order = st.selectbox("Order", options=["Ascending", "Descending"], key="sort_order")
 
         # Apply sorting
         reverse = (sort_order == "Descending")
@@ -1683,187 +1701,67 @@ elif selected_tab == "Review & Categorize":
         # Update session state with sorted order
         st.session_state.transactions_to_review = transactions
 
-        # AI Categorization section
-        st.divider()
-        st.markdown("**AI-Powered Categorization**")
+        with action_panels["ai"]:
+            render_controls(transactions, all_accounts, client_id, jev_prepared, other_prepared)
 
-        # Show previous categorization result if any
-        if st.session_state.get('ai_categorization_result'):
-            result = st.session_state.ai_categorization_result
-            if result.get('error'):
-                st.error(f"AI categorization error: {result['error']}")
-            elif result.get('matched', 0) > 0:
-                st.success(f"AI categorization complete! Matched {result['matched']} of {result['total']} transactions.")
-            else:
-                st.warning(f"AI processed {result.get('total', 0)} transactions but none matched your accounts.")
-            # Clear the message after showing
-            st.session_state.ai_categorization_result = None
-
-        if categorization_service.is_available():
-            # Build list of uncategorized transactions.
-            # Check session state for current selection, not transaction dict.
-            uncategorized = [
-                t for t in transactions
-                if not st.session_state.get(row_key("cat", t))
-            ]
-
-            if uncategorized:
-                col1, col2 = st.columns([2, 2])
-                with col1:
-                    if st.button(f"Categorize {len(uncategorized)} transactions with AI", type="secondary"):
-                        with st.spinner("AI is analyzing transactions..."):
-                            # Get expense and revenue accounts for suggestions
-                            expense_accts = [a for a in all_accounts if a.type == 'Expense']
-                            revenue_accts = [a for a in all_accounts if a.type == 'Revenue']
-                            categorization_service.categorize_transactions(
-                                uncategorized,
-                                expense_accts + revenue_accts,
-                                business_context=client.categorization_context(),
-                            )
-
-                        # Store result in session state for display after rerun
-                        if hasattr(categorization_service, 'last_error') and categorization_service.last_error:
-                            st.session_state.ai_categorization_result = {
-                                'error': categorization_service.last_error
-                            }
-                        else:
-                            st.session_state.ai_categorization_result = {
-                                'matched': getattr(categorization_service, 'last_matched', 0),
-                                'total': getattr(categorization_service, 'last_total', 0),
-                            }
-
-                        # Update the selectbox session state keys to match AI suggestions.
-                        # Only the transactions that were just categorized (uncategorized
-                        # holds references to the same dicts, now mutated by the AI call),
-                        # so manual selections the user already made are preserved.
-                        for t in uncategorized:
-                            if 'suggested_account_id' in t and t['suggested_account_id']:
-                                st.session_state[row_key("cat", t)] = t['suggested_account_id']
-
-                        # Save updated transactions to session state
-                        st.session_state.transactions_to_review = transactions
-                        st.rerun()
-                with col2:
-                    st.caption(
-                        "Sends transaction dates, descriptions, amounts, and the "
-                        "available account names/numbers to Anthropic, along with "
-                        "the client's entity type, business type, and optional AI "
-                        "business context. General client Notes are not sent. "
-                        "Suggestions only; nothing posts automatically."
-                    )
-            else:
-                st.success("All transactions have been categorized!")
-        else:
-            # Configuration lives on Firm Settings with the rest of the
-            # firm-level setup; this workflow page only points there.
-            st.caption("AI categorization is off — add your Anthropic API key "
-                       "on the Firm Settings page to enable suggestions here.")
-            st.page_link("pages/12_Firm_Settings.py",
-                         label="Set up AI categorization", icon=icons.FIRM)
-
-        # Bulk categorization section
-        st.divider()
-        st.markdown("**Bulk Categorization**")
-        st.caption("Deselect all, then check the transactions you want to categorize together")
-
-        # Selection controls
-        sel_col1, sel_col2, sel_col3, sel_col4 = st.columns([1, 1, 1, 2])
-        with sel_col1:
-            if st.button("Deselect All", key="deselect_bulk"):
-                for t in transactions:
-                    t['include'] = False
-                    st.session_state[row_key("include", t)] = False
-                st.rerun()
-        with sel_col2:
-            if st.button("Select All", key="select_bulk"):
-                for t in transactions:
-                    t['include'] = True
-                    st.session_state[row_key("include", t)] = True
-                st.rerun()
-        with sel_col3:
-            # Count selected using session state checkbox values
-            selected_count = sum(1 for t in transactions if st.session_state.get(row_key("include", t), True))
-            st.markdown(f"**{selected_count}** selected")
-
-        col1, col2, col3 = st.columns([2, 1, 1])
-        with col1:
-            bulk_account = st.selectbox(
-                "Account to apply",
-                options=category_option_ids,
-                format_func=category_label,
-                key="bulk_account_select",
-                index=None,
-                placeholder="Type an account number or name",
+        def _apply_bulk(uncategorized_only):
+            account_id = st.session_state.get("bulk_account_select")
+            if account_id not in account_options:
+                st.session_state.bulk_result = "Choose an account first."
+                return
+            count = apply_bulk_category(
+                transactions, st.session_state, account_id,
+                uncategorized_only=uncategorized_only, transfer_ids=transfer_ids,
             )
-        with col2:
-            if st.button("Apply to Selected", type="primary"):
-                if not bulk_account or bulk_account == ADD_NEW_ACCOUNT:
-                    st.warning("Please select an account first")
-                else:
-                    applied_count = 0
-                    for t in transactions:
-                        # Check session state for checkbox value
-                        is_selected = st.session_state.get(row_key("include", t), True)
-                        if is_selected:
-                            t['selected_account_id'] = bulk_account
-                            t['suggested_account_id'] = bulk_account
-                            # Update the selectbox session state
-                            st.session_state[row_key("cat", t)] = bulk_account
-                            applied_count += 1
-                    # Deselect all checkboxes after applying
-                    for t in transactions:
-                        st.session_state[row_key("include", t)] = False
-                        t['include'] = False
-                    # Save changes to session state
-                    st.session_state.transactions_to_review = transactions
-                    if applied_count > 0:
-                        st.session_state.bulk_result = f"Applied to {applied_count} transactions"
-                    else:
-                        st.session_state.bulk_result = "No transactions selected"
-                    st.rerun()
-        with col3:
-            if st.button("Apply to Uncategorized"):
-                if not bulk_account or bulk_account == ADD_NEW_ACCOUNT:
-                    st.warning("Please select an account first")
-                else:
-                    applied_count = 0
-                    for t in transactions:
-                        is_selected = st.session_state.get(row_key("include", t), True)
-                        # None/0/absent all mean uncategorized
-                        current_category = st.session_state.get(row_key("cat", t))
-                        if is_selected and not current_category:
-                            t['selected_account_id'] = bulk_account
-                            t['suggested_account_id'] = bulk_account
-                            # Update the selectbox session state
-                            st.session_state[row_key("cat", t)] = bulk_account
-                            applied_count += 1
-                    # Deselect all checkboxes after applying
-                    for t in transactions:
-                        st.session_state[row_key("include", t)] = False
-                        t['include'] = False
-                    # Save changes to session state
-                    st.session_state.transactions_to_review = transactions
-                    st.session_state.bulk_result = f"Applied to {applied_count} uncategorized transactions"
-                    st.rerun()
+            st.session_state.bulk_result = (
+                f"Applied to {count} transactions. Posting inclusion is unchanged. "
+                "Transfer rows require an asset or liability account."
+            )
 
-        # The bulk dropdown can create an account too.
-        if st.session_state.get("bulk_account_select") == ADD_NEW_ACCOUNT:
-            render_quick_add_form("bulk_account_select")
+        with action_panels["bulk"]:
+            col1, col2, col3 = st.container(), st.container(), st.container()
+            with col1:
+                bulk_account = st.selectbox(
+                    "Account to apply", options=category_option_ids,
+                    format_func=category_label, key="bulk_account_select", index=None,
+                    placeholder="Type an account number or name",
+                )
+            with col2:
+                st.button("Apply to Selected", on_click=_apply_bulk, args=(False,))
+            with col3:
+                st.button("Apply to Uncategorized", on_click=_apply_bulk, args=(True,),
+                          help="Apply only to selected rows that have no category.")
 
-        # Show bulk result message if any
-        if st.session_state.get('bulk_result'):
-            st.info(st.session_state.bulk_result)
-            st.session_state.bulk_result = None
+            # The bulk dropdown can create an account too.
+            if st.session_state.get("bulk_account_select") == ADD_NEW_ACCOUNT:
+                render_quick_add_form("bulk_account_select")
 
-        if st.session_state.get('quick_add_account_msg'):
-            st.success(st.session_state.pop('quick_add_account_msg'))
+            # Show bulk result message if any
+            if st.session_state.get('bulk_result'):
+                st.info(st.session_state.bulk_result)
+                st.session_state.bulk_result = None
+
+            if st.session_state.get('quick_add_account_msg'):
+                st.success(st.session_state.pop('quick_add_account_msg'))
 
         # Review each transaction - header row
         st.divider()
 
-        header_cols = st.columns([0.5, 0.9, 2.2, 1, 0.6, 2])
+        page_size = 50
+        page_count = max(1, (len(transactions) + page_size - 1) // page_size)
+        if st.session_state.get("review_page", 1) not in range(1, page_count + 1):
+            st.session_state["review_page"] = 1
+        page_number = (st.selectbox("Review page", options=list(range(1, page_count + 1)), key="review_page")
+                       if page_count > 1 else 1)
+        row_start = (page_number - 1) * page_size
+        visible_rows = transactions[row_start:row_start + page_size]
+        st.caption(f"{len(st.session_state.get("bulk_rows", []))} selected for actions · "
+                   f"Rows {row_start + 1}–{row_start + len(visible_rows)} of {len(transactions)}. "
+                   "Only included rows post, across all pages.")
+
+        header_cols = st.columns([1.1, 1.5, 2.2, 1.2, 0.65, 2.2])
         with header_cols[0]:
-            st.markdown("**Select**")
+            st.markdown("**Include**")
         with header_cols[1]:
             st.markdown("**Date**")
         with header_cols[2]:
@@ -1873,7 +1771,7 @@ elif selected_tab == "Review & Categorize":
         with header_cols[4]:
             st.markdown("**Xfer**")
         with header_cols[5]:
-            st.markdown("**Category/Transfer Account**")
+            st.markdown("**Category / account**")
 
         st.divider()
 
@@ -1881,7 +1779,7 @@ elif selected_tab == "Review & Categorize":
         transfer_accounts = [a for a in all_accounts if a.type in ('Asset', 'Liability')]
         transfer_options = {a.id: a.display_name() for a in transfer_accounts}
 
-        for i, t in enumerate(transactions):
+        for i, t in enumerate(visible_rows, start=row_start):
             duplicate_select_disabled = False
             if t.get("is_duplicate"):
                 duplicate_kind = t.get("duplicate_kind")
@@ -1953,7 +1851,7 @@ elif selected_tab == "Review & Categorize":
                     transactions[i]["include"] = False
                     st.session_state[row_key("include", t)] = False
 
-            col0, col1, col2, col3, col4, col5 = st.columns([0.5, 0.9, 2.2, 1, 0.6, 2])
+            col0, col1, col2, col3, col4, col5 = st.columns([1.1, 1.5, 2.2, 1.2, 0.65, 2.2])
 
             include_key = row_key("include", t)
             with col0:
@@ -1962,7 +1860,7 @@ elif selected_tab == "Review & Categorize":
                     st.session_state[include_key] = t.get('include', True)
 
                 include = st.checkbox(
-                    "Select",
+                    "Include for posting",
                     key=include_key,
                     disabled=duplicate_select_disabled,
                     label_visibility="collapsed"
@@ -1981,17 +1879,17 @@ elif selected_tab == "Review & Categorize":
                 # on. Long ones collapse behind an expander rather than
                 # vanishing.
                 _desc = str(t['description'])
-                if len(_desc) <= 35:
+                if len(_desc) <= 160:
                     st.text(_desc)
                 else:
-                    st.text(_desc[:35] + "…")
+                    st.text(_desc[:160] + "…")
                     with st.expander("Full description"):
                         st.text(_desc)
                 # Show source account if from multi-account import
                 if t.get('source_account'):
-                    source_acct = Account.get_by_id(t.get('bank_account_id'), client_id=client_id)
-                    if source_acct:
-                        st.caption(f"From: {source_acct.display_name()}")
+                    source_label = account_options.get(t.get('bank_account_id'))
+                    if source_label:
+                        st.caption(f"From: {source_label}")
                 if t.get('reason'):
                     st.caption(t['reason'])
 
@@ -2002,7 +1900,8 @@ elif selected_tab == "Review & Categorize":
             with col4:
                 # Transfer toggle
                 is_transfer = st.checkbox(
-                    "Xfer",
+                    "Transfer between accounts",
+                    label_visibility="collapsed",
                     value=t.get('is_transfer', False),
                     key=row_key("xfer", t),
                     help="Check if this is a transfer between accounts (e.g., credit card payment)"
@@ -2013,7 +1912,9 @@ elif selected_tab == "Review & Categorize":
                 # Initialize session state for this selectbox if not already set
                 cat_key = row_key("cat", t)
                 if cat_key not in st.session_state:
-                    st.session_state[cat_key] = t.get('suggested_account_id') or None
+                    st.session_state[cat_key] = t.get(
+                        'selected_account_id', t.get('suggested_account_id')
+                    ) or None
 
                 if is_transfer:
                     # For transfers, show only bank/liability accounts
@@ -2053,6 +1954,11 @@ elif selected_tab == "Review & Categorize":
                         and is_parking_account(account_options.get(selected, ""))):
                     st.caption(":red[⚠ Parked — still needs a real category]")
 
+            # Opinions belong to the whole row. Keep long comparisons out of
+            # the narrow category cell, especially with the sidebar open.
+            if provider != "off":
+                render_results(t, all_accounts, client_id, jev_prepared, other_prepared)
+
             # Picking "Add new account…" opens the form right under this row;
             # creating selects the account here and in the chart of accounts.
             if selected == ADD_NEW_ACCOUNT and not is_transfer:
@@ -2060,13 +1966,16 @@ elif selected_tab == "Review & Categorize":
 
         st.divider()
 
+        checkpoint_active_review()
+        review_conflict = conflicting_saved_review(client_id)
+        render_save_review(client_id, transactions)
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            if st.button("Post Transactions", type="primary"):
+            if st.button("Post Transactions", type="primary", disabled=dbconn.READ_ONLY or review_conflict):
                 plan = classify_review_rows(
                     transactions,
-                    is_included=lambda t: st.session_state.get(row_key("include", t), True),
+                    is_included=lambda t: st.session_state.get(row_key("include", t), t.get('include', True)),
                     get_account_id=lambda t: t.get('selected_account_id', 0),
                 )
                 created = 0
@@ -2088,11 +1997,13 @@ elif selected_tab == "Review & Categorize":
                             batch_id=t['batch_id'],
                             duplicate_override=t.get('duplicate_override', False),
                             duplicate_override_reason=t.get('duplicate_override_reason'),
+                            review_context={'generation': st.session_state.get('_review_generation'),
+                                            'revision': st.session_state.get('review_saved_revision')},
                         )
                         created += 1
 
                     except Exception as e:
-                        errors.append(f"{t['description'][:30]}: {e}")
+                        errors.append(f"{t['description'][:30]}: {save_error_message(e)}")
                         failed.append(t)  # keep failed rows so they can be retried
 
                 # Kept in the review list: included-but-uncategorized + failed rows.
@@ -2100,17 +2011,20 @@ elif selected_tab == "Review & Categorize":
                 uncategorized = len(plan.uncategorized)
                 skipped = len(plan.excluded)
 
+                if created == 0:
+                    remaining = transactions
+
                 # A run that posted nothing at all is a mistake, not a finished
                 # import — every row was deselected or blocked. Discarding the
                 # batch there means re-uploading to try again, so keep the rows
                 # and say what happened instead.
-                if created == 0 and skipped:
+                if created == 0 and skipped == len(transactions):
                     st.session_state.transactions_to_review = transactions
                     st.session_state.post_result = {
                         'level': 'warning',
                         'text': (
                             f"Nothing was posted — all {skipped} row(s) were excluded. "
-                            "A row must be selected in the leftmost column to post; "
+                            "A row must be included in the leftmost column to post; "
                             "duplicates are deselected automatically until you tick "
                             "\"Post this transaction anyway\"."
                         ),
@@ -2125,12 +2039,14 @@ elif selected_tab == "Review & Categorize":
                         msg += f" — {skipped} excluded"
                     msg += "."
                     st.session_state.transactions_to_review = []
+                    checkpoint_active_review()
                     st.session_state.import_complete = True
                     st.session_state.import_complete_msg = msg
                     st.rerun()
                 else:
                     # Partial: keep unresolved rows and report exactly what happened.
                     st.session_state.transactions_to_review = remaining
+                    checkpoint_active_review()
                     parts = []
                     if created:
                         parts.append(f"posted {created}")
@@ -2150,22 +2066,20 @@ elif selected_tab == "Review & Categorize":
 
         with col2:
             if st.button("Clear review list"):
-                st.session_state.transactions_to_review = []
+                st.session_state['_review_clear_pending'] = True
                 st.rerun()
             _loaded_staged_ids = [
                 t["staged_id"] for t in transactions if t.get("staged_id")
             ]
             if (_loaded_staged_ids
-                    and st.button("Dismiss staged rows", key="dismiss_loaded_staged")):
+                    and st.button("Dismiss staged rows", key="dismiss_loaded_staged", disabled=dbconn.READ_ONLY)):
                 st.session_state.confirm_dismiss_staged = {
                     "client_id": client_id,
                     "ids": _loaded_staged_ids,
                 }
                 st.rerun()
 
-        with col3:
-            if not categorization_service.is_available():
-                st.caption("AI categorization unavailable — set ANTHROPIC_API_KEY")
+
 
 elif selected_tab == "Import History":
     st.subheader("Import History")
@@ -2338,7 +2252,7 @@ elif selected_tab == "Import History":
                     "Undo import and review again",
                     type="primary",
                     key=f"reverse_import_batch_{selected_batch}",
-                    disabled=(not preview.can_reverse or not reversal_reason or not confirmed),
+                    disabled=(dbconn.READ_ONLY or not preview.can_reverse or not reversal_reason or not confirmed),
                 ):
                     try:
                         result = reverse_import_batch(
@@ -2506,6 +2420,6 @@ elif selected_tab == "Learned Patterns":
                 st.caption(f"Used {rule['times_used']}x")
 
             with col4:
-                if st.button("Delete", key=f"del_rule_{rule['id']}"):
+                if st.button("Delete", key=f"del_rule_{rule['id']}", disabled=dbconn.READ_ONLY):
                     PatternLearner.delete_rule(rule['id'], client_id)
                     st.rerun()

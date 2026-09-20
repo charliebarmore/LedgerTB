@@ -8,9 +8,36 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # falling back to the macOS credential vault. From a pytest process that read
 # can raise a Keychain authorization dialog no headless run can answer — the
 # suite hangs forever. A dummy env key short-circuits the vault entirely.
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-never-used")
+for provider_key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "TYPESAFE_API_KEY"):
+    os.environ[provider_key] = "test-key-never-used"
+# A process-wide backstop remains in force after a per-test monkeypatch is
+# undone (including when a timed-out UI worker finishes late). Child processes
+# inherit it unless their own explicitly fake fixture backend replaces it.
+os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.fail.Keyring"
+import keyring
+from keyring.backends.fail import Keyring as UnavailableTestKeyring
+keyring.set_keyring(UnavailableTestKeyring())
 
 import pytest
+
+
+@pytest.fixture(scope='session', autouse=True)
+def _cache_installed_component_discovery():
+    """Discover actual manifests once; the suite never changes installed packages.
+
+    Each AppTest still gets a fresh component manager/registry. Only the costly
+    read-only distribution scan is reused, not widget or application state.
+    """
+    from functools import lru_cache
+    try:
+        from streamlit.components.v2 import manifest_scanner
+    except ImportError:  # Older supported Streamlit versions have no v2 scanner.
+        yield
+        return
+    original = manifest_scanner.scan_component_manifests
+    manifest_scanner.scan_component_manifests = lru_cache(maxsize=None)(original)
+    yield
+    manifest_scanner.scan_component_manifests = original
 
 from database import connection as db_connection
 from database.connection import init_database

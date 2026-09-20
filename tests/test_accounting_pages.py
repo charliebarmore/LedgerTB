@@ -177,7 +177,7 @@ def test_chart_of_accounts_uses_correct_plural_labels(
     assert "Liabilitys" not in labels
     assert "Equitys" not in labels
     assert any(
-        "Review statement subtypes" in expander.label
+        "View accounts and assign groupings" in expander.label
         for expander in page.expander
     )
 
@@ -1095,7 +1095,7 @@ def test_dashboard_balances_show_totals_and_equation(client_id, accounts, monkey
         assert label in html, f"missing {label!r}"
     assert "$1,080.00" in html  # total assets: 900 + 300 - 120
 
-    success = "\n".join(str(s.value) for s in dashboard.success)
+    success = "\n".join(str(s.value) for s in dashboard.success).replace(r"\$", "$")
     assert "In balance" in success
     assert "assets $1,080.00" in success
     # liabilities 50 + equity 900 + net income (300 - 170) = 1,080
@@ -1629,4 +1629,44 @@ def test_chart_of_accounts_warns_about_unresolved_subtypes(
     warnings = " ".join(str(item.value) for item in page.warning)
     assert "need a statement grouping" in warnings or \
         "needs a statement grouping" in warnings
-    assert "3100 Owner's Capital" in warnings
+    review = next(
+        expander for expander in page.expander
+        if "View accounts and assign groupings" in expander.label
+    )
+    assert any("3100 — Owner's Capital" in item.value for item in review.text)
+
+
+def test_readonly_journal_disables_entry_and_correction_actions(client_id,accounts,monkeypatch):
+    from database import connection as dbconn
+    _select_client(monkeypatch,client_id)
+    post_transaction(client_id,dict(date=date(2026,1,1),amount=-12.34,description='Fictional read-only import'),
+                     accounts['expense'],accounts['cash'],batch_id='readonly')
+    monkeypatch.setattr(dbconn,'READ_ONLY',True)
+    page=AppTest.from_file(page_path('pages/2_Journal_Entries.py'),default_timeout=60)
+    page.session_state['journal_active_tab']='New Entry'
+    page.run()
+    assert not page.exception
+    assert next(b for b in page.button if b.label=='Save Entry').disabled
+    page.session_state['journal_active_tab']='View Entries'
+    page.run()
+    assert not page.exception
+    assert next(b for b in page.button if b.label=='Change category').disabled
+
+
+def test_readonly_chart_keeps_review_available_without_write_actions(
+    client_id, accounts, monkeypatch,
+):
+    from database import connection as dbconn
+    _select_client(monkeypatch, client_id)
+    before = [(a.id, a.name, a.subtype) for a in Account.get_all(client_id)]
+    monkeypatch.setattr(dbconn, "READ_ONLY", True)
+    page = AppTest.from_file(page_path("pages/3_Chart_of_Accounts.py"), default_timeout=30)
+    page.session_state["editing_account"] = accounts["expense"]
+    page.run()
+    assert not page.exception
+    mutations = [b for b in page.button if b.label in (
+        "Apply to selected accounts", "Save Changes", "Delete", "Add Account",
+    )]
+    assert mutations and all(b.disabled for b in mutations)
+    assert not next(b for b in page.button if b.label == "Cancel").disabled
+    assert before == [(a.id, a.name, a.subtype) for a in Account.get_all(client_id)]

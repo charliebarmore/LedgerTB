@@ -1,0 +1,76 @@
+{
+  "checks": [
+    "packaged SQLCipher unlock and CSV import",
+    "explicit Jev request and human acceptance",
+    "acceptance preserves exclusion",
+    "rerun and repeated request reuse",
+    "offline failure preserves staged rows",
+    "failed result reuse and explicit recovery retry",
+    "bulk select/clear preserves posting exclusion",
+    "human posting creates one balanced integer-cent entry",
+    "excluded row is not posted",
+    "import identity and human audit attribution retained",
+    "CSV preview shows 81.58 disbursements",
+    "journal entry displays a balanced debit/credit table",
+    "book switch with identical client/account IDs resets consent and review state",
+    "second book receives no Jev result or entries and makes no new provider request"
+  ],
+  "requests": [
+    {
+      "questions": 1,
+      "payload_sha256": "ab3373df1503faf94269bafe94a27c5ba2558f8ea4e8ccbf98980eaba4e64029",
+      "live": false,
+      "network_attempted": false,
+      "error_type": "URLError",
+      "success": false
+    },
+    {
+      "questions": 1,
+      "payload_sha256": "ab3373df1503faf94269bafe94a27c5ba2558f8ea4e8ccbf98980eaba4e64029",
+      "live": false,
+      "network_attempted": false,
+      "model": "synthetic-fixture",
+      "usage": {},
+      "success": true
+    }
+  ],
+  "source_sha256": {
+    "config.py": "b71565128077dfb90a6f8a8bc4eb9fd6b2db405c8adfbf988a2452356770fa1a",
+    "pages/4_Import_Transactions.py": "1e4b0f494d5b7edb9f55cba2a3bcfb35881881020d7c511244ba38685bc5ef6f",
+    "services/jev_categorization.py": "f9061c3e8ab84f78820ac1d112de9aaff92f9d765f1fc39b0c702ac228a41398",
+    "utils/jev_review.py": "e33fb066ececf468ab220e003e16a2148992f9bb56f1088fdab7fba754e9ae2a",
+    "utils/import_review.py": "03f34a2a6a73cf4e6f7f26b7643b415d5ac6a8486b4edd9c3c0eba4a6e62f392",
+    "services/csv_import.py": "39c867237920e1d88d52ad88cd4e327e9a1c86e6d2d937116dae665e368d2390",
+    "pages/2_Journal_Entries.py": "4611aac2dece23fe3407c4ada88853af16f5eb5c9d7ef7d21da956d96b0f49c7"
+  },
+  "live": false,
+  "limitations": "Frozen server mode in Chromium with test-only fake vault; not native window, installed upgrade or Windows acceptance.",
+  "date": "2026-09-18",
+  "purpose": "Focused import and journal usability pass after the user walkthrough",
+  "functional_tests": {
+    "passed": 810,
+    "skipped": 5,
+    "seconds": 150.74,
+    "xml": "output/ux-polish-20260918/tests.xml",
+    "qualification": "Full 810-case pass precedes final journal-only empty-cell display adjustment; all 41 journal-page tests passed afterward, and final-source packaged acceptance passed all 14 checks."
+  },
+  "performance_tests": {
+    "passed": 3,
+    "seconds": 17.09,
+    "review_10000_rows_seconds": 0.633,
+    "csv_50000_parse_seconds": 6.1739,
+    "csv_50000_classification_seconds": 2.2489,
+    "peak_mib": 44.92,
+    "log": "output/ux-polish-20260918/performance.log"
+  },
+  "source_browser_checks": 8,
+  "amount_preview_qualification": "Original zero-total symptom did not reproduce in source; frozen revised path verified as 81.58 disbursements and -81.58 net. Original cause not proven.",
+  "artifact_directory": "output/ux-polish-20260918",
+  "harness_attempts": "Earlier attempts stopped on off-screen totals inspection and journal-selector mismatches; retained separately and not counted as passing. Complete run passed all 14 checks.",
+  "final_packaged_artifacts": "output/ux-polish-20260918/final-acceptance",
+  "final_journal_tests": {
+    "passed": 41,
+    "seconds": 19.23,
+    "log": "output/ux-polish-20260918/final-journal-tests.log"
+  }
+}
