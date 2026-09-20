@@ -315,16 +315,17 @@ equation_gap = round(
     - (section_totals['Liabilities'] + section_totals['Equity'] + summary_net_income),
     2,
 )
+# Literal currency symbols must not open Markdown math spans.
 if abs(equation_gap) < 0.01:
     st.success(
-        f"In balance — assets ${section_totals['Assets']:,.2f} = "
-        f"liabilities ${section_totals['Liabilities']:,.2f} "
-        f"+ equity ${section_totals['Equity']:,.2f} "
-        f"+ net income ${summary_net_income:,.2f}"
+        rf"In balance — assets \${section_totals['Assets']:,.2f} = "
+        rf"liabilities \${section_totals['Liabilities']:,.2f} "
+        rf"+ equity \${section_totals['Equity']:,.2f} "
+        rf"+ net income \${summary_net_income:,.2f}"
     )
 else:
     st.error(
-        f"OUT OF BALANCE by ${abs(equation_gap):,.2f} — assets "
-        f"${section_totals['Assets']:,.2f} vs liabilities + equity + net income "
-        f"${section_totals['Liabilities'] + section_totals['Equity'] + summary_net_income:,.2f}"
+        rf"OUT OF BALANCE by \${abs(equation_gap):,.2f} — assets "
+        rf"\${section_totals['Assets']:,.2f} vs liabilities + equity + net income "
+        rf"\${section_totals['Liabilities'] + section_totals['Equity'] + summary_net_income:,.2f}"
     )

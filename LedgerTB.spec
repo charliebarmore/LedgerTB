@@ -89,13 +89,14 @@ for pkg in (
         pass
 
 hiddenimports = st_hiddenimports + [
+    "urllib.request", "urllib.error", "ssl",  # TypeSafe HTTP adapter (stdlib; no SDK)
     "pandas", "numpy", "openpyxl", "anthropic", "dotenv", "platformdirs", "portalocker", "altair",
     # Both credential-vault backends: the frozen app must reach the OS vault
     # on each platform (API key + MCP enablement live there).
     "keyring", "keyring.backends.macOS", "keyring.backends.Windows",
     "pypdfium2", "pypdfium2_raw", "PIL", "Quartz", "objc",
     "sqlcipher3", "sqlcipher3.dbapi2",  # encrypted database driver (native ext)
-] + collect_submodules("openpyxl") + collect_submodules("reportlab") \
+] + collect_submodules("certifi") + collect_submodules("openpyxl") + collect_submodules("reportlab") \
   + collect_submodules("mcp", filter=lambda name: "mcp.cli" not in name)
     # mcp: the server entry (mcp_server.py) is a data file, invisible to the
     # analyzer — same reason openpyxl/reportlab are collected wholesale.

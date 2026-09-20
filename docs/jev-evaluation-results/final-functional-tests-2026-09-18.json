@@ -1,0 +1,57 @@
+{
+  "source_commit": "87aa093816feb210ce2a7d7b740d7a1bcd929c60",
+  "normal_settings": true,
+  "unique_passing_cases": 802,
+  "platform_skipped_cases": 5,
+  "skip_reason": "Five NTFS alternate-data-stream tests require Windows.",
+  "initial_failures": [
+    {
+      "test": "tests.test_accounting_crash_recovery::test_process_death_preserves_atomicity_and_retry[before_commit-post]",
+      "failure_kind": "timeout"
+    },
+    {
+      "test": "tests.test_accounting_pages::test_edit_account_scrolls_the_editor_into_view",
+      "failure_kind": "timeout"
+    },
+    {
+      "test": "tests.test_accounting_pages::test_correction_draft_shows_original_and_retains_visible_chain",
+      "failure_kind": "timeout"
+    },
+    {
+      "test": "tests.test_mcp_stdio::test_stdio_draft_types_permissions_reconnect_and_revocation",
+      "failure_kind": "timeout"
+    },
+    {
+      "test": "tests.test_recurring_snapshots::test_legacy_primary_page_explains_recovery_and_disables_approval",
+      "failure_kind": "timeout"
+    }
+  ],
+  "runs": [
+    {
+      "artifact": "output/jev-overnight-20260917/final-normal-tests.xml",
+      "passed": 797,
+      "failed": 5,
+      "skipped": 5
+    },
+    {
+      "artifact": "output/jev-overnight-20260917/final-timeout-retries.xml",
+      "passed": 4,
+      "failed": 1,
+      "skipped": 0
+    },
+    {
+      "artifact": "output/jev-overnight-20260917/final-stdio-isolated.xml",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    }
+  ],
+  "qualification": "A final clean full run passed all 802 runnable functional cases together with normal deadlines and assertions after host contention subsided. Earlier full-run timeouts and targeted reruns are retained in this report; the five skips require Windows.",
+  "clean_full_run": {
+    "artifact": "output/jev-overnight-20260917/final-normal-quiet-tests.xml",
+    "passed": 802,
+    "skipped": 5,
+    "failed": 0,
+    "pytest_seconds": 201.1
+  }
+}

@@ -398,3 +398,40 @@ class CSVImporter:
         text = ' '.join(text.split())
 
         return text
+
+
+def summarize_csv_preview(frame, *, amount_column=None, debit_column=None,
+                          credit_column=None, sign_convention="bank", account_type=None):
+    """Preview uses the importer's amount parser; unreadable values never become zero.
+
+    Keep the already-parsed frame, support both amount layouts, and sum in cents
+    just as the posting boundary rounds each transaction.
+    """
+    import math
+    from money import to_cents, to_dollars
+    amounts = []
+    if not amount_column and not (debit_column or credit_column):
+        raise ValueError("Choose an amount column or debit/credit columns.")
+    selected = [amount_column] if amount_column else [c for c in (debit_column, credit_column) if c]
+    for column in selected:
+        if column not in frame.columns:
+            raise ValueError(f"Amount column {column!r} is missing.")
+    def value(raw, blank_zero=False):
+        if blank_zero and (pd.isna(raw) or str(raw).strip() == ""):
+            return 0
+        parsed = parse_amount(raw)
+        if not math.isfinite(parsed):
+            raise ValueError("An amount is missing or invalid. Check the file and mapping.")
+        return parsed
+    if amount_column:
+        amounts = [value(raw) for raw in frame[amount_column]]
+    else:
+        debit = [value(raw, True) for raw in frame[debit_column]] if debit_column else [0] * len(frame)
+        credit = [value(raw, True) for raw in frame[credit_column]] if credit_column else [0] * len(frame)
+        amounts = [abs(c) - abs(d) for d, c in zip(debit, credit)]
+    normalized = [to_cents(apply_sign_convention(a, sign_convention)) for a in amounts]
+    result = summarize_import_amounts([], sign_convention, account_type)
+    result.update(outflow=to_dollars(-sum(a for a in normalized if a < 0)),
+                  inflow=to_dollars(sum(a for a in normalized if a > 0)),
+                  net=to_dollars(sum(normalized)))
+    return result

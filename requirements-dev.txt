@@ -1,2 +1,4 @@
 -r requirements.txt
 pytest>=8.0.0,<10
+# Launcher lifecycle tests exercise pywebview's real synchronous Event contract.
+pywebview>=5.0,<7.0

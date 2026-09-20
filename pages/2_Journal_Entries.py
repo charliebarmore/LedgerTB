@@ -25,6 +25,7 @@ from utils.client_context import (
 from utils.client_selector import render_client_selector
 from utils.unlock import require_unlock
 from utils import icons
+from utils.recovery import save_error_message
 from constants import EntryType
 from utils.fiscal_dates import fiscal_year_bounds
 from utils.dates import display_date
@@ -82,6 +83,8 @@ date_format = get_date_format()
 client_id = render_client_selector()
 
 st.title("Journal Entries")
+if dbconn.READ_ONLY:
+    st.info("Read-only book. Journal entries can be viewed, but editing and posting are disabled.")
 
 # Quick link to Trial Balance Worksheet
 st.page_link("pages/1_Trial_Balance_Worksheet.py", label="Back to Trial Balance Worksheet", icon=icons.TRIAL_BALANCE)
@@ -324,7 +327,7 @@ def render_delete_control(entry_id: int):
     """Require a second, explicit action before permanently deleting an entry."""
     confirmation_key = "confirm_delete_entry_id"
     if st.session_state.get(confirmation_key) != entry_id:
-        if st.button("Delete", key=f"delete_entry_{entry_id}"):
+        if st.button("Delete", key=f"delete_entry_{entry_id}", disabled=dbconn.READ_ONLY):
             st.session_state[confirmation_key] = entry_id
             st.rerun()
         return
@@ -332,7 +335,7 @@ def render_delete_control(entry_id: int):
     st.warning("Permanently delete this entry?")
     confirm_col, cancel_col = st.columns(2)
     with confirm_col:
-        if st.button("Confirm delete", key=f"confirm_delete_entry_{entry_id}"):
+        if st.button("Confirm delete", key=f"confirm_delete_entry_{entry_id}", disabled=dbconn.READ_ONLY):
             try:
                 JournalEntry.delete(entry_id, client_id=client_id)
                 st.session_state.pop(confirmation_key, None)
@@ -340,21 +343,43 @@ def render_delete_control(entry_id: int):
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
+            except Exception as exc:
+                st.error(save_error_message(exc))
     with cancel_col:
         if st.button("Cancel", key=f"cancel_delete_entry_{entry_id}"):
             st.session_state.pop(confirmation_key, None)
             st.rerun()
 
 
+def render_entry_lines(entry):
+    """Accounting columns retain numeric alignment and readable empty sides."""
+    debit_cents = sum(to_cents(line.debit) for line in entry.lines)
+    credit_cents = sum(to_cents(line.credit) for line in entry.lines)
+    if debit_cents == credit_cents:
+        st.caption(f"Balanced · ${to_dollars(debit_cents):,.2f}")
+    else:
+        st.error(f"Out of balance by ${to_dollars(abs(debit_cents - credit_cents)):,.2f}")
+    st.dataframe([
+        {"Account": f"{line.account_number} · {line.account_name}",
+         "Debit": f"${line.debit:,.2f}" if line.debit else "—",
+         "Credit": f"${line.credit:,.2f}" if line.credit else "—",
+         "Memo": line.memo or ""}
+        for line in entry.lines
+    ], hide_index=True, width="stretch", column_config={
+        "Debit": st.column_config.TextColumn(alignment="right"),
+        "Credit": st.column_config.TextColumn(alignment="right"),
+    })
+
+
 def render_entry_controls(entry: JournalEntry, import_link: dict | None):
     if import_link:
         st.caption("Imported posting")
-        if st.button("Correct category", key=f"correct_import_{entry.id}"):
+        if st.button("Change category", key=f"correct_import_{entry.id}", disabled=dbconn.READ_ONLY):
             st.session_state.correct_import_entry_id = entry.id
             st.rerun()
         return
 
-    if st.button("Edit", key=f"edit_entry_{entry.id}"):
+    if st.button("Edit", key=f"edit_entry_{entry.id}", disabled=dbconn.READ_ONLY):
         load_entry_for_edit(entry)
         # Land the user on the form, or the click appears to do nothing.
         st.session_state.journal_active_tab = "New Entry"
@@ -457,7 +482,7 @@ if correction_entry_id:
                 if st.button(
                     "Post correction",
                     type="primary",
-                    disabled=not target_account_id or not reason.strip(),
+                    disabled=dbconn.READ_ONLY or not target_account_id or not reason.strip(),
                     key=f"post_correction_{correction_entry_id}",
                 ):
                     try:
@@ -475,6 +500,8 @@ if correction_entry_id:
                         st.rerun()
                     except ValueError as exc:
                         st.error(str(exc))
+                    except Exception as exc:
+                        st.error(save_error_message(exc))
             with cancel_col:
                 if st.button("Cancel", key=f"cancel_correction_{correction_entry_id}"):
                     st.session_state.pop("correct_import_entry_id", None)
@@ -697,7 +724,7 @@ if active_view == "New Entry":
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Save Entry", type="primary"):
+        if st.button("Save Entry", type="primary", disabled=dbconn.READ_ONLY):
             # Validate and save
             lines = []
             for line in st.session_state.je_lines:
@@ -750,7 +777,7 @@ if active_view == "New Entry":
                     reset_entry_form()
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error saving entry: {e}")
+                    st.error(save_error_message(e))
 
     with col2:
         if st.button("Clear Form"):
@@ -807,68 +834,68 @@ if active_view == "New Entry":
 elif active_view == "View Entries":
     st.subheader("Journal Entry List")
 
-    # Quick search by Entry ID
-    search_col1, search_col2 = st.columns([1, 3])
-    with search_col1:
-        search_id = st.number_input("Find Entry #", min_value=0, value=0, step=1, key="search_entry_id")
-    with search_col2:
-        if search_id > 0:
-            if st.button("Go to Entry", key="search_btn"):
-                found_entry = JournalEntry.get_by_id(search_id, client_id=client_id)
-                if found_entry:
-                    import_link = ImportedTransaction.get_links_for_journal_entries(
-                        client_id, [found_entry.id]
-                    ).get(found_entry.id)
-                    if import_link:
-                        st.session_state.correct_import_entry_id = found_entry.id
+    with st.expander("Search and filters"):
+        # Quick search by Entry ID
+        search_col1, search_col2 = st.columns([1, 3])
+        with search_col1:
+            search_id = st.number_input("Find Entry #", min_value=0, value=0, step=1, key="search_entry_id")
+        with search_col2:
+            if search_id > 0:
+                if st.button("Go to Entry", key="search_btn"):
+                    found_entry = JournalEntry.get_by_id(search_id, client_id=client_id)
+                    if found_entry:
+                        import_link = ImportedTransaction.get_links_for_journal_entries(
+                            client_id, [found_entry.id]
+                        ).get(found_entry.id)
+                        if import_link:
+                            st.session_state.correct_import_entry_id = found_entry.id
+                        else:
+                            load_entry_for_edit(found_entry)
+                            st.session_state.journal_active_tab = "New Entry"
+                        st.rerun()
                     else:
-                        load_entry_for_edit(found_entry)
-                        st.session_state.journal_active_tab = "New Entry"
-                    st.rerun()
-                else:
-                    st.error(f"Entry #{search_id} not found for this client.")
+                        st.error(f"Entry #{search_id} not found for this client.")
 
-    st.divider()
 
-    # Filters
-    col1, col2, col3 = st.columns(3)
+        # Filters
+        col1, col2, col3 = st.columns(3)
 
-    with col1:
-        filter_start = st.date_input(
-            "From Date", value=current_fy_start, key="filter_start",
-            format=date_format,
-        )
+        with col1:
+            filter_start = st.date_input(
+                "From Date", value=current_fy_start, key="filter_start",
+                format=date_format,
+            )
 
-    with col2:
-        filter_end = st.date_input(
-            "To Date", value=date.today(), key="filter_end",
-            format=date_format,
-        )
+        with col2:
+            filter_end = st.date_input(
+                "To Date", value=date.today(), key="filter_end",
+                format=date_format,
+            )
 
-    with col3:
-        filter_type = st.selectbox("Entry Type", options=['All'] + EntryType.ALL, key="filter_type")
+        with col3:
+            filter_type = st.selectbox("Entry Type", options=['All'] + EntryType.ALL, key="filter_type")
 
-    search_col, account_col = st.columns([2, 1])
-    with search_col:
-        filter_search = st.text_input(
-            "Search", key="filter_search",
-            placeholder="Description, reference, AJE #, or amount",
-        )
-    with account_col:
-        # Own options dict — the New Entry view builds its own and only one
-        # view's code runs per render.
-        filter_account_options = {
-            a.id: a.display_name()
-            for a in Account.get_all(client_id, active_only=True)
-        }
-        filter_account = st.selectbox(
-            "Account",
-            options=list(filter_account_options.keys()),
-            format_func=lambda x: filter_account_options[x],
-            key="filter_account",
-            index=None,
-            placeholder="All accounts",
-        )
+        search_col, account_col = st.columns([2, 1])
+        with search_col:
+            filter_search = st.text_input(
+                "Search", key="filter_search",
+                placeholder="Description, reference, AJE #, or amount",
+            )
+        with account_col:
+            # Own options dict — the New Entry view builds its own and only one
+            # view's code runs per render.
+            filter_account_options = {
+                a.id: a.display_name()
+                for a in Account.get_all(client_id, active_only=True)
+            }
+            filter_account = st.selectbox(
+                "Account",
+                options=list(filter_account_options.keys()),
+                format_func=lambda x: filter_account_options[x],
+                key="filter_account",
+                index=None,
+                placeholder="All accounts",
+            )
 
     if filter_start > filter_end:
         st.error("Journal entry filter start date cannot be after the end date.")
@@ -965,13 +992,7 @@ elif active_view == "View Entries":
                             st.caption(f"Source Reference: {entry.source_reference}")
                         st.caption(f"Type: {entry.entry_type}")
 
-                        # Show lines
-                        st.markdown("**Lines:**")
-                        for line in entry.lines:
-                            debit_str = f"${line.debit:,.2f}" if line.debit > 0 else ""
-                            credit_str = f"${line.credit:,.2f}" if line.credit > 0 else ""
-                            memo_str = f" - {line.memo}" if line.memo else ""
-                            st.text(f"  {line.account_number} - {line.account_name}: Dr {debit_str} Cr {credit_str}{memo_str}")
+                        render_entry_lines(entry)
 
                     with col2:
                         render_entry_controls(entry, import_links.get(entry.id))
@@ -991,13 +1012,7 @@ elif active_view == "View Entries":
                             st.caption(f"Source Reference: {entry.source_reference}")
                         st.caption(f"Type: {entry.entry_type}")
 
-                        # Show lines
-                        st.markdown("**Lines:**")
-                        for line in entry.lines:
-                            debit_str = f"${line.debit:,.2f}" if line.debit > 0 else ""
-                            credit_str = f"${line.credit:,.2f}" if line.credit > 0 else ""
-                            memo_str = f" - {line.memo}" if line.memo else ""
-                            st.text(f"  {line.account_number} - {line.account_name}: Dr {debit_str} Cr {credit_str}{memo_str}")
+                        render_entry_lines(entry)
 
                     with col2:
                         render_entry_controls(entry, import_links.get(entry.id))
@@ -1014,13 +1029,7 @@ elif active_view == "View Entries":
                             st.caption(f"Reference: {entry.source_reference}")
                         st.caption(f"Type: {entry.entry_type}")
 
-                        # Show lines
-                        st.markdown("**Lines:**")
-                        for line in entry.lines:
-                            debit_str = f"${line.debit:,.2f}" if line.debit > 0 else ""
-                            credit_str = f"${line.credit:,.2f}" if line.credit > 0 else ""
-                            memo_str = f" - {line.memo}" if line.memo else ""
-                            st.text(f"  {line.account_number} - {line.account_name}: Dr {debit_str} Cr {credit_str}{memo_str}")
+                        render_entry_lines(entry)
 
                     with col2:
                         render_entry_controls(entry, import_links.get(entry.id))
@@ -1084,7 +1093,7 @@ elif active_view == "Reverse Entry":
         )
         if st.button(
             "Post reversal", type="primary",
-            disabled=not confirmed or bool(pending_corrections),
+            disabled=dbconn.READ_ONLY or not confirmed or bool(pending_corrections),
             key="post_reversal",
         ):
             try:
@@ -1096,6 +1105,8 @@ elif active_view == "Reverse Entry":
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
+            except Exception as exc:
+                st.error(save_error_message(exc))
 
 
 elif active_view == "Templates & recurring":
@@ -1215,7 +1226,7 @@ if active_view == "Drafts":
                         try:
                             _entry_id = d.approve()
                         except Exception as exc:
-                            st.error(f"Could not post the draft: {exc}")
+                            st.error(save_error_message(exc))
                         else:
                             result = (
                                 f"Draft #{d.id} posted as journal entry #{_entry_id}."

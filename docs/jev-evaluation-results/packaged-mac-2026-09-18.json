@@ -1,0 +1,45 @@
+{
+  "checks": [
+    "packaged SQLCipher unlock and CSV import",
+    "explicit Jev request and human acceptance",
+    "acceptance preserves exclusion",
+    "rerun and repeated request reuse",
+    "offline failure preserves staged rows",
+    "failed result reuse and explicit recovery retry",
+    "bulk select/clear preserves posting exclusion",
+    "human posting creates one balanced integer-cent entry",
+    "excluded row is not posted",
+    "import identity and human audit attribution retained"
+  ],
+  "requests": [
+    {
+      "questions": 1,
+      "payload_sha256": "562193d7495fa9ddbcc84396a7198df2633b8d836015921beb132185d8c192df",
+      "live": true,
+      "network_attempted": false,
+      "error_type": "URLError",
+      "success": false
+    },
+    {
+      "questions": 1,
+      "payload_sha256": "562193d7495fa9ddbcc84396a7198df2633b8d836015921beb132185d8c192df",
+      "live": true,
+      "network_attempted": true,
+      "model": "jev-1.13.0",
+      "usage": {
+        "input_tokens": 1229,
+        "output_tokens": 131
+      },
+      "success": true
+    }
+  ],
+  "source_sha256": {
+    "config.py": "b71565128077dfb90a6f8a8bc4eb9fd6b2db405c8adfbf988a2452356770fa1a",
+    "pages/4_Import_Transactions.py": "b98802f1a61dcfa7d50732e497cd10690e3623f0c494f99332b813d1e81152fb",
+    "services/jev_categorization.py": "f9061c3e8ab84f78820ac1d112de9aaff92f9d765f1fc39b0c702ac228a41398",
+    "utils/jev_review.py": "cce96e2947446229565477db34f837b3f453c47d53c65be8cfe00d54e06b42cd",
+    "utils/import_review.py": "03f34a2a6a73cf4e6f7f26b7643b415d5ac6a8486b4edd9c3c0eba4a6e62f392"
+  },
+  "live": true,
+  "limitations": "Frozen server mode in Chromium with test-only fake vault; not native window, installed upgrade or Windows acceptance."
+}

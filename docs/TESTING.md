@@ -106,3 +106,33 @@ distributed Windows/Mac bundles. Keep the real-device checklist in
 `WINDOWS-TESTING.md` and the broader release plan in
 `RELEASE-REVIEW-1.7.0.md` for those acceptance steps. Generated randomized
 workflows and longer performance histories remain later extensions.
+
+## Optional Jev categorization
+
+See [Jev integration and synthetic comparison](JEV-CATEGORIZATION.md) for
+fake-vault/SQLCipher tests, the disposable browser fixture, opt-in live evaluation,
+request reuse guarantees, and remaining packaged-app acceptance.
+
+## Import-review usability and recovery
+
+See [the CPA usability trial guide](CPA-USABILITY-TRIAL-2026-09-18.md) for
+saved-review semantics, read-only behavior, worksheet export reuse, the fictional
+bank/card scenario matrix and isolated desktop verification commands. In
+particular, explicit **Save review for later** copies remain distinct from
+automatic encrypted recovery checkpoints. Recovery captures completed
+server-side edits; edits still in flight can be lost. See the
+[desktop-pilot guide](DESKTOP-PILOT-2026-09-19.md) for crash, native-close and
+restored-book checks, and the [v1.8.0 release review](RELEASE-REVIEW-1.8.0.md)
+for current candidate qualification.
+
+```sh
+python -m pytest -q tests/test_import_workflow_scenarios.py \
+  tests/test_import_review_drafts.py tests/test_worksheet_export_cache.py
+```
+
+For guarded client/book/import transitions and the complete 250-row fictional
+month, use [the recoverable monthly-close guide](RECOVERABLE-MONTH-CLOSE-2026-09-19.md).
+It specifies independent expected cent balances, partial-post/restart/conflict/
+backup recovery checks, reconciliation and PDF/XLSX assertions, and an isolated
+fixture creation command. The fixture never opens real client books or the real
+credential vault.

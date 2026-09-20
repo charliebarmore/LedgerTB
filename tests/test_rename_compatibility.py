@@ -3,6 +3,9 @@
 from pathlib import Path
 
 import config
+import pytest
+import runpy
+import sys
 from database.crypto import derive_key
 
 
@@ -36,6 +39,27 @@ def test_existing_book_key_derivation_never_changes():
     assert derive_key("LedgerTB rename regression") == (
         "5116e5ab747aab25b33ae22249b0585a6c585072e8eaefc1ba6b2aa67caa8a84"  # pragma: allowlist secret
     )
+
+
+def test_isolated_data_directory_does_not_inspect_installed_books(tmp_path, monkeypatch):
+    import dotenv
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda: None)
+    monkeypatch.setenv("LEDGERTB_DATA_DIR", str(tmp_path / "isolated"))
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    for suffix in ("DB_PATH", "BACKUP_DIR"):
+        for prefix in ("LEDGERTB", "PROBOOKS"):
+            monkeypatch.delenv(f"{prefix}_{suffix}", raising=False)
+    def unexpected(*args):
+        raise AssertionError("An explicit data home must not inspect installed app data")
+    monkeypatch.setattr(config.platformdirs, "user_data_dir", unexpected)
+    isolated = runpy.run_path(str(Path(config.__file__)))
+    assert isolated["USER_DATA_DIR"] == tmp_path / "isolated"
+    assert isolated["DATABASE_PATH"] == tmp_path / "isolated/accounting.db"
+    assert isolated["BACKUP_DIR"] == tmp_path / "isolated/backups"
+    monkeypatch.setenv("LEDGERTB_DATA_DIR", "relative/path")
+    with pytest.raises(ValueError, match="absolute path"):
+        runpy.run_path(str(Path(config.__file__)))
 
 
 def test_windows_installer_uses_a_fresh_identity():

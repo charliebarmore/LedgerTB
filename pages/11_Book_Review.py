@@ -94,7 +94,7 @@ with st.expander("Accounting policy notes (the reviewer honors these)"):
         key=f"review_policy_text_{review_widget_scope}", height=140,
         label_visibility="collapsed",
     )
-    if st.button("Save policy notes"):
+    if st.button("Save policy notes", disabled=dbconn.READ_ONLY):
         set_review_policy(client_id, policy_text)
         st.success("Saved. Every future review will honor these notes.")
 

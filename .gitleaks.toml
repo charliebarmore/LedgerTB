@@ -1,0 +1,12 @@
+title = "LedgerTB secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "detect-secrets stores SHA-1 fingerprints, never raw credentials"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^\.secrets\.baseline$''']
+regexTarget = "line"
+regexes = ['''^\s*"hashed_secret": "[0-9a-f]{40}",?\s*$''']

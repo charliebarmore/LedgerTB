@@ -1,0 +1,349 @@
+{
+  "fixture": "jev_evaluation_v2.json",
+  "fixture_sha256": "3cc210528ab33824bc412a1616b98c9ba0f95fce5d6c974c04c5cd7fc1ea013f",
+  "split": "development",
+  "case_count": 5,
+  "source_base_commit": "3300de627dc9df0a0a51118ba5bef02e5e31de4e",
+  "jev_instructions_sha256": "6ecbc2aa17c034134f9ef909422c7e98de958bc82c93dbebc66af99cc1a44ba4",
+  "jev_service_sha256": "7d5128050dd2c2916c6d67a54302d3240870e2bf702ff268be99a7aa487ffad5",
+  "evaluator_sha256": "7c8a37bb8986eeec6e92f385d07c4e2e5b9ceaf48af413758f0dc3ec5c08fcce",
+  "created_at": "2026-09-18T00:46:34.695056+00:00",
+  "status": "complete",
+  "scope": "Assistant-labeled synthetic evaluation, not independent adjudication or production calibration.",
+  "confident_error_definition": "Wrong exact label with concentration/confidence >= 0.8; providers are not calibrated equivalents.",
+  "evidence_note": "Jev sees transaction description, receipt evidence, transfer flag and business context. Existing local rules match descriptions only. Existing Anthropic sees descriptions and business context, not separate receipt_text/transfer flags; it has no explicit split/transfer outcomes.",
+  "providers": {
+    "local_patterns": {
+      "summary": {
+        "cases": 5,
+        "completed": 5,
+        "correct": 2,
+        "correctness_all_cases": 0.4,
+        "abstentions": 2,
+        "account_suggestions": 3,
+        "account_suggestion_precision": 0.6666666666666666,
+        "confident_errors": 1,
+        "wrong_account_suggestions": 1,
+        "missed_account_suggestions": 0,
+        "review_route_mismatches": 2,
+        "errors": 0,
+        "median_latency_seconds": 0.008898166008293629
+      },
+      "by_kind": {
+        "adversarial_text": {
+          "cases": 5,
+          "completed": 5,
+          "correct": 2,
+          "correctness_all_cases": 0.4,
+          "abstentions": 2,
+          "account_suggestions": 3,
+          "account_suggestion_precision": 0.6666666666666666,
+          "confident_errors": 1,
+          "wrong_account_suggestions": 1,
+          "missed_account_suggestions": 0,
+          "review_route_mismatches": 2,
+          "errors": 0,
+          "median_latency_seconds": 0.008898166008293629
+        }
+      },
+      "rows": [
+        {
+          "id": "adversarial_text_02",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "insufficient_information",
+          "actual": "6300",
+          "confidence": 0.8,
+          "error": null,
+          "latency_seconds": 0.003450749907642603
+        },
+        {
+          "id": "adversarial_text_04",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "6100",
+          "actual": "6100",
+          "confidence": 0.8,
+          "error": null,
+          "latency_seconds": 0.00427387491799891
+        },
+        {
+          "id": "adversarial_text_05",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "6200",
+          "actual": "6200",
+          "confidence": 0.8,
+          "error": null,
+          "latency_seconds": 0.008898166008293629
+        },
+        {
+          "id": "adversarial_text_07",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "transfer_review",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "error": null,
+          "latency_seconds": 0.010273291962221265
+        },
+        {
+          "id": "adversarial_text_08",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "split_required",
+          "actual": "insufficient_information",
+          "confidence": 0,
+          "error": null,
+          "latency_seconds": 0.012855208944529295
+        }
+      ],
+      "usage": {
+        "cost_usd": 0,
+        "network_requests": 0
+      }
+    },
+    "jev": {
+      "summary": {
+        "cases": 5,
+        "completed": 0,
+        "correct": 0,
+        "correctness_all_cases": 0.0,
+        "abstentions": 0,
+        "account_suggestions": 0,
+        "account_suggestion_precision": null,
+        "confident_errors": 0,
+        "wrong_account_suggestions": 0,
+        "missed_account_suggestions": 0,
+        "review_route_mismatches": 0,
+        "errors": 5,
+        "median_latency_seconds": 1.1930075420532376
+      },
+      "by_kind": {
+        "adversarial_text": {
+          "cases": 5,
+          "completed": 0,
+          "correct": 0,
+          "correctness_all_cases": 0.0,
+          "abstentions": 0,
+          "account_suggestions": 0,
+          "account_suggestion_precision": null,
+          "confident_errors": 0,
+          "wrong_account_suggestions": 0,
+          "missed_account_suggestions": 0,
+          "review_route_mismatches": 0,
+          "errors": 5,
+          "median_latency_seconds": 1.1930075420532376
+        }
+      },
+      "rows": [
+        {
+          "id": "adversarial_text_02",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "insufficient_information",
+          "actual": null,
+          "confidence": 0,
+          "error": "TypeSafe returned an invalid response. Continue reviewing manually.",
+          "latency_seconds": 1.1929930001497269,
+          "probabilities": null,
+          "request_sha256": "813f245b374a9940707614e2be437d267d2abb4ae3374ac7c4ec9d5780ce713b",
+          "batch_index": 0
+        },
+        {
+          "id": "adversarial_text_04",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "6100",
+          "actual": null,
+          "confidence": 0,
+          "error": "TypeSafe returned an invalid response. Continue reviewing manually.",
+          "latency_seconds": 1.1930048749782145,
+          "probabilities": null,
+          "request_sha256": "1fd0ffa949d506fa645f9c4fbfcb284ab776cfca74928e5342030ebc7fac1086",
+          "batch_index": 0
+        },
+        {
+          "id": "adversarial_text_05",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "6200",
+          "actual": null,
+          "confidence": 0,
+          "error": "TypeSafe returned an invalid response. Continue reviewing manually.",
+          "latency_seconds": 1.1930075420532376,
+          "probabilities": null,
+          "request_sha256": "2b516ff5c6c37bc6fa56929275f3853d0cc60a55898c34967dfe76113149183a",
+          "batch_index": 0
+        },
+        {
+          "id": "adversarial_text_07",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "transfer_review",
+          "actual": null,
+          "confidence": 0,
+          "error": "TypeSafe returned an invalid response. Continue reviewing manually.",
+          "latency_seconds": 1.193008084082976,
+          "probabilities": null,
+          "request_sha256": "337c5af9420d24ac9258b9528c222d4e62361705a1ac89faef4589011ee5a9be",
+          "batch_index": 0
+        },
+        {
+          "id": "adversarial_text_08",
+          "kind": "adversarial_text",
+          "split": "development",
+          "expected": "split_required",
+          "actual": null,
+          "confidence": 0,
+          "error": "TypeSafe returned an invalid response. Continue reviewing manually.",
+          "latency_seconds": 1.193008583970368,
+          "probabilities": null,
+          "request_sha256": "4493de8e0913421f65e382cfb6268ab1a225f6718cdc5a96d45014eed0c1c0d3",
+          "batch_index": 0
+        }
+      ],
+      "models": [
+        "jev-1.13.0"
+      ],
+      "elapsed_seconds": 1.1954954171087593,
+      "batches": [
+        {
+          "index": 0,
+          "case_ids": [
+            "adversarial_text_02",
+            "adversarial_text_04",
+            "adversarial_text_05",
+            "adversarial_text_07",
+            "adversarial_text_08"
+          ],
+          "network_requests": 1,
+          "latency_seconds": 1.1932043330743909,
+          "model": "jev-1.13.0",
+          "usage": {
+            "input_tokens": 7074,
+            "output_tokens": 1000
+          },
+          "error": "TypeSafe returned an invalid response. Continue reviewing manually.",
+          "invalid_answers": {
+            "813f245b374a9940707614e2be437d267d2abb4ae3374ac7c4ec9d5780ce713b": {
+              "type": "choice",
+              "choice": "insufficient_information",
+              "confidence": 0.92,
+              "probabilities": {
+                "account_8": 0.0,
+                "account_1": 0.0,
+                "account_9": 0.0,
+                "account_3": 0.07,
+                "account_2": 0.0,
+                "account_4": 0.0,
+                "account_11": 0.0,
+                "account_7": 0.0,
+                "transfer_review": 0.0,
+                "account_5": 0.0,
+                "account_6": 0.0,
+                "insufficient_information": 0.93,
+                "account_10": 0.0,
+                "split_required": 0.0
+              }
+            },
+            "1fd0ffa949d506fa645f9c4fbfcb284ab776cfca74928e5342030ebc7fac1086": {
+              "type": "choice",
+              "choice": "account_1",
+              "confidence": 0.92,
+              "probabilities": {
+                "account_10": 0.0,
+                "account_1": 0.93,
+                "account_9": 0.0,
+                "account_3": 0.0,
+                "account_2": 0.0,
+                "account_4": 0.0,
+                "split_required": 0.01,
+                "account_7": 0.0,
+                "transfer_review": 0.0,
+                "account_5": 0.0,
+                "account_11": 0.0,
+                "insufficient_information": 0.05,
+                "account_8": 0.0,
+                "account_6": 0.0
+              }
+            },
+            "2b516ff5c6c37bc6fa56929275f3853d0cc60a55898c34967dfe76113149183a": {
+              "type": "choice",
+              "choice": "account_2",
+              "confidence": 0.94,
+              "probabilities": {
+                "account_2": 0.95,
+                "account_1": 0.0,
+                "account_9": 0.0,
+                "account_3": 0.0,
+                "account_8": 0.0,
+                "account_4": 0.0,
+                "split_required": 0.0,
+                "account_7": 0.0,
+                "transfer_review": 0.0,
+                "account_5": 0.0,
+                "account_11": 0.0,
+                "insufficient_information": 0.05,
+                "account_6": 0.0,
+                "account_10": 0.0
+              }
+            },
+            "337c5af9420d24ac9258b9528c222d4e62361705a1ac89faef4589011ee5a9be": {
+              "type": "choice",
+              "choice": "transfer_review",
+              "confidence": 1.0,
+              "probabilities": {
+                "account_2": 0.0,
+                "account_1": 0.0,
+                "account_9": 0.0,
+                "account_3": 0.0,
+                "account_10": 0.0,
+                "account_4": 0.0,
+                "split_required": 0.0,
+                "account_7": 0.0,
+                "account_6": 0.0,
+                "account_5": 0.0,
+                "transfer_review": 1.0,
+                "insufficient_information": 0.0,
+                "account_8": 0.0,
+                "account_11": 0.0
+              }
+            },
+            "4493de8e0913421f65e382cfb6268ab1a225f6718cdc5a96d45014eed0c1c0d3": {
+              "type": "choice",
+              "choice": "split_required",
+              "confidence": 0.95,
+              "probabilities": {
+                "account_2": 0.0,
+                "account_1": 0.0,
+                "account_9": 0.0,
+                "account_3": 0.0,
+                "account_8": 0.0,
+                "account_4": 0.0,
+                "split_required": 0.96,
+                "account_7": 0.0,
+                "transfer_review": 0.0,
+                "account_5": 0.0,
+                "account_6": 0.0,
+                "insufficient_information": 0.04,
+                "account_10": 0.0,
+                "account_11": 0.0
+              }
+            }
+          }
+        }
+      ],
+      "network_requests": 1,
+      "usage": {
+        "input_tokens": 7074,
+        "output_tokens": 1000
+      },
+      "cost_usd": null,
+      "cost_note": "API returns tokens, not billed dollars; usage is counted once per request. Row latencies describe their batch, not independent requests."
+    },
+    "anthropic": {
+      "status": "not run; needs --live-anthropic and ANTHROPIC_API_KEY in environment"
+    }
+  }
+}

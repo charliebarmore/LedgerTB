@@ -31,7 +31,7 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def start_streamlit(port: int, ui_token: str) -> subprocess.Popen:
+def start_streamlit(port: int, ui_token: str, review_status=None) -> subprocess.Popen:
     """Launch `streamlit run app.py` headless on the given port, in its own
     process group so the whole tree can be torn down cleanly on exit.
 
@@ -44,10 +44,14 @@ def start_streamlit(port: int, ui_token: str) -> subprocess.Popen:
         "--server.address=127.0.0.1",
         f"--server.port={port}",
         "--server.runOnSave=false",
+        "--runner.magicEnabled=false",
         "--browser.gatherUsageStats=false",
     ]
     kwargs = {"cwd": str(APP_DIR),
               "env": dict(os.environ, LEDGERTB_UI_TOKEN=ui_token)}
+    if review_status is not None:
+        from utils.desktop_review_status import ENV
+        kwargs['env'][ENV] = str(review_status)
     if os.name == "posix":
         kwargs["start_new_session"] = True  # own process group for clean shutdown
     return subprocess.Popen(cmd, **kwargs)
@@ -139,7 +143,10 @@ def main() -> int:
     url = f"http://127.0.0.1:{port}"
     window_url = f"{url}/?t={ui_token}"
 
-    proc = start_streamlit(port, ui_token)
+    from utils.desktop_review_status import create_channel, CLOSE_MESSAGE, register_close_guard
+    review_channel, review_status = create_channel()
+    atexit.register(review_channel.cleanup)
+    proc = start_streamlit(port, ui_token, review_status)
     atexit.register(stop_streamlit, proc)
 
     if not wait_until_ready(url):
@@ -158,11 +165,15 @@ def main() -> int:
     geom = _window_geometry()
     win_x, win_y = geom.pop("x", None), geom.pop("y", None)
     window = webview.create_window(
-        WINDOW_TITLE, window_url, text_select=True, **geom
+        WINDOW_TITLE, window_url, text_select=True,
+        localization={'global.quitConfirmation': CLOSE_MESSAGE}, **geom
     )
-    webview.start(_place_window, (window, win_x, win_y))  # blocks until the window is closed
-
-    stop_streamlit(proc)
+    register_close_guard(window, review_status)
+    try:
+        webview.start(_place_window, (window, win_x, win_y))
+    finally:
+        stop_streamlit(proc)
+        review_channel.cleanup()
     return 0
 
 

@@ -1,0 +1,213 @@
+{
+  "date": "2026-09-18",
+  "source_commit": "8e3d734c543bfb9dcb4686fb24501ddc41208e1e",
+  "scope": "Local fictional usability trial; fake vaults, encrypted disposable books, simulated providers; no paid requests or release.",
+  "test_runs": {
+    "final-functional": {
+      "source_checkpoint": "dc5f2f4",
+      "junit": "output/usability-overnight-20260918/final-functional.xml",
+      "tests": 873.0,
+      "failures": 0.0,
+      "errors": 0.0,
+      "skipped": 5.0,
+      "time": 745.973
+    },
+    "performance": {
+      "source_checkpoint": "dc5f2f4",
+      "junit": "output/usability-overnight-20260918/performance.xml",
+      "tests": 3.0,
+      "failures": 0.0,
+      "errors": 0.0,
+      "skipped": 0.0,
+      "time": 56.668
+    },
+    "final-ui": {
+      "source_checkpoint": "8eb8b62",
+      "junit": "output/usability-overnight-20260918/final-ui.xml",
+      "tests": 26.0,
+      "failures": 0.0,
+      "errors": 0.0,
+      "skipped": 0.0,
+      "time": 120.367
+    },
+    "final-recovery": {
+      "source_checkpoint": "8e3d734",
+      "junit": "output/usability-overnight-20260918/final-recovery.xml",
+      "tests": 26.0,
+      "failures": 0.0,
+      "errors": 0.0,
+      "skipped": 0.0,
+      "time": 39.503
+    }
+  },
+  "source_browser": {
+    "final-browser-small": {
+      "passed": true,
+      "viewport": {
+        "width": 1024,
+        "height": 600
+      },
+      "startup_timeout_seconds": 20,
+      "checks": [
+        "consent",
+        "separate inclusion",
+        "acceptance",
+        "request reuse",
+        "navigation persistence",
+        "provider-off invalidation",
+        "failure preservation",
+        "immediate explicit retry",
+        "independent Anthropic opinion",
+        "OpenAI opinion",
+        "disagreement visibility",
+        "second-opinion reuse",
+        "model switch resets consent without a request",
+        "panel fits viewport without horizontal overflow",
+        "saved review resumes without a cloud call",
+        "closed panels leave no flex gaps and Include header stays on one line"
+      ]
+    },
+    "final-browser-laptop": {
+      "passed": true,
+      "viewport": {
+        "width": 1360,
+        "height": 768
+      },
+      "startup_timeout_seconds": 20,
+      "checks": [
+        "consent",
+        "separate inclusion",
+        "acceptance",
+        "request reuse",
+        "navigation persistence",
+        "provider-off invalidation",
+        "failure preservation",
+        "immediate explicit retry",
+        "independent Anthropic opinion",
+        "OpenAI opinion",
+        "disagreement visibility",
+        "second-opinion reuse",
+        "model switch resets consent without a request",
+        "panel fits viewport without horizontal overflow",
+        "saved review resumes without a cloud call",
+        "closed panels leave no flex gaps and Include header stays on one line"
+      ]
+    }
+  },
+  "limitations": [
+    "Full 868-pass run precedes final label/CSS and saved-confirmation key changes; separate UI, recovery and browser runs cover those changes.",
+    "Small-window browser run precedes saved-confirmation key change; larger-window run includes it.",
+    "Synthetic provider outputs test wiring and accounting, not live-model accuracy or calibrated confidence.",
+    "Earlier timeout/failure artifacts retained in output; passing reruns do not erase them.",
+    "Windows, real keychain, installed upgrade and independent CPA label adjudication remain separate rollout work."
+  ],
+  "packaged": {
+    "checks": [
+      "packaged SQLCipher unlock and CSV import",
+      "explicit Jev request and human acceptance",
+      "acceptance preserves exclusion",
+      "rerun and repeated request reuse",
+      "offline failure preserves staged rows",
+      "failed result reuse and explicit recovery retry",
+      "packaged Anthropic and OpenAI structured responses",
+      "independent disagreement display",
+      "second opinions preserve accepted category and exclusions",
+      "second opinions reuse requests",
+      "bulk select/clear preserves posting exclusion",
+      "human posting creates one balanced integer-cent entry",
+      "excluded row is not posted",
+      "import identity and human audit attribution retained",
+      "CSV preview shows 81.58 disbursements",
+      "journal entry displays a balanced debit/credit table",
+      "frozen worksheet generates all three PDF/XLSX exports",
+      "encrypted saved review resumes after posting without a request or inclusion change",
+      "book switch with identical client/account IDs resets consent and review state",
+      "second book receives no Jev result or entries and makes no new provider request"
+    ],
+    "requests": [
+      {
+        "questions": 1,
+        "payload_sha256": "6d12ab82c747bf376cb66ef512cead8ce98ac0a7d170ce2551fa781c97d03a0e",
+        "live": false,
+        "network_attempted": false,
+        "error_type": "URLError",
+        "success": false
+      },
+      {
+        "questions": 1,
+        "payload_sha256": "6d12ab82c747bf376cb66ef512cead8ce98ac0a7d170ce2551fa781c97d03a0e",
+        "live": false,
+        "network_attempted": false,
+        "model": "synthetic-fixture",
+        "usage": {},
+        "success": true
+      }
+    ],
+    "source_sha256": {
+      "config.py": "b71565128077dfb90a6f8a8bc4eb9fd6b2db405c8adfbf988a2452356770fa1a",
+      "pages/4_Import_Transactions.py": "0cf9f2a112dcae926e0a630c5a25a162cb82eae259cc5dc3113d1540bde6dd80",
+      "services/jev_categorization.py": "fb2a463722151f5dd571cf7beb706dd75eaeacb558bb4ae2cbe5f48816d7768a",
+      "utils/jev_review.py": "5fb98ac32d6a3481c1491a36ea2a0a3ea7f710309f94fd9decce1ee66ada2a54",
+      "utils/import_review.py": "d88cbd3f59e0ce4ca6bfdc34980f6522e621e705a0f3375e6f92113e88e6e019",
+      "services/csv_import.py": "39c867237920e1d88d52ad88cd4e327e9a1c86e6d2d937116dae665e368d2390",
+      "pages/2_Journal_Entries.py": "469e221d4d80e3b1cd8d6f4febc4a5a03b62dcae232066a7dd97ca522c901a29",
+      "pages/7_Dashboard.py": "551d217479b2a8e22c88e0d54d47898673ef8bcd243e209340de4ffdd067a87c",
+      "pages/12_Firm_Settings.py": "ec5e7daaba8a66386bb468a0e3ec705fa8b1230150286877865aa22494c972ff",
+      "services/review_categorization.py": "17a52764f88d1c103a5809689960e0d2e53fd757428193ac0606f18dc0a21259",
+      "utils/ai_review.py": "d949e0ee86ba164468f470c1ed4639d0454f32b187fc041e2c45830202836706",
+      "utils/ui.py": "b4c15babd5a3529bbb8d742b0c22cf86bf2909219715d91bd9b187bac29d118f",
+      "services/import_review_drafts.py": "226c766e90d2cbfee831553e5d40a112c09a7a88641bd21c2715b74a40d53b67",
+      "utils/review_recovery.py": "3f9d14732aa54907227716f935326849fc669d835c844ba7ea5ed1022790aada",
+      "utils/recovery.py": "0bc518887829ade05cb45e4457deda7916341fd6420a0ef9b6f81889bec41008",
+      "services/worksheet_export.py": "549aeb2d1d141a676f0cb977569ae4be1953379675069ed947ec01c9dd6a4f5c",
+      "services/worksheet_export_cache.py": "5a385bc2ba2ad4ad4c2c1a48f1c36383163257753d6574add384f67e3f981e28",
+      "pages/1_Trial_Balance_Worksheet.py": "f19e9089e698797b29a3f45bc3cf3c22dafa65e072cb8562a65812d2c9e1c7b4",
+      "database/migrations/026_import_review_drafts.sql": "2eb1469d8fd6fd86c7fe18a6e5b200d3225fb28d3f431c4f086acc78dd977ec5"
+    },
+    "live": false,
+    "limitations": "Frozen server mode in Chromium with test-only fake vault; not native window, installed upgrade or Windows acceptance.",
+    "checks_passed": 20,
+    "artifact_directory": "output/usability-overnight-20260918/packaged-final",
+    "book_switch_evidence": [
+      {
+        "name": "accounting.db",
+        "client_id": 1,
+        "journal_entries": 1,
+        "imported_transactions": 1,
+        "encrypted_header": true
+      },
+      {
+        "name": "Maple.ledgertb",
+        "client_id": 1,
+        "journal_entries": 0,
+        "imported_transactions": 0,
+        "encrypted_header": true
+      }
+    ],
+    "earlier_failure": "First run reached posting/exports/recovery, then failed a harness /var versus /private/var canonical-path selector; corrected selector and repeated complete flow. No app change or rebuild was needed."
+  },
+  "selfcheck": {
+    "exit_code": 1,
+    "passed_release_gate": false,
+    "only_reported_failure": "keyring backend: unexpected packaged_fake_vault.Keyring",
+    "inference": "All 51 imports, SQLCipher requirement and Apple Vision OCR completed without reported failure. Not real-keychain acceptance.",
+    "log": "output/usability-overnight-20260918/selfcheck.log"
+  },
+  "native_preview": {
+    "pid": 25822,
+    "startup_verified": true,
+    "full_native_workflow_verified": false,
+    "fake_vault": true,
+    "fixture": "output/usability-overnight-20260918/walkthrough/books",
+    "launcher": "output/usability-overnight-20260918/walkthrough/launch.py",
+    "screenshot": "output/usability-overnight-20260918/walkthrough/native-startup.png",
+    "left_open": true
+  },
+  "installed_app": {
+    "path": "/Applications/LedgerTB.app",
+    "version": "1.7.2",
+    "plist_mtime_ns": 1788773329000000000,
+    "executable_mtime_ns": 1788773370000000000,
+    "timestamps_unchanged": true
+  }
+}

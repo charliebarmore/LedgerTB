@@ -1,0 +1,126 @@
+{
+  "date": "2026-09-18",
+  "purpose": "Provider/model choice and independent second opinions",
+  "functional_tests": {
+    "tests": "853",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "5",
+    "time": "396.663"
+  },
+  "functional_qualification": "848 passed and five Windows-only skips. Full suite precedes final display-only grouping of provider/model selectors and disclosure; all 26 affected review-screen tests passed afterward.",
+  "final_ui_tests": {
+    "passed": 26,
+    "seconds": 71.53
+  },
+  "performance_tests": {
+    "tests": "3",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "57.807"
+  },
+  "source_browser": {
+    "passed": true,
+    "checks": [
+      "consent",
+      "separate inclusion",
+      "acceptance",
+      "request reuse",
+      "navigation persistence",
+      "provider-off invalidation",
+      "failure preservation",
+      "immediate explicit retry",
+      "independent Anthropic opinion",
+      "OpenAI opinion",
+      "disagreement visibility",
+      "second-opinion reuse",
+      "model switch resets consent without a request"
+    ]
+  },
+  "live_provider_calls": 0,
+  "limitations": [
+    "Anthropic/OpenAI response contracts and controls tested with fake transports; live access, usage and cost unverified.",
+    "Synthetic books and fake credential vaults only; no real-vault, installed-upgrade or Windows native acceptance.",
+    "Small viewports can position the Streamlit popover partly above the visible page; keyboard model selection verified, native visual walkthrough remains required."
+  ],
+  "artifact_directory": "output/provider-review-20260918",
+  "packaged": {
+    "checks": [
+      "packaged SQLCipher unlock and CSV import",
+      "explicit Jev request and human acceptance",
+      "acceptance preserves exclusion",
+      "rerun and repeated request reuse",
+      "offline failure preserves staged rows",
+      "failed result reuse and explicit recovery retry",
+      "packaged Anthropic and OpenAI structured responses",
+      "independent disagreement display",
+      "second opinions preserve accepted category and exclusions",
+      "second opinions reuse requests",
+      "bulk select/clear preserves posting exclusion",
+      "human posting creates one balanced integer-cent entry",
+      "excluded row is not posted",
+      "import identity and human audit attribution retained",
+      "CSV preview shows 81.58 disbursements",
+      "journal entry displays a balanced debit/credit table",
+      "book switch with identical client/account IDs resets consent and review state",
+      "second book receives no Jev result or entries and makes no new provider request"
+    ],
+    "requests": [
+      {
+        "questions": 1,
+        "payload_sha256": "53f0e0f228d4897fe73b97a86cad7a92e942b49009057077f38bd0826d70ed2c",
+        "live": false,
+        "network_attempted": false,
+        "error_type": "URLError",
+        "success": false
+      },
+      {
+        "questions": 1,
+        "payload_sha256": "53f0e0f228d4897fe73b97a86cad7a92e942b49009057077f38bd0826d70ed2c",
+        "live": false,
+        "network_attempted": false,
+        "model": "synthetic-fixture",
+        "usage": {},
+        "success": true
+      }
+    ],
+    "source_sha256": {
+      "config.py": "b71565128077dfb90a6f8a8bc4eb9fd6b2db405c8adfbf988a2452356770fa1a",
+      "pages/4_Import_Transactions.py": "7f83a4858975e9c528641630be5c51a21819574b870af7a6102146afa93ed9c8",
+      "services/jev_categorization.py": "fb2a463722151f5dd571cf7beb706dd75eaeacb558bb4ae2cbe5f48816d7768a",
+      "utils/jev_review.py": "ac4cfd59bc474d50d2b7aa4c162722d4a7409a0facbe1404fbaea959848802de",
+      "utils/import_review.py": "3cd97d3e7a3e05f2a8ef0c6b256801755a484dbeda671fe423d6f0267d1366be",
+      "services/csv_import.py": "39c867237920e1d88d52ad88cd4e327e9a1c86e6d2d937116dae665e368d2390",
+      "pages/2_Journal_Entries.py": "4611aac2dece23fe3407c4ada88853af16f5eb5c9d7ef7d21da956d96b0f49c7",
+      "pages/7_Dashboard.py": "551d217479b2a8e22c88e0d54d47898673ef8bcd243e209340de4ffdd067a87c",
+      "pages/12_Firm_Settings.py": "ec5e7daaba8a66386bb468a0e3ec705fa8b1230150286877865aa22494c972ff",
+      "services/review_categorization.py": "17a52764f88d1c103a5809689960e0d2e53fd757428193ac0606f18dc0a21259",
+      "utils/ai_review.py": "4a6139adbac27c94da0982147e9d573144d04b86b6c8aea5d49a91769b8b1e7d"
+    },
+    "live": false,
+    "limitations": "Frozen server mode in Chromium with test-only fake vault; not native window, installed upgrade or Windows acceptance."
+  },
+  "simulated_provider_requests": [
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "live": false,
+      "network_attempted": false
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "live": false,
+      "network_attempted": false
+    }
+  ],
+  "native_preview": {
+    "window_title": "LedgerTB",
+    "pid": 45686,
+    "scope": "Native startup/frontmost only; full workflow checked in frozen server through Chromium.",
+    "fixture": "output/provider-review-20260918/walkthrough/books",
+    "installed_application_changed": false
+  },
+  "harness_attempts": "Earlier runs exposed and fixed provider widget default/rerun state. A later click-based model test stopped at a popover obstruction; keyboard selection passed, with no production bypass. Failed artifacts retained separately."
+}

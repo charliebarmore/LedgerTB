@@ -2,10 +2,6 @@
 
 from datetime import date
 import json
-import os
-from pathlib import Path
-import subprocess
-import sys
 
 import pytest
 
@@ -16,6 +12,7 @@ from models.transaction import ImportedTransaction
 from services.posting import post_transaction
 from services.recurring_entries import generate_occurrence
 from tests.helpers.cedar import JANUARY, create_cedar
+from tests.helpers.review_crash_process import run_worker
 
 
 @pytest.mark.parametrize("operation", ["generate", "approve", "post"])
@@ -30,11 +27,7 @@ def test_process_death_preserves_atomicity_and_retry(db, tmp_path, operation, bo
                   cash=accounts["cash"], revenue=accounts["revenue"])
     fixture = tmp_path / "crash-fixture.json"
     fixture.write_text(json.dumps(config))
-    result = subprocess.run(
-        [sys.executable, str(Path(__file__).parent / "helpers/accounting_crash_worker.py"), str(fixture)],
-        env=dict(os.environ, LEDGERTB_DB_PATH=str(dbc.DATABASE_PATH), ANTHROPIC_API_KEY="test-key-never-used"),
-        capture_output=True, text=True, timeout=30,
-    )
+    result = run_worker(fixture, dbc.DATABASE_PATH, worker='accounting_crash_worker.py')
     assert result.returncode == 73, result.stderr
     committed = boundary == "after_commit"
     with dbc.get_cursor() as cur:

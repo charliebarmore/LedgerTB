@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "checks": [
+    "consent",
+    "separate inclusion",
+    "acceptance",
+    "request reuse",
+    "navigation persistence",
+    "provider-off invalidation",
+    "failure preservation",
+    "immediate explicit retry"
+  ],
+  "source_commit": "87aa093816feb210ce2a7d7b740d7a1bcd929c60",
+  "fixture": "Fake provider/vault; disposable SQLCipher book; Chromium",
+  "artifact_directory": "output/jev-overnight-20260917/source-browser-final"
+}

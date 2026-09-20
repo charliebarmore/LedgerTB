@@ -5,6 +5,10 @@
 # that process to the LAN: every supported launch path must remain loopback-only.
 address = "127.0.0.1"
 
+[runner]
+# Pages render explicitly with st.*. Skip magic's recursive AST rewrite.
+magicEnabled = false
+
 [theme]
 base = "light"
 primaryColor = "#1f3a5f"            # navy — buttons, accents, active nav

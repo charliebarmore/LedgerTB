@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-18",
+  "source_commit": "87aa093816feb210ce2a7d7b740d7a1bcd929c60",
+  "bundle": "output/jev-overnight-20260917/dist/LedgerTB.app",
+  "fixture": "output/jev-overnight-20260917/native-fixture",
+  "credential_backend": "packaged_fake_vault.Keyring",
+  "live_provider_credentials": false,
+  "native_startup": {
+    "passed": true,
+    "observed": "Native LedgerTB window with passphrase field, unchecked Remember on this computer, Unlock button, Book file control and disclosure footer. Window loopback port matched isolated server log.",
+    "scope": "Startup only; no native-window unlock or full workflow acceptance.",
+    "launcher_pid": 84264,
+    "server_pid": 84301,
+    "test_process_exit_verified": true,
+    "tool_delay_seconds": 7865.7352
+  },
+  "selfcheck": {
+    "exit_code": 1,
+    "passed": false,
+    "only_reported_failure": "keyring backend: unexpected packaged_fake_vault.Keyring",
+    "inference_from_complete_failure_list": "All 44 module imports, SQLCipher requirement and Apple Vision OCR completed without reported failure.",
+    "qualification": "Expected identity rejection with test-only fake vault; not a passing release gate or real keychain acceptance. Production gate unchanged.",
+    "log": "output/jev-overnight-20260917/package-selfcheck-final.log"
+  },
+  "limitations": [
+    "No installed application replacement",
+    "No native installed-upgrade acceptance",
+    "No Windows native acceptance",
+    "No real keychain operations"
+  ],
+  "native_log": "output/jev-overnight-20260917/native-window.log"
+}

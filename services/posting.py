@@ -97,6 +97,7 @@ def post_transaction(
     learn: bool = True,
     duplicate_override: bool = False,
     duplicate_override_reason: Optional[str] = None,
+    review_context: Optional[dict] = None,
 ) -> Tuple[JournalEntry, ImportedTransaction]:
     """Post one categorized bank transaction as a balanced journal entry.
 
@@ -130,6 +131,19 @@ def post_transaction(
     conn = get_connection()
     try:
         cursor = conn.cursor()
+        if review_context is not None:
+            # Hold the write lock from baseline check through the posting commit.
+            cursor.execute('BEGIN IMMEDIATE')
+            from services.book_generation import require_current
+            from services.import_review_drafts import ReviewConflict
+            require_current(cursor, review_context['generation'])
+            saved = cursor.execute('SELECT revision FROM import_review_drafts WHERE client_id=?',
+                                   (client_id,)).fetchone()
+            if (saved[0] if saved else None) != review_context['revision']:
+                raise ReviewConflict('The saved review changed in another window. Review the current saved copy before posting.')
+        if transaction.get('_book_generation') is not None:
+            from services.book_generation import require_current
+            require_current(cursor, transaction['_book_generation'])
         cursor.execute(
             """
             SELECT * FROM imported_transactions

@@ -129,6 +129,9 @@ def render_client_selector() -> Optional[int]:
     Render the client selector in the sidebar with sub-navigation and return the selected client ID.
     Returns None if no clients exist.
     """
+    from utils.review_lifecycle import protect_restored_book, checkpoint_active_review
+    protect_restored_book()
+    checkpoint_active_review()
     apply_sidebar_style()
 
     clients = Client.get_all(active_only=True)
@@ -154,16 +157,32 @@ def render_client_selector() -> Optional[int]:
     if st.session_state.selected_client_id not in client_options:
         st.session_state.selected_client_id = clients[0].id
 
+    # Rotate on cancellation: the browser otherwise restores its rejected choice.
+    selector_generation = st.session_state.get("_client_selector_generation", 0)
+    selector_key = "client_selector" if not selector_generation else f"client_selector_{selector_generation}"
     # Render selector
     selected_id = st.sidebar.selectbox(
         "Select Client",
         options=list(client_options.keys()),
         format_func=lambda x: client_options[x],
         index=list(client_options.keys()).index(st.session_state.selected_client_id),
-        key="client_selector"
+        key=selector_key
     )
 
-    # Update session state
+    previous_id = st.session_state.selected_client_id
+    if selected_id != previous_id:
+        from utils.review_guard import confirm_transition
+        from utils.import_review import scope_import_state_to_client
+        decision = confirm_transition(previous_id, f"client_{selected_id}",
+                                      f"switching to {client_options[selected_id]}")
+        if decision == 'cancel':
+            st.session_state['_client_selector_generation'] = selector_generation + 1
+            st.rerun()
+        if decision != 'continue':
+            st.stop()
+        scope_import_state_to_client(st.session_state, selected_id, book=db_connection.DATABASE_PATH)
+
+    # Update the effective context only after any unsaved review is resolved.
     st.session_state.selected_client_id = selected_id
     sync_active_client_context(
         st.session_state, selected_id, db_connection.DATABASE_PATH

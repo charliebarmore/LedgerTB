@@ -361,5 +361,12 @@ def _cursor(commit: bool):
 def init_database():
     """Initialize the database with tables (requires the passphrase to be set)."""
     conn = get_connection()
-    create_tables(conn)
-    conn.close()
+    try:
+        # A read-only reader cannot upgrade a book another session owns.
+        # Optional features tolerate absent newer tables until a writer opens it.
+        if not READ_ONLY:
+            create_tables(conn)
+    finally:
+        # A failed upgrade must release both SQLCipher and its maintenance
+        # lease, so a safe retry or backup restore can proceed in this process.
+        conn.close()

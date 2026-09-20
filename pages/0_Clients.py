@@ -181,7 +181,7 @@ if view == "View Clients":
                             "timing or settlement flows, and account-specific "
                             "facts that affect categorization. This field, "
                             "entity type, and business type are sent to "
-                            "Anthropic only when AI categorization runs. "
+                            "the selected cloud provider only when AI categorization runs. "
                             "General Notes are not sent."
                         ),
                     )
@@ -384,7 +384,7 @@ else:
             height=120,
             help=(
                 "Optional. This field, entity type, and business type are sent "
-                "to Anthropic only when AI categorization runs. General Notes "
+                "to the selected cloud provider only when AI categorization runs. General Notes "
                 "are not sent."
             ),
         )

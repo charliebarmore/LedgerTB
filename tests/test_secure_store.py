@@ -84,3 +84,12 @@ def test_failed_legacy_migration_preserves_plaintext_for_recovery(tmp_path, monk
 
     assert migrate_legacy_secret("api", legacy) is None
     assert legacy.exists()
+
+
+def test_unstubbed_test_backend_cannot_reach_the_os_vault():
+    import keyring
+    from keyring.backends.fail import Keyring
+    from keyring.errors import NoKeyringError
+    assert isinstance(keyring.get_keyring(), Keyring)
+    with pytest.raises(NoKeyringError):
+        keyring.get_password("fictional-test-only", "never-an-os-secret")

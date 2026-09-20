@@ -75,7 +75,7 @@ def view_switcher(options, key, label="View"):
     current = st.session_state.get(key, options[0])
     if current not in options:
         current = options[0]
-    if st.session_state.get(shadow_key) != current:
+    if widget_key not in st.session_state or st.session_state.get(shadow_key) != current:
         st.session_state[widget_key] = current
 
     # ``st.html`` treats this as styling rather than Markdown content, keeping
@@ -87,6 +87,36 @@ def view_switcher(options, key, label="View"):
     st.session_state[key] = selected
     st.session_state[shadow_key] = selected
     return selected
+
+
+def review_action_panels():
+    """One in-page action panel, with mounted widgets so reruns retain edits.
+
+    Floating popovers clip long selections/model controls in short desktop
+    windows. These scoped containers stay in normal document flow. Closed
+    panels are hidden from both layout and the accessibility tree, not unmounted.
+    """
+    actions = {'select': 'Select rows for actions', 'ai': 'AI suggestions',
+               'bulk': 'Change category', 'sort': 'Sort'}
+    key = 'review_action_panel'
+    def toggle(name):
+        st.session_state[key] = None if st.session_state.get(key) == name else name
+    active = st.session_state.get(key)
+    with st.container(horizontal=True):
+        for name, label in actions.items():
+            st.button(f'Close {label}' if active == name else label,
+                      key=f'review_action_toggle_{name}',
+                      type='primary' if active == name else 'secondary',
+                      on_click=toggle, args=(name,))
+    # Streamlit's zero-height layout wrapper still consumes a flex gap. Hide
+    # the observed wrapper too, while keeping every widget mounted in Python.
+    rules = ''.join(
+        f'.st-key-review_panel_{name}, '
+        f'[data-testid="stLayoutWrapper"]:has(> .st-key-review_panel_{name}) '
+        '{ display: none; }' for name in actions if name != active
+    )
+    st.html('<style>' + rules + '</style>')
+    return {name: st.container(key=f'review_panel_{name}', border=True) for name in actions}
 
 
 _PARKING_HINTS = ("ask my accountant", "uncategorized", "suspense")
