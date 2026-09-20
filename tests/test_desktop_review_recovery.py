@@ -1,6 +1,7 @@
 """Crash/restore/window boundaries on disposable SQLCipher books and fake vaults."""
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -197,7 +198,10 @@ def test_close_status_is_private_boolean_only_and_dynamic(tmp_path, monkeypatch)
     from webview.event import Event
     directory, path = channel.create_channel()
     try:
-        assert Path(directory.name).stat().st_mode & 0o077 == 0
+        # Windows access control uses inherited ACLs, not POSIX mode bits.
+        # Keep all channel-content and close-guard assertions on both systems.
+        if os.name == 'posix':
+            assert Path(directory.name).stat().st_mode & 0o077 == 0
         monkeypatch.setenv(channel.ENV, str(path))
         window = SimpleNamespace(events=SimpleNamespace(closing=Event(None, should_lock=True)))
         channel.register_close_guard(window, path)
