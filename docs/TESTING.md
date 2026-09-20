@@ -118,8 +118,12 @@ request reuse guarantees, and remaining packaged-app acceptance.
 See [the CPA usability trial guide](CPA-USABILITY-TRIAL-2026-09-18.md) for
 saved-review semantics, read-only behavior, worksheet export reuse, the fictional
 bank/card scenario matrix and isolated desktop verification commands. In
-particular, closing a session still loses edits made after its last explicit
-**Save review for later**; tests distinguish saved copies from transient edits.
+particular, explicit **Save review for later** copies remain distinct from
+automatic encrypted recovery checkpoints. Recovery captures completed
+server-side edits; edits still in flight can be lost. See the
+[desktop-pilot guide](DESKTOP-PILOT-2026-09-19.md) for crash, native-close and
+restored-book checks, and the [v1.8.0 release review](RELEASE-REVIEW-1.8.0.md)
+for current candidate qualification.
 
 ```sh
 python -m pytest -q tests/test_import_workflow_scenarios.py \
