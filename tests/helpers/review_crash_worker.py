@@ -13,6 +13,7 @@ from utils import secure_store
 
 if __name__ == "__main__":
     fixture = json.loads(Path(sys.argv[1]).read_text())
+    Path(sys.argv[1]).with_suffix('.ready').write_text('Fixture imports complete\n')
     dbc.set_active_key(fixture["key"])
     secure_store.get_secret = lambda *a: None
     original = AuditLog.write
@@ -23,7 +24,12 @@ if __name__ == "__main__":
             os._exit(73)
 
         AuditLog.write = die
-    drafts.save(
-        fixture["client_id"], [fixture["row"]], expected_revision=fixture["revision"]
-    )
+    if fixture.get('mode') == 'recovery':
+        from services import review_recovery_store, book_generation
+        review_recovery_store.save(fixture['client_id'], 'crash-window', [fixture['row']],
+                                   expected_generation=book_generation.current())
+    else:
+        drafts.save(
+            fixture["client_id"], [fixture["row"]], expected_revision=fixture["revision"]
+        )
     os._exit(73)

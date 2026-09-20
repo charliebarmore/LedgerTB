@@ -42,7 +42,7 @@ def render_saved_review(client_id, duplicate_check):
             key=_control_key(client_id, "resume", info["revision"]),
         ):
             try:
-                loaded = drafts.load(client_id)
+                loaded = drafts.load(client_id, expected_revision=info['revision'])
                 if not loaded:
                     raise drafts.ReviewConflict(
                         "The saved copy was removed in another window."
@@ -93,6 +93,8 @@ def render_saved_review(client_id, duplicate_check):
 def render_save_review(client_id, rows):
     if review_is_dirty(st.session_state, client_id):
         st.caption("Unsaved changes · Save this review before closing the app.")
+        if status := st.session_state.get('_review_recovery_status'):
+            st.caption(status)
     else:
         st.caption("Saved in this encrypted book. Duplicate overrides are checked again on resume.")
     if st.button(

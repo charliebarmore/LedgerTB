@@ -28,10 +28,13 @@ def test_launchers_configure_downloads_and_keep_links_in_app(monkeypatch, tmp_pa
     observed = []
     stopped = []
     proc = object()
+    from webview.event import Event
 
     def create_window(*args, **kwargs):
         observed.append(dict(settings))
-        return object()
+        window = SimpleNamespace(events=SimpleNamespace(closing=Event(None, should_lock=True)))
+        assert 'Save review for later' in kwargs['localization']['global.quitConfirmation']
+        return window
 
     monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(
         settings=settings, create_window=create_window, start=lambda *a, **k: None,

@@ -279,8 +279,8 @@ if backups:
                 )
 
             safety_copy = restore_backup(selected, audit=_record_restore)
-            from utils.import_review import scope_import_state_to_client
-            scope_import_state_to_client(st.session_state, None, book=dbconn.DATABASE_PATH)
+            from utils.review_lifecycle import acknowledge_restored_book
+            acknowledge_restored_book()
             st.session_state['restore_complete_message'] = (
                 f"Restore complete. Pre-restore safety copy: {safety_copy.name}. "
                 "Resume any saved review from the restored book before posting."

@@ -108,6 +108,7 @@ def _run_server() -> int:
         "--server.address=127.0.0.1",
         f"--server.port={port}",
         "--server.runOnSave=false",
+        "--runner.magicEnabled=false",
         "--browser.gatherUsageStats=false",
         "--global.developmentMode=false",
         # Also set in .streamlit/config.toml; passed here too so the product
@@ -376,7 +377,8 @@ def _selfcheck() -> int:
             "services.import_review_drafts", "utils.review_recovery", "utils.review_guard", "utils.recovery",
             "services.worksheet_export", "services.worksheet_export_cache",
             "urllib.request", "certifi", "services.document_import", "pypdfium2", "PIL",
-            "keyring", "version", "utils.desktop_window"]
+            "keyring", "version", "utils.desktop_window", "utils.desktop_review_status",
+            "utils.review_lifecycle", "services.review_recovery_store", "services.book_generation"]
     failed = []
     for m in mods:
         try:
@@ -507,6 +509,9 @@ def main() -> int:
 
     env = dict(os.environ, LEDGERTB_MODE="server", LEDGERTB_PORT=str(port),
                LEDGERTB_UI_TOKEN=ui_token, LEDGERTB_PARENT_PID=str(os.getpid()))
+    from utils.desktop_review_status import create_channel, ENV, CLOSE_MESSAGE, register_close_guard
+    review_channel, review_status = create_channel()
+    env[ENV] = str(review_status)
     kwargs = {"env": env}
     if os.name == "posix":
         kwargs["start_new_session"] = True
@@ -554,8 +559,10 @@ def main() -> int:
             geom = _window_geometry()
             win_x, win_y = geom.pop("x", None), geom.pop("y", None)
             window = webview.create_window(
-                WINDOW_TITLE, window_url, text_select=True, **geom
+                WINDOW_TITLE, window_url, text_select=True,
+                localization={'global.quitConfirmation': CLOSE_MESSAGE}, **geom
             )
+            register_close_guard(window, review_status)
             gui_returned = threading.Event()
             _register_windows_close_handler(window, stop_child, gui_returned)
             # Pin the native backend per platform (macOS WebKit, Windows
@@ -575,6 +582,7 @@ def main() -> int:
         return 0
     finally:
         stop_child()
+        review_channel.cleanup()
         if server_log is not None:
             server_log.close()
 

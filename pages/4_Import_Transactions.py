@@ -45,6 +45,8 @@ from utils import icons
 from utils.recovery import save_error_message
 from utils.review_recovery import render_saved_review, render_save_review
 from utils.review_guard import queue_replacement, render_pending_replacement, confirm_transition
+from utils.review_lifecycle import (protect_restored_book, checkpoint_active_review,
+                                    render_recovery_copies, conflicting_saved_review)
 from utils.import_review import (
     classify_review_rows,
     ensure_row_ids,
@@ -82,6 +84,8 @@ scope_import_state_to_client(
 # Get client info
 client = Client.get_by_id(client_id)
 st.caption(f"Viewing: **{client.name}**")
+protect_restored_book()
+checkpoint_active_review()
 render_pending_replacement(client_id)
 if st.session_state.get('_review_clear_pending'):
     decision = confirm_transition(client_id, 'clear', 'clearing this review')
@@ -90,6 +94,7 @@ if st.session_state.get('_review_clear_pending'):
         st.rerun()
     if decision == 'continue':
         st.session_state.transactions_to_review = []
+        checkpoint_active_review()
         st.session_state.pop('_review_clear_pending', None)
         st.rerun()
     st.stop()
@@ -1380,6 +1385,7 @@ elif selected_tab == "Review & Categorize":
         st.session_state.post_result = None
 
     render_saved_review(client_id, apply_duplicate_checks)
+    render_recovery_copies(client_id, apply_duplicate_checks)
 
     # Check if import just completed - show "What's next?" prompt
     if st.session_state.get('import_complete'):
@@ -1960,11 +1966,13 @@ elif selected_tab == "Review & Categorize":
 
         st.divider()
 
+        checkpoint_active_review()
+        review_conflict = conflicting_saved_review(client_id)
         render_save_review(client_id, transactions)
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            if st.button("Post Transactions", type="primary", disabled=dbconn.READ_ONLY):
+            if st.button("Post Transactions", type="primary", disabled=dbconn.READ_ONLY or review_conflict):
                 plan = classify_review_rows(
                     transactions,
                     is_included=lambda t: st.session_state.get(row_key("include", t), t.get('include', True)),
@@ -1989,6 +1997,8 @@ elif selected_tab == "Review & Categorize":
                             batch_id=t['batch_id'],
                             duplicate_override=t.get('duplicate_override', False),
                             duplicate_override_reason=t.get('duplicate_override_reason'),
+                            review_context={'generation': st.session_state.get('_review_generation'),
+                                            'revision': st.session_state.get('review_saved_revision')},
                         )
                         created += 1
 
@@ -2029,12 +2039,14 @@ elif selected_tab == "Review & Categorize":
                         msg += f" — {skipped} excluded"
                     msg += "."
                     st.session_state.transactions_to_review = []
+                    checkpoint_active_review()
                     st.session_state.import_complete = True
                     st.session_state.import_complete_msg = msg
                     st.rerun()
                 else:
                     # Partial: keep unresolved rows and report exactly what happened.
                     st.session_state.transactions_to_review = remaining
+                    checkpoint_active_review()
                     parts = []
                     if created:
                         parts.append(f"posted {created}")

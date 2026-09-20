@@ -20,6 +20,25 @@ keyring.set_keyring(UnavailableTestKeyring())
 
 import pytest
 
+
+@pytest.fixture(scope='session', autouse=True)
+def _cache_installed_component_discovery():
+    """Discover actual manifests once; the suite never changes installed packages.
+
+    Each AppTest still gets a fresh component manager/registry. Only the costly
+    read-only distribution scan is reused, not widget or application state.
+    """
+    from functools import lru_cache
+    try:
+        from streamlit.components.v2 import manifest_scanner
+    except ImportError:  # Older supported Streamlit versions have no v2 scanner.
+        yield
+        return
+    original = manifest_scanner.scan_component_manifests
+    manifest_scanner.scan_component_manifests = lru_cache(maxsize=None)(original)
+    yield
+    manifest_scanner.scan_component_manifests = original
+
 from database import connection as db_connection
 from database.connection import init_database
 from models.client import Client

@@ -79,18 +79,26 @@ def content_fingerprint(rows):
     return hashlib.sha256(json.dumps(items).encode()).hexdigest()
 
 
-def save(client_id, rows, *, expected_revision=None):
+def encode_payload(rows):
     encoded = _encode_rows(rows)
     payload = json.dumps(
         {"version": 1, "rows": encoded}, separators=(",", ":"), allow_nan=False
     )
     if len(payload.encode()) > MAX_BYTES:
         raise ValueError("The review is too large to save as one copy.")
+    return payload
+
+
+def save(client_id, rows, *, expected_revision=None, expected_generation=None):
+    payload = encode_payload(rows)
     revision = uuid.uuid4().hex
     with get_cursor(commit=True) as cur:
         # Lock before comparing the revision: two windows must not overwrite
         # one another between a read and write.
         cur.execute("BEGIN IMMEDIATE")
+        if expected_generation is not None:
+            from services.book_generation import require_current
+            require_current(cur, expected_generation)
         old = cur.execute(
             "SELECT revision,row_count FROM import_review_drafts WHERE client_id=?",
             (client_id,),
@@ -121,7 +129,7 @@ def save(client_id, rows, *, expected_revision=None):
     return revision
 
 
-def load(client_id):
+def load(client_id, *, expected_revision=None):
     with get_cursor() as cur:
         record = cur.execute(
             "SELECT revision,payload FROM import_review_drafts WHERE client_id=?",
@@ -129,7 +137,13 @@ def load(client_id):
         ).fetchone()
     if not record:
         return None
-    data = json.loads(record["payload"])
+    if expected_revision is not None and record['revision'] != expected_revision:
+        raise ReviewConflict('The saved review changed in another window. Refresh and choose the current copy.')
+    return record["revision"], decode_payload(record["payload"])
+
+
+def decode_payload(payload):
+    data = json.loads(payload)
     if data.get("version") != 1 or len(data["rows"]) > MAX_ROWS:
         raise ValueError("Unsupported saved review.")
     rows = []
@@ -144,7 +158,7 @@ def load(client_id):
         # against the current ledger, including anything posted since saving.
         row["duplicate_override"] = False
         rows.append(row)
-    return record["revision"], rows
+    return rows
 
 
 def discard(client_id, expected_revision):

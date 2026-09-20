@@ -22,7 +22,7 @@ def _restore_audit(conn):
                    new_values={"restored_from": "synthetic prior-release book"})
 
 
-@pytest.mark.parametrize("last_migration", [23, 24, 25])
+@pytest.mark.parametrize("last_migration", [23, 24, 25, 26])
 def test_populated_prior_schema_upgrades_and_restores_without_rewriting_history(
     db, tmp_path, monkeypatch, last_migration,
 ):
@@ -92,7 +92,7 @@ def test_populated_prior_schema_upgrades_and_restores_without_rewriting_history(
                     assert actual[:len(expected)] == expected
                 else:
                     assert actual == expected, table
-            assert cur.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 26
+            assert cur.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0] == 27
 
     assert_history()
     restore_backup(backup.database_path, tmp_path / "backups", audit=_restore_audit)
@@ -113,3 +113,60 @@ def test_populated_prior_schema_upgrades_and_restores_without_rewriting_history(
         assert replacement["generation_number"] == 2
         DraftEntry.get_by_id(replacement["draft_id"], client_id).approve()
         assert JournalEntry.count(client_id) == 2
+
+
+@pytest.mark.parametrize('operation', ['upgrade', 'restore'])
+def test_failed_upgrade_rolls_back_and_retry_preserves_populated_history(db, tmp_path, monkeypatch, operation):
+    """Fail after new DDL on a real encrypted v26 book, then retry successfully."""
+    historical = tmp_path / 'prior-migrations'
+    historical.mkdir()
+    for path in schema.MIGRATIONS_DIR.glob('*.sql'):
+        if int(path.name[:3]) <= 26:
+            shutil.copy2(path, historical / path.name)
+    monkeypatch.setattr(dbc, 'DATABASE_PATH', tmp_path / 'prior-upgrade.db')
+    with monkeypatch.context() as m:
+        m.setattr(schema, 'MIGRATIONS_DIR', historical)
+        dbc.init_database()
+    cid = Client(name='Fictional failed upgrade').save(seed_accounts=False)
+    cash = Account(client_id=cid, account_number='1000', name='Cash', type='Asset')
+    equity = Account(client_id=cid, account_number='3000', name='Capital', type='Equity')
+    cash.save()
+    equity.save()
+    post_entry(cid, date(2026, 1, 1), [(cash.id, 33.33, 0), (equity.id, 0, 33.33)])
+    from services import import_review_drafts as drafts, book_generation
+    review_revision = drafts.save(cid, [dict(date='2026-01-02', description='Unposted fictional paper',
+        amount=-10.01, bank_account_id=cash.id, include=False)])
+    backup = create_backup(tmp_path / 'backups')
+    def snapshot():
+        with dbc.get_cursor() as cur:
+            return {table: [tuple(r) for r in cur.execute(f'SELECT * FROM {table} ORDER BY rowid')]
+                    for table in ('clients', 'accounts', 'journal_entries', 'journal_entry_lines',
+                                  'import_review_drafts', 'audit_log', 'schema_migrations')}
+    before = snapshot()
+    (historical / '027_review_recovery.sql').write_text(
+        'CREATE TABLE partial_upgrade (id INTEGER);\nCREATE TABLE partial_upgrade (id INTEGER);')
+    with monkeypatch.context() as m:
+        m.setattr(schema, 'MIGRATIONS_DIR', historical)
+        with pytest.raises(Exception):
+            if operation == 'upgrade':
+                dbc.init_database()
+            else:
+                restore_backup(backup.database_path, tmp_path / 'backups', audit=_restore_audit)
+    assert snapshot() == before
+    assert book_generation.current() is None
+    with dbc.get_cursor() as cur:
+        assert cur.execute("SELECT name FROM sqlite_master WHERE name='partial_upgrade'").fetchone() is None
+        assert cur.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+    # Remove the simulated fault by returning to shipped migrations. Both
+    # direct retry and restoring the pre-upgrade backup must become usable.
+    if operation == 'upgrade':
+        dbc.init_database()
+    else:
+        restore_backup(backup.database_path, tmp_path / 'backups', audit=_restore_audit)
+    assert book_generation.current()
+    assert JournalEntry.count(cid) == 1
+    assert drafts.load(cid)[0] == review_revision
+    after = snapshot()
+    for table in before:
+        assert after[table][:len(before[table])] == before[table]
+    assert b'Unposted fictional paper' not in dbc.DATABASE_PATH.read_bytes()

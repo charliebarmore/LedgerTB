@@ -156,6 +156,8 @@ _CLIENT_IMPORT_STATE_KEYS = {
     "_review_replacement",
     "_review_clear_pending",
     "_review_book_switch_pending",
+    "_review_generation",
+    "_review_recovery_status",
     "review_saved_revision",
     "review_saved_message",
     "review_resume_replace",

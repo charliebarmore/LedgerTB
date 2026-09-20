@@ -139,9 +139,6 @@ def test_saved_review_survives_new_session_without_request_or_duplicate_post(
 def test_abrupt_exit_retains_complete_saved_copy(
     client_id, accounts, tmp_path, boundary
 ):
-    import os, sys, subprocess
-    from pathlib import Path
-
     source = row(accounts)
     revision = drafts.save(client_id, [source])
     source["description"] = "Updated fictional review"
@@ -158,21 +155,8 @@ def test_abrupt_exit_retains_complete_saved_copy(
             default=str,
         )
     )
-    process = subprocess.run(
-        [
-            sys.executable,
-            str(Path(__file__).parent / "helpers/review_crash_worker.py"),
-            str(fixture),
-        ],
-        env=dict(
-            os.environ,
-            LEDGERTB_DB_PATH=str(dbconn.DATABASE_PATH),
-            ANTHROPIC_API_KEY="test-key-never-used",
-        ),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    from tests.helpers.review_crash_process import run_worker
+    process = run_worker(fixture, dbconn.DATABASE_PATH)
     assert process.returncode == 73, process.stderr
     loaded_revision, rows = drafts.load(client_id)
     committed = boundary == "after_commit"

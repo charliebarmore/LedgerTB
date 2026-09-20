@@ -129,6 +129,9 @@ def render_client_selector() -> Optional[int]:
     Render the client selector in the sidebar with sub-navigation and return the selected client ID.
     Returns None if no clients exist.
     """
+    from utils.review_lifecycle import protect_restored_book, checkpoint_active_review
+    protect_restored_book()
+    checkpoint_active_review()
     apply_sidebar_style()
 
     clients = Client.get_all(active_only=True)

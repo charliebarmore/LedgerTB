@@ -46,14 +46,17 @@ def main():
     bundle = app / "Contents/Frameworks" if app else ROOT
     if app and not bundle.resolve().is_relative_to(app):
         parser.error("The disposable bundle must not link its Frameworks directory outside the app")
-    sources = ["config.py", "pages/4_Import_Transactions.py", "services/jev_categorization.py",
+    sources = ["config.py", ".streamlit/config.toml", "database/connection.py", "pages/4_Import_Transactions.py", "services/jev_categorization.py",
                "utils/jev_review.py", "utils/import_review.py", "services/csv_import.py",
                "pages/2_Journal_Entries.py", "pages/7_Dashboard.py", "pages/12_Firm_Settings.py",
                "services/review_categorization.py", "utils/ai_review.py", "utils/ui.py",
                "services/import_review_drafts.py", "utils/review_recovery.py", "utils/recovery.py",
                "services/worksheet_export.py", "services/worksheet_export_cache.py",
                "pages/1_Trial_Balance_Worksheet.py", "pages/3_Chart_of_Accounts.py", "database/migrations/026_import_review_drafts.sql",
-               "utils/review_guard.py", "utils/client_selector.py", "pages/9_Data_Safety.py"]
+               "utils/review_guard.py", "utils/client_selector.py", "pages/9_Data_Safety.py",
+               "utils/desktop_review_status.py", "utils/review_lifecycle.py", "services/book_generation.py",
+               "services/review_recovery_store.py", "services/posting.py", "services/backups.py",
+               "database/migrations/027_review_recovery.sql"]
     hashes = {}
     for name in sources:
         actual = (bundle / name).read_bytes()

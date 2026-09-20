@@ -68,9 +68,12 @@ def save_current_review(client_id):
         raise ValueError('This review belongs to another book or client. Return to it before saving.')
     rows = review_snapshot(st.session_state)
     revision = drafts.save(client_id, rows,
-                           expected_revision=st.session_state.get('review_saved_revision'))
+                           expected_revision=st.session_state.get('review_saved_revision'),
+                           expected_generation=st.session_state.get('_review_generation'))
     st.session_state.transactions_to_review = rows
     mark_saved(st.session_state, client_id, rows, revision)
+    from utils.review_lifecycle import checkpoint_active_review
+    checkpoint_active_review()
     return revision
 
 
@@ -97,7 +100,13 @@ def confirm_transition(client_id, action, label):
     if cancel:
         return 'cancel'
     if discard:
-        return 'continue'
+        try:
+            from utils.review_lifecycle import discard_window_recovery
+            discard_window_recovery(client_id)
+            return 'continue'
+        except Exception as exc:
+            st.error(save_error_message(exc))
+            return 'pending'
     if save:
         try:
             save_current_review(client_id)
