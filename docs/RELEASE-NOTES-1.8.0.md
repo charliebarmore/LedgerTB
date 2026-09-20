@@ -46,6 +46,8 @@ Release candidate — not published. Final qualification is recorded in
 - Integer-cent amounts, balanced posting, import identity and duplicate checks,
   human audit attribution, and engine-enforced assistant permissions remain in
   force. AI suggestions do not change posting inclusion or post automatically.
+- Mac and Windows builds pin the HTTPX2/HTTPCore2 security fixes identified by
+  the release dependency audit.
 
 ## Upgrade preparation
 

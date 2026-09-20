@@ -1,5 +1,17 @@
 # Desktop review recovery and pilot verification
 
+September 20 follow-through: the full queue has been exercised within the stated
+tool limits, and release preparation continues in
+[the v1.8.0 qualification record](RELEASE-REVIEW-1.8.0.md). Clean patched Mac suite:
+898 passes and five Windows-only skips; all three original-threshold performance
+checks pass. The fresh 1.8.0 frozen bundle passed 22 acceptance checks. Actual
+Cocoa close-Cancel, quit/reopen, distinct saved/recovery copies and selective
+posting passed with fictional encrypted books. Reconciliation completion and
+native export save/cancel remain unverified because the input driver could not
+operate the canvas/save-panel controls and Computer Use timed out. The new record
+contains the precise remaining walkthrough, source commit, artifact provenance
+and CI links. Earlier failures below are retained as historical evidence.
+
 Technical work on `codex/jev-overnight`, based on `f8e2755`. Current priorities
 and handoff belong in the [LedgerTB project](https://app.notion.com/p/3d7f5bd8d2b981ed91d3fad1a03255ce).
 This document is in progress; verification results below must be completed
