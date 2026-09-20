@@ -127,11 +127,37 @@ performance pass.
 
 ## Evidence to complete
 
+Implementation checkpoint: local commit `47bb8ce` on `codex/jev-overnight`.
+Nothing has been pushed, released or installed over the existing app.
+
+The September 20 full functional attempt was interrupted after **35 passed,
+6 failed, 3 deselected** (1,551.38 seconds). All six failures were the existing
+accounting crash workers exceeding their startup-inclusive 30-second timeout.
+They now use the same separate startup handshake as the review crash workers;
+the transaction deadline and all atomicity/idempotency assertions remain
+unchanged. A targeted diagnostic retry passed `before_commit-generate`, then
+failed `before_commit-approve` because imports did not complete within **600
+seconds**, before the accounting transaction started (1 passed, 1 failed in
+827.18 seconds). The remaining four cases did not run in that fail-fast retry.
+This is not a clean regression pass and does not prove the remaining cases.
+
+Native UI discovery also exceeded its requested 10-second timeout and returned
+only after roughly 22 minutes. The fresh source-native preview opened; its
+test controller acknowledged the fictional passphrase submission after a long
+delay. No further native acceptance is claimed. Avoid launching more builds or
+repeating timed tests until the host has sufficient resources. Other apps and
+earlier previews have not been stopped.
+
 - Focused and clean full functional suite: pending.
 - Migration 23/24/25/26 and failed-upgrade/restore focused checks passed; clean full-suite confirmation pending.
 - Native close/cancel/quit, import, review, posting, reconciliation, PDF/XLSX: pending.
 - Relevant performance checks and fresh isolated frozen Mac build: pending.
-- Installed application baseline, local commits, morning walkthrough: pending.
+- Local implementation commit and walkthrough recorded; installed-app baseline recheck and final qualification commit pending.
+
+Resume with the six accounting crash cases first, then the clean full suite
+and default-threshold performance checks. Build the isolated Mac preview only
+after those results can be evaluated reliably. Retain the failed logs alongside
+successful reruns; do not replace them with a passing-only account.
 
 ## Walkthrough after the isolated preview passes verification
 
