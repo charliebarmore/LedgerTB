@@ -106,10 +106,25 @@ function Save-Screenshot {
     return $bounds
 }
 
+function Read-SharedBytes {
+    # The app still holds its log open for writing; File.ReadAllBytes asks for
+    # exclusive-write sharing and is refused. Open it the way a log viewer does.
+    param([string]$Path)
+    $fs = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+        $ms = New-Object System.IO.MemoryStream
+        $fs.CopyTo($ms)
+        return $ms.ToArray()
+    } finally {
+        $fs.Dispose()
+    }
+}
+
 function Find-Traceback {
     param([string]$Path, [int]$Offset = 0)
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $bytes = Read-SharedBytes -Path $Path
     if ($bytes.Length -le $Offset) { return $null }
     $text = [System.Text.Encoding]::UTF8.GetString($bytes, $Offset, $bytes.Length - $Offset)
     if ($text -match "(?im)^\s*Traceback \(most recent call last\)") { return $text }
@@ -192,7 +207,9 @@ try {
             # Ask nicely first, the way a user closing the window would; the
             # app is expected to take its server child down with it.
             try { $parent.CloseMainWindow() | Out-Null } catch { }
-            if (-not $parent.WaitForExit(15000)) {
+            if ($parent.WaitForExit(15000)) {
+                Write-Host "desktop check: window closed on request, process exited $($parent.ExitCode)"
+            } else {
                 Write-Host "desktop check: window did not close on request; stopping it"
                 Stop-Process -Id $parent.Id -Force -ErrorAction SilentlyContinue
             }
@@ -203,7 +220,11 @@ try {
     }
     Start-Sleep -Seconds 2
     if (Test-Path -LiteralPath $serverLog) {
-        Copy-Item -LiteralPath $serverLog -Destination (Join-Path $ArtifactDir "server.log") -Force
+        try {
+            [System.IO.File]::WriteAllBytes((Join-Path $ArtifactDir "server.log"), (Read-SharedBytes -Path $serverLog))
+        } catch {
+            Write-Host "desktop check: could not copy server.log: $($_.Exception.Message)"
+        }
     }
     $env:LEDGERTB_DB_PATH = $previousBook
     Remove-Item -LiteralPath $probeDir -Recurse -Force -ErrorAction SilentlyContinue
