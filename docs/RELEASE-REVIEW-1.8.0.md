@@ -1,10 +1,61 @@
-# LedgerTB v1.8.0 candidate qualification
+# LedgerTB v1.8.0 release review
+
+Published September 22, 2026:
+[LedgerTB v1.8.0](https://github.com/charliebarmore/LedgerTB/releases/tag/v1.8.0).
+Tag `982386c40b3a03f2b162809279caae3ec9215550` points at commit
+`ae360a66d586ebcde6dacc60b53a24b6369b4558`.
 
 Current goal and operational handoff:
 [LedgerTB Notion project](https://app.notion.com/p/3d7f5bd8d2b981ed91d3fad1a03255ce).
 This file records technical evidence and reproducible release checks. Candidate
-preparation starts from local `8d9b3d2`; version 1.7.2 remains the public release.
-No release tag, publication or installed-app replacement is part of preparation.
+preparation started from local `8d9b3d2`. v1.8.0 is the public release.
+
+## Published assets
+
+The release page carries these files. The two names in each pair are the same
+bytes.
+
+- `LedgerTB-1.8.0-windows-x64-setup.exe` and `LedgerTB-windows-x64-setup.exe`:
+  SHA-256 `4374221b0e3bf80d21e3d89b50f4a2e0dec488400b37213336673887334f2bf0`
+  (the qualified installer, 79,750,025 bytes)
+- `LedgerTB-1.8.0-mac.zip` and `LedgerTB-mac.zip`:
+  SHA-256 `7bb1bfe143f057ebdbe80c33970ba3b440917ec7166513743f55148586748ef2`
+  (105,079,255 bytes)
+- `LedgerTB-1.8.0-windows-x64.zip` and `LedgerTB-windows-x64.zip`:
+  SHA-256 `c8368f09d285f655041024802b64b96542339c9a88962ac732d8d2eb77248534`
+  (tag-build package, not the qualified installer; 109,712,295 bytes)
+
+The Windows setup program is the supported Windows download.
+
+## Acceptance after qualification
+
+### Mac reconciliation and export — pass
+
+On September 22 the packaged qualified binary ran in server mode and was driven
+with headless Playwright, with a separate Cocoa save-panel check for cancel and
+save. That was not a complete native-window walkthrough. The reconciliation
+difference reached $0.00, one cancelled save left no file, and the saved files
+opened and reconciled. Record:
+[Mac reconciliation and export walkthrough](mac-reconciliation-export-walkthrough.md).
+
+### Mac credential vault and installed upgrade — pass
+
+The installed 1.7.2 app was replaced with the qualified 1.8.0 bundle. Launched
+twice from Applications, the app opened the existing book with no passphrase
+prompt, no keychain prompt, and no Gatekeeper prompt. Help & Updates showed
+LedgerTB 1.8.0, and the passphrase stayed remembered on that Mac. Record:
+[Mac credential and upgrade walkthrough](mac-credential-upgrade-walkthrough.md).
+
+### Windows desktop
+
+Windows desktop checks on a GitHub-hosted machine covered install of the
+published installer, the mark a browser download leaves on a file, the frozen
+self-check, compressed pages, and a desktop launch.
+
+Windows SmartScreen: the installer was opened from File Explorer on a GitHub-hosted Windows machine, with the mark a browser download leaves on the file. Windows Defender SmartScreen said "Windows protected your PC" and "Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk." The choices on that screen were "Don't run" and "More info." This was not a download from the release page in a home browser, so it does not show how Microsoft treats the file after people have downloaded it. The installer is not code-signed, so that warning is expected the first time Windows opens it.
+
+That pass covered the installer named above. It did not record remembered
+credentials across relaunch, the Start Menu entry, or uninstall.
 
 ## Scope and evidence rules
 
@@ -23,10 +74,10 @@ Keep failed runs and distinguish source/browser/frozen/native acceptance.
 | Frozen imports, SQLCipher, OCR and source provenance | Patched rebuild succeeded; 132 bundled source/legal/config files match. Imports, SQLCipher and native OCR report no failure; the deliberately disabled vault remains the sole selfcheck failure |
 | Browser import/provider/recovery/export/book isolation | Both initial and patched 1.8.0 bundles passed all 22 checks at 1360×768 with simulated providers |
 | Native close/cancel/quit, recovery and posting | Actual Cocoa/WebKit source window passed close-Cancel preservation, application quit/reopen, separate saved/recovery copies, resume and selective posting |
-| Native reconciliation and PDF/XLSX save/cancel | Reconciliation opened with the correct -$33.33 balance; clearing/completion unverified. Excel opened a real NSSavePanel; save/cancel and PDF dialog acceptance unverified |
-| Signed/notarized Mac artifact and installed upgrade | Developer ID signature, secure timestamp, accepted Apple notarization, stapled ticket validation and Gatekeeper acceptance pass. Installed upgrade remains unverified; installed app untouched |
+| Native reconciliation and PDF/XLSX save/cancel | September 22 packaged check passed: difference $0.00, cancelled save left no file, saved files opened and reconciled. Server mode plus headless Playwright, with a separate Cocoa save-panel check. Not a complete native-window walkthrough |
+| Signed/notarized Mac artifact and installed upgrade | Developer ID signature, secure timestamp, accepted Apple notarization, stapled ticket validation and Gatekeeper acceptance pass. September 22 installed upgrade from 1.7.2 passed: two launches, no passphrase, keychain, or Gatekeeper prompt |
 | Windows pinned tests, frozen runtime and installer | 901 passed, two POSIX-only skips in 1465.90s; encryption, build, frozen selfcheck, compressed routes, window shutdown and Inno installer all passed |
-| Windows native install/upgrade/save dialogs | Requires a suitable Windows desktop |
+| Windows native install/upgrade/save dialogs | GitHub-hosted machine: install of the published installer, browser-download mark, frozen self-check, compressed pages, and a desktop launch. SmartScreen showed the unsigned-app warning. Not a home-browser download. Remembered credentials, Start Menu, and uninstall were not recorded |
 
 Artifacts for this pass: `output/release-candidate-20260920/`. Earlier evidence
 remains in the dated Jev/usability/month-close guides and
@@ -89,8 +140,10 @@ the control. The Excel action opened an actual save panel, whose remote controls
 were not exposed by the driver. Computer Use discovery returned, but selecting
 the Python app subsequently timed out after 26,379 seconds despite a requested
 10-second limit. This is a tool failure, not evidence of an application hang.
-No native reconciliation completion or PDF/Excel save/cancel pass is claimed.
-Use the remaining walkthrough below on the disposable fixture before release.
+That September 20 source-window attempt did not complete reconciliation or a
+PDF/Excel save and cancel. The September 22 packaged check in the acceptance
+section above did: difference $0.00, one cancelled save with no file, and saved
+files that opened and reconciled. The steps below are that earlier attempt.
 The task-owned native acceptance window was closed after preserving evidence;
 prior user previews remain untouched. Reopen the existing fictional book with:
 
@@ -112,6 +165,8 @@ Keep exports inside its `manual-walkthrough/downloads/` directory.
 3. Repeat installed-upgrade/real-vault acceptance with Charlie's explicit
    supervision; native Windows download/install/upgrade checks need Windows.
 
+The acceptance section records the September 22 results for those checks.
+
 ## Local commands
 
 The source/build commit is `a351c3ebe4ad0f837193c1720e56929beecc3539`. The clean
@@ -129,21 +184,26 @@ The final distribution archive is `LedgerTB-1.8.0-macos-arm64.zip` (105,079,255 
 SHA-256 `7bb1bfe143f057ebdbe80c33970ba3b440917ec7166513743f55148586748ef2`.
 The extracted archive also passes strict signature verification, ticket validation
 and Gatekeeper assessment; all 132 recorded source/config/legal hashes match.
-No release is published.
+Those bytes are the published `LedgerTB-1.8.0-mac.zip` and `LedgerTB-mac.zip`.
 
 The Windows installer from that same source and CI run is
 `windows-final/LedgerTB-1.8.0-windows-x64-setup.exe` (79,750,025 bytes), SHA-256
 `4374221b0e3bf80d21e3d89b50f4a2e0dec488400b37213336673887334f2bf0`.
-Its PE certificate table is empty: this installer is unsigned. CI qualification
-and a scripted artifact download do not establish browser-download, SmartScreen,
-native install/upgrade or save-dialog acceptance on a user's Windows desktop.
-Ship the installer, not the diagnostic Windows bundle ZIP. Both final artifact
+Those bytes are the published `LedgerTB-1.8.0-windows-x64-setup.exe` and
+`LedgerTB-windows-x64-setup.exe`. Its PE certificate table is empty: this
+installer is unsigned. The published `LedgerTB-1.8.0-windows-x64.zip` and
+`LedgerTB-windows-x64.zip` are the tag-build package, SHA-256
+`c8368f09d285f655041024802b64b96542339c9a88962ac732d8d2eb77248534`, not this
+installer. Ship the installer, not that zip. The GitHub-hosted Windows check
+in the acceptance section recorded the SmartScreen wording. It was not a
+download from the release page in a home browser. Both qualified artifact
 hashes are retained locally in `SHA256SUMS` and `artifact-manifest.json`.
 
 The sandbox prevented OCR and Developer ID verification. Repeating those checks
 outside it, while keeping the credential vault disabled, passed OCR/signature
 checks. The sole remaining selfcheck failure is the disabled credential backend.
-Installed v1.7.2's version and plist/executable timestamps still match baseline.
+The installed Mac app was replaced with this 1.8.0 bundle on September 22.
+See the acceptance section.
 
 Use the pinned `.macos-venv` environment. Set BLAS worker counts to one if other
 workloads are active; do not relax assertions or performance thresholds.
@@ -161,11 +221,12 @@ acceptance use `scripts/check_packaged_jev.py` without `--key-file`; all provide
 requests remain simulated. Build into a new directory under the dated artifact
 folder. Do not overwrite earlier previews or `/Applications/LedgerTB.app`.
 
-## Release decision still required
+## Release decision
 
-Final evidence must identify the exact source commit and artifact hashes, explain
-any failed/skipped checks, and distinguish simulated provider integration from
-live-provider quality/usage testing. Independent CPA evaluation, provider terms,
-real-vault/installed-upgrade acceptance and Windows native qualification remain
-explicit rollout considerations. Prepare reviewable PR material and release
-notes before any publication decision.
+v1.8.0 was published on September 22, 2026. The published commit is
+`ae360a66d586ebcde6dacc60b53a24b6369b4558`. The published asset hashes are in
+the section above. Independent CPA evaluation of the synthetic labels, and firm
+approval of TypeSafe, Anthropic, and OpenAI data-handling terms, remain product
+decisions. Those features are opt-in and off by default. A cancelled worksheet
+export still writes an export audit row, and reconciliation history shows UTC
+while the Audit Trail shows local time. Those are accepted follow-ups.
