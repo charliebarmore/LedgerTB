@@ -22,6 +22,11 @@ name: Windows acceptance
 # dispatch, or by calling that workflow as a job when neither is available.
 
 on:
+  # TEMPORARY (registration only): GitHub does not list a workflow that has
+  # never fired, so a dispatch-only workflow on a feature branch cannot be
+  # dispatched. Removed before merge.
+  push:
+    branches: [cursor/windows-acceptance-workflow-8da7]
   workflow_dispatch:
     inputs:
       build_run_id:
