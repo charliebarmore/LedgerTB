@@ -1,6 +1,8 @@
 # LedgerTB v1.8.0
 
-Release candidate — not published. Final qualification is recorded in
+Released September 22, 2026.
+[v1.8.0](https://github.com/charliebarmore/LedgerTB/releases/tag/v1.8.0).
+Final qualification is recorded in
 [the release review](RELEASE-REVIEW-1.8.0.md).
 
 ## Import review and optional AI
@@ -56,6 +58,55 @@ using that book. This version adds migrations 026 (explicit saved reviews) and
 027 (automatic recovery and restore detection). Keep the pre-upgrade backup for
 rollback; do not assume an older app understands newer review metadata.
 
-Live AI quality evaluations, native platform acceptance and signing/build results
-are described in the release review. Synthetic results do not establish accuracy
-on client transactions. This document is not a claim that the release is ready.
+Synthetic results do not establish accuracy on client transactions.
+
+## Completed release checks
+
+- Mac functional suite: 898 passed, 5 Windows-only skips. Three performance
+  checks passed at the original thresholds. Packaged browser acceptance passed
+  all 22 checks.
+- Linux tests on the qualified source: 898 passed, 5 skipped. Security checks
+  passed, including both lockfile audits.
+- Windows qualification run: 901 passed, 2 POSIX-only skips. Encryption, the
+  frozen self-check, compressed pages, window shutdown, and the installer
+  build passed. The release workflow on this tag passed the same Windows gates
+  before the draft was opened.
+- The Mac archive is Developer ID signed, notarized (Apple submission
+  ce953e33-d251-4290-be94-f3aeb514bb46, Accepted), stapled, and accepted by
+  Gatekeeper as Notarized Developer ID.
+- Reconciliation and export on the packaged Mac build passed. The app ran in
+  server mode and was driven with headless Playwright, with a separate Cocoa
+  save-panel check for cancel and save. That was not a complete native-window
+  walkthrough. The reconciliation difference reached $0.00, one cancelled save
+  left no file, and the saved files opened and reconciled.
+- The installed Mac upgrade from 1.7.2 to 1.8.0 passed. Launched twice from
+  Applications, the app opened the existing book with no passphrase prompt, no
+  keychain prompt, and no Gatekeeper prompt. Help & Updates showed LedgerTB
+  1.8.0, and the passphrase stayed remembered on that Mac.
+- Windows desktop checks on a GitHub-hosted machine covered install of this
+  installer, the mark a browser download leaves on a file, the frozen
+  self-check, compressed pages, and a desktop launch.
+
+Windows SmartScreen: the installer was opened from File Explorer on a GitHub-hosted Windows machine, with the mark a browser download leaves on the file. Windows Defender SmartScreen said "Windows protected your PC" and "Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk." The choices on that screen were "Don't run" and "More info." This was not a download from the release page in a home browser, so it does not show how Microsoft treats the file after people have downloaded it. The installer is not code-signed, so that warning is expected the first time Windows opens it.
+
+## Download verification
+
+The supported Windows file is the setup program. The same bytes are attached
+under both names below. The Mac archive is the notarized build, also attached
+under both names.
+
+- `LedgerTB-1.8.0-windows-x64-setup.exe` and `LedgerTB-windows-x64-setup.exe`:
+  SHA-256 `4374221b0e3bf80d21e3d89b50f4a2e0dec488400b37213336673887334f2bf0`
+  (the qualified installer, 79,750,025 bytes)
+- `LedgerTB-1.8.0-mac.zip` and `LedgerTB-mac.zip`:
+  SHA-256 `7bb1bfe143f057ebdbe80c33970ba3b440917ec7166513743f55148586748ef2`
+  (105,079,255 bytes)
+- `LedgerTB-1.8.0-windows-x64.zip` and `LedgerTB-windows-x64.zip`:
+  SHA-256 `c8368f09d285f655041024802b64b96542339c9a88962ac732d8d2eb77248534`
+  (tag-build package, not the qualified installer; 109,712,295 bytes)
+
+Install with the setup program. Files taken out of that zip by File Explorer
+are marked as coming from the internet, and LedgerTB will not start until
+those marks are cleared.
+
+[Full source comparison](https://github.com/charliebarmore/LedgerTB/compare/v1.7.2...v1.8.0)

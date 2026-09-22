@@ -88,9 +88,37 @@
   person doing the accounting work.</p>
 
   <article class="changelog">
+    <section class="release" id="v1-8-0">
+      <div class="release-head">
+        <h2>LedgerTB v1.8.0 <span class="release-label">Latest</span></h2>
+        <span class="release-date">September 22, 2026</span>
+      </div>
+      <p>This update adds optional account suggestions while you review an import,
+      and it can keep that review if you leave and come back.</p>
+      <ul>
+        <li>You can ask TypeSafe Jev, Anthropic, or OpenAI to suggest an account.
+        Asking is optional, needs your consent, and does not post anything.
+        You still accept each suggestion.</li>
+        <li>Choosing rows for an action is separate from including them when you
+        post. Imports show 50 rows at a time, with wider comparisons.</li>
+        <li>You can save an encrypted review and resume it later. The app also
+        keeps a recovery copy of edits it has already saved, and it warns you
+        before closing while a review may be open.</li>
+        <li>An unchanged worksheet export reuses the file from earlier in the
+        same session. A change to the books, the report, or the branding makes
+        a new file.</li>
+      </ul>
+      <h3>Before you upgrade</h3>
+      <p>Create a verified backup and close every LedgerTB window before
+      installing. Keep that backup. An older version may not understand a
+      review this version has saved.</p>
+      <p class="release-links"><a href="https://github.com/charliebarmore/LedgerTB/releases/tag/v1.8.0">Detailed release notes</a> ·
+      <a href="https://github.com/charliebarmore/LedgerTB/compare/v1.7.2...v1.8.0">Source comparison</a></p>
+    </section>
+
     <section class="release" id="v1-7-2">
       <div class="release-head">
-        <h2>LedgerTB v1.7.2 <span class="release-label">Latest</span></h2>
+        <h2>LedgerTB v1.7.2</h2>
         <span class="release-date">September 7, 2026</span>
       </div>
       <p>This update repairs desktop downloads and report navigation, improves
