@@ -70,7 +70,13 @@ custody of anyone's data. Built and maintained with Claude Code.
   `scripts/signing.env`; ad-hoc without it)
 - Install locally: `./scripts/install_local.sh`
 - Windows build: CI only (`.github/workflows/windows-build.yml` spike,
-  `release.yml` on `v*` tags → draft GitHub Release)
+ `release.yml` on `v*` tags → draft GitHub Release)
+- Windows acceptance: `.github/workflows/windows-acceptance.yml` takes the
+ spike's installer artifact, tags it `Zone.Identifier` ZoneId=3 like a
+ browser download, installs silently, asserts 0 tagged installed files,
+ then runs selfcheck, `smoke_serve.ps1` and a desktop launch with a
+ screenshot (`scripts/accept_install.ps1`, `scripts/smoke_desktop.ps1`).
+ Dispatch with a `build_run_id`, or empty to build first.
 
 ## Testing rules
 
@@ -116,9 +122,12 @@ custody of anyone's data. Built and maintained with Claude Code.
   nothing gets tagged. Code signing does **not** fix this — different
   mechanism from SmartScreen.
 - **CI cannot see mark-of-the-web**: the runner never downloads its own
-  artifact. Only a browser download plus Explorer extraction reproduces it.
-  Equally, `gh run download` strips it — a scripted download proves nothing
-  about what a member sees.
+ artifact. Only a browser download plus Explorer extraction reproduces it.
+ Equally, `gh run download` strips it — a scripted download proves nothing
+ about what a member sees. The acceptance workflow writes the stream by
+ hand onto the installer, which proves the installer strips it from what
+ it writes; it cannot show the SmartScreen prompt, and `Expand-Archive`
+ does not propagate the mark the way Explorer does.
 - **Pin the Windows deps** (`requirements-windows.lock`). Open ranges shipped a
   build that 500'd on every request: starlette 1.4.0 made a keyword argument
   required that Streamlit 1.61.0 did not pass (Streamlit 1.61.1 later capped it

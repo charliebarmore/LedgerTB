@@ -1,0 +1,229 @@
+name: Windows acceptance
+
+# The part of the Windows checklist (docs/WINDOWS-TESTING.md) a machine can
+# stand in for. It takes the installer the build workflow produced, marks it
+# the way a browser download is marked, installs it silently, and then runs
+# the installed copy the three ways a member's PC will:
+#   1. the installer, tagged Zone.Identifier ZoneId=3, exits 0 and leaves
+#      NO installed file carrying that tag (the whole reason we ship an
+#      installer and not a zip);
+#   2. the installed exe passes selfcheck and serves real pages with gzip
+#      requested (scripts/smoke_serve.ps1, the gate that caught starlette);
+#   3. the installed exe opens a desktop window and stays up, with a
+#      screenshot uploaded so a person can see the window.
+#
+# What it cannot prove, and stays on the human checklist: the SmartScreen
+# prompt (a shell feature; the installer is started directly here so nothing
+# can stall on a dialog), the real browser download, and Windows Credential
+# Manager behaviour across a relaunch.
+#
+# The installer is never rebuilt here. It comes from the "Windows build spike"
+# workflow: from the run that just finished on main, from a run id given at
+# dispatch, or by calling that workflow as a job when neither is available.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: >-
+          Run ID of a "Windows build spike" run whose LedgerTB-windows-installer
+          artifact to test (artifacts keep for 3 days). Leave empty to build
+          the installer first in this run (adds the full build, about 40 min).
+        required: false
+        default: ""
+        type: string
+  # Chained to the build on main only; that workflow is dispatch-only, so
+  # this cannot be reached from a fork or a pull request.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["Windows build spike"]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: windows-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the installer (Windows build spike)
+    if: github.event_name == 'workflow_dispatch' && inputs.build_run_id == ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/windows-build.yml
+
+  acceptance:
+    name: Install and run on Windows
+    needs: build
+    if: >-
+      ${{ !cancelled()
+          && (needs.build.result == 'success' || needs.build.result == 'skipped')
+          && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read # download artifacts from another run of this repository
+    env:
+      EVIDENCE_DIR: ${{ github.workspace }}\acceptance\evidence
+      INSTALL_DIR: C:\LTB
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # After a build on main, test with the scripts from the commit that
+          # was built, not whatever main has become since.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Decide which run built the installer
+        id: src
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          INPUT_RUN_ID: ${{ inputs.build_run_id }}
+          THIS_RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          $runId = $env:THIS_RUN_ID
+          if ($env:EVENT_NAME -eq "workflow_run") {
+            $runId = $env:WORKFLOW_RUN_ID
+          } elseif ($env:INPUT_RUN_ID -and $env:INPUT_RUN_ID.Trim()) {
+            $runId = $env:INPUT_RUN_ID.Trim()
+            if ($runId -notmatch '^\d+$') { Write-Error "build_run_id must be a number, got '$runId'"; exit 1 }
+          }
+          Write-Host "installer artifact comes from https://github.com/$env:REPO/actions/runs/$runId"
+          "run_id=$runId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          New-Item -ItemType Directory -Force -Path $env:EVIDENCE_DIR | Out-Null
+          "installer built by run $runId" | Out-File -FilePath (Join-Path $env:EVIDENCE_DIR "source.txt") -Encoding utf8
+
+      - name: Download the installer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: LedgerTB-windows-installer
+          path: acceptance/download
+          run-id: ${{ steps.src.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download the raw bundle (zip contrast only)
+        id: bundle
+        # Informational. The bundle is not a distribution channel; it is here
+        # to show the zip path next to the installer path in the same run.
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: LedgerTB-windows
+          path: acceptance/bundle
+          run-id: ${{ steps.src.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: "Gate 1: tagged installer installs, leaves no tagged files"
+        id: install
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem acceptance/download -Filter "LedgerTB-*-windows-x64-setup.exe" -Recurse |
+              Select-Object -First 1 -ExpandProperty FullName
+          if (-not $installer) { Write-Error "no LedgerTB-*-windows-x64-setup.exe in the downloaded artifact"; exit 1 }
+          pwsh scripts/accept_install.ps1 -InstallerPath $installer -InstallDir $env:INSTALL_DIR `
+              -SimulateDownload -ReportDir $env:EVIDENCE_DIR
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: "Contrast: the zip path (informational)"
+        if: steps.bundle.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        # Explorer is what stamps extracted files; Expand-Archive
+        # (System.IO.Compression) is not Explorer and is not expected to.
+        # Recorded so the run shows what a scripted extraction does and does
+        # not reproduce; CLAUDE.md: only a browser download plus Explorer
+        # extraction reproduces the real failure.
+        run: |
+          $src = "acceptance/bundle/_internal/pythonnet"
+          if (-not (Test-Path $src)) { Write-Host "no _internal/pythonnet in the bundle; skipping"; exit 0 }
+          $zip = "acceptance\contrast.zip"
+          $out = "acceptance\contrast-extracted"
+          Compress-Archive -Path $src -DestinationPath $zip -Force
+          Set-Content -Path $zip -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
+          $zipZone = Get-Content -Path $zip -Stream Zone.Identifier -Raw
+          Write-Host "zip tagged: $($zipZone -replace "`r?`n", ' | ')"
+          Expand-Archive -Path $zip -DestinationPath $out -Force
+          $files = @(Get-ChildItem $out -Recurse -File -Force)
+          $tagged = @($files | Where-Object { Get-Item -LiteralPath $_.FullName -Stream Zone.Identifier -ErrorAction SilentlyContinue })
+          $lines = @(
+            "### Zip contrast (informational)",
+            "",
+            "- zip tagged ZoneId=3, extracted with Expand-Archive: **$($tagged.Count) of $($files.Count)** files carry Zone.Identifier",
+            "- Expand-Archive is not Explorer; only Explorer propagates the mark (2,848 of 2,848 files on a real PC, 2026-08-05). This row shows a scripted extraction cannot stand in for that.",
+            ""
+          )
+          $lines | ForEach-Object { Write-Host $_ }
+          if ($env:GITHUB_STEP_SUMMARY) { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $lines }
+          $lines | Out-File -FilePath (Join-Path $env:EVIDENCE_DIR "zip-contrast.txt") -Encoding utf8
+
+      - name: "Gate 2: installed exe passes selfcheck"
+        id: selfcheck
+        shell: pwsh
+        # A GUI-subsystem exe: run under Start-Process and trust the exit code.
+        # Redirecting stdout gives the windowed build somewhere to print.
+        run: |
+          $env:LEDGERTB_MODE = "selfcheck"
+          $out = Join-Path $env:EVIDENCE_DIR "selfcheck.out.log"
+          $err = Join-Path $env:EVIDENCE_DIR "selfcheck.err.log"
+          $p = Start-Process -FilePath "$env:INSTALL_DIR\LedgerTB.exe" -Wait -PassThru `
+              -RedirectStandardOutput $out -RedirectStandardError $err
+          Get-Content $out -ErrorAction SilentlyContinue
+          Get-Content $err -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { Write-Error "selfcheck exited $($p.ExitCode)"; exit $p.ExitCode }
+
+      - name: "Gate 3: installed exe serves real pages (gzip on every route)"
+        id: smoke
+        shell: pwsh
+        run: |
+          pwsh scripts/smoke_serve.ps1 -ExePath "$env:INSTALL_DIR\LedgerTB.exe"
+          $code = $LASTEXITCODE
+          $smokeLogs = Join-Path ([System.IO.Path]::GetTempPath()) "ledgertb-smoke"
+          if (Test-Path $smokeLogs) {
+            Copy-Item "$smokeLogs\*" -Destination $env:EVIDENCE_DIR -Force
+          }
+          if ($code -ne 0) { exit $code }
+
+      - name: "Gate 4: installed exe opens a desktop window (screenshot)"
+        id: desktop
+        shell: pwsh
+        run: pwsh scripts/smoke_desktop.ps1 -ExePath "$env:INSTALL_DIR\LedgerTB.exe" -ArtifactDir $env:EVIDENCE_DIR
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-acceptance-evidence
+          path: acceptance/evidence/
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+
+      - name: Scorecard
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          SELFCHECK_OUTCOME: ${{ steps.selfcheck.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          DESKTOP_OUTCOME: ${{ steps.desktop.outcome }}
+        shell: pwsh
+        run: |
+          $lines = @(
+            "### Windows acceptance scorecard",
+            "",
+            "| gate | outcome |",
+            "|---|---|",
+            "| tagged installer installs, 0 tagged files | $env:INSTALL_OUTCOME |",
+            "| installed selfcheck | $env:SELFCHECK_OUTCOME |",
+            "| installed exe serves pages with gzip | $env:SMOKE_OUTCOME |",
+            "| desktop window opens and stays up | $env:DESKTOP_OUTCOME |",
+            "",
+            "Not covered here (human checklist, docs/WINDOWS-TESTING.md): the SmartScreen prompt, a real browser download, Credential Manager across relaunch, Start Menu and uninstall.",
+            ""
+          )
+          $lines | ForEach-Object { Write-Host $_ }
+          if ($env:GITHUB_STEP_SUMMARY) { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $lines }
