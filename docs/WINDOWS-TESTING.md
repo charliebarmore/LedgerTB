@@ -5,6 +5,20 @@ workflow and attached to the run as the `LedgerTB-windows` artifact. This
 checklist is the part CI cannot do: a human confirming the app runs and
 works on real Windows.
 
+## What CI already covers
+
+The `Windows acceptance` workflow (Actions → Windows acceptance → Run
+workflow, paste the build run's ID) does the mechanical part on a
+`windows-latest` runner: it stamps the installer with the same
+`Zone.Identifier` stream a browser download carries, installs it silently,
+confirms **0** installed files carry the stream, runs selfcheck and the
+page-serving smoke test against the installed exe, and opens the desktop
+window with a screenshot in the `windows-acceptance-evidence` artifact.
+
+It cannot show the SmartScreen prompt, download through a real browser,
+or exercise Credential Manager across a relaunch. That is what the rest of
+this page is for.
+
 ## Getting the build onto the PC
 
 1. On the Windows PC, sign in to GitHub in a browser → the LedgerTB repo →

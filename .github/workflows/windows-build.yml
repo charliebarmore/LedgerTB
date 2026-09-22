@@ -11,6 +11,9 @@ name: Windows build spike
 
 on:
   workflow_dispatch:
+  # Also callable as a job, so windows-acceptance.yml can get a fresh
+  # installer without carrying a second copy of these build steps.
+  workflow_call:
 
 permissions:
   contents: read
