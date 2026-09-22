@@ -1,0 +1,144 @@
+name: Windows SmartScreen capture
+
+# Opens the already-built LedgerTB installer the way a person double-clicks
+# it, and photographs whatever Windows shows. It does not install the app.
+#
+# The acceptance workflow starts that same installer with Start-Process
+# -NoNewWindow (CreateProcess) and /VERYSILENT, which never asks the shell.
+# This workflow is the missing check: stamp Zone.Identifier ZoneId=3, then
+# ShellExecuteEx with the open verb and no arguments.
+#
+# The bytes are the qualified installer from Windows build spike run
+# 35531662865 (artifact LedgerTB-windows-installer). The script refuses to
+# open the file unless its SHA-256 is
+# 4374221b0e3bf80d21e3d89b50f4a2e0dec488400b37213336673887334f2bf0.
+# A pull request always uses that run. A dispatch may name another run id,
+# and the hash gate still refuses a different exe. This workflow never
+# builds an installer.
+#
+# The runner is GitHub-hosted windows-latest. Writing the zone stream here
+# is not a browser download, and the log must not be read as one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: >-
+          Run ID of a Windows build spike run whose LedgerTB-windows-installer
+          artifact to open. The file is opened only if its SHA-256 is the
+          qualified v1.8.0 installer. Default is run 35531662865.
+        required: false
+        default: "35531662865"
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/windows-smartscreen.yml
+      - scripts/capture_smartscreen.ps1
+
+permissions: {}
+
+concurrency:
+  group: windows-smartscreen-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    name: Capture the shell dialog
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read # download the installer artifact from another run
+    env:
+      EVIDENCE_DIR: ${{ github.workspace }}\smartscreen\evidence
+      EXPECTED_SHA256: 4374221b0e3bf80d21e3d89b50f4a2e0dec488400b37213336673887334f2bf0  # pragma: allowlist secret
+      QUALIFIED_RUN_ID: "35531662865"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Choose the qualified build run
+        id: src
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_RUN_ID: ${{ inputs.build_run_id }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $wanted = "$env:INPUT_RUN_ID".Trim()
+          # A pull request cannot pick a different installer. Dispatch may
+          # name a run, and the hash gate below still refuses other bytes.
+          if ($env:EVENT_NAME -eq "pull_request" -or -not $wanted) {
+            $runId = $env:QUALIFIED_RUN_ID
+          } else {
+            if ($wanted -notmatch '^\d+$') {
+              Write-Error "build_run_id must be a run number, got '$wanted'"
+              exit 1
+            }
+            $runId = $wanted
+          }
+          $source = gh api "repos/$env:REPO/actions/runs/$runId" --jq '"run \(.id) \(.html_url) head \(.head_sha)"'
+          Write-Host "installer artifact from $source"
+          "run_id=$runId" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          New-Item -ItemType Directory -Force -Path $env:EVIDENCE_DIR | Out-Null
+          @(
+            "installer artifact from $source",
+            "expected sha256: $env:EXPECTED_SHA256",
+            "host: GitHub-hosted windows-latest. Zone.Identifier is written by the capture script. This is not a browser download."
+          ) | Out-File -FilePath (Join-Path $env:EVIDENCE_DIR "source.txt") -Encoding utf8
+
+      - name: Download the installer artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: LedgerTB-windows-installer
+          path: smartscreen/download
+          run-id: ${{ steps.src.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Require the qualified hash, then ShellExecute
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem smartscreen/download -Filter "LedgerTB-*-windows-x64-setup.exe" -Recurse |
+              Select-Object -First 1
+          if (-not $installer) {
+            Write-Error "no LedgerTB-*-windows-x64-setup.exe in the downloaded artifact"
+            exit 1
+          }
+          $sha = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = $env:EXPECTED_SHA256.ToLowerInvariant()
+          Write-Host "downloaded $($installer.FullName)"
+          Write-Host "sha256 $sha"
+          if ($sha -ne $expected) {
+            Write-Error "REFUSING to open the installer. sha256 $sha is not the qualified installer $expected"
+            exit 1
+          }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $pwd "scripts\capture_smartscreen.ps1") `
+              -InstallerPath $installer.FullName `
+              -ExpectedSha256 $env:EXPECTED_SHA256 `
+              -ArtifactDir $env:EVIDENCE_DIR
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Show the capture report
+        if: always()
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:EVIDENCE_DIR "dialog-report.txt"
+          if (Test-Path -LiteralPath $report) {
+            Get-Content -LiteralPath $report
+          } else {
+            Write-Host "no dialog-report.txt was written"
+          }
+
+      - name: Upload the screenshot and dialog text
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-smartscreen-evidence
+          path: smartscreen/evidence/
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
