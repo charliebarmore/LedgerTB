@@ -70,7 +70,7 @@ _GATE_BUTTON_CSS = """
 """
 
 
-def render_brand_header(*, chip: str = "Encrypted · stays on this computer") -> None:
+def render_brand_header(*, chip: str = "") -> None:
     """The branded title block for lock, unlock, setup and refusal screens."""
     name = APP_NAME
     word = (f"{name[:-2]}<span>{name[-2:]}</span>"

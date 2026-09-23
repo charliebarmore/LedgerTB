@@ -674,7 +674,7 @@ def _render_book_chooser():
 
 def _render_gate(state: str):
     # Keep the lock screen clean: no client nav, just the passphrase prompt.
-    render_brand_header()
+    render_brand_header(chip="Encrypted book" if state == "encrypted" else "")
     if st.session_state.get("_book_lock_holder"):
         _render_lock_choice()
         return
