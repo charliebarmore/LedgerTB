@@ -1,6 +1,8 @@
 # Jev synthetic evaluation — September 17, 2026
 
-Current project decisions: [LedgerTB in Notion](https://app.notion.com/p/3d7f5bd8d2b981ed91d3fad1a03255ce).
+Historical design and test evidence. Final qualification is recorded in the
+[v1.8.0 release review](RELEASE-REVIEW-1.8.0.md).
+
 Protocol and fixture were committed in `3300de6` before inference. The adapter and
 evaluator were frozen in local `5dcd696` before the first held-out run. No release
 or installation is implied by these results.

@@ -5,8 +5,6 @@ Published September 22, 2026:
 Tag `982386c40b3a03f2b162809279caae3ec9215550` points at commit
 `ae360a66d586ebcde6dacc60b53a24b6369b4558`.
 
-Current goal and operational handoff:
-[LedgerTB Notion project](https://app.notion.com/p/3d7f5bd8d2b981ed91d3fad1a03255ce).
 This file records technical evidence and reproducible release checks. Candidate
 preparation started from local `8d9b3d2`. v1.8.0 is the public release.
 
@@ -57,13 +55,12 @@ Windows SmartScreen: the installer was opened from File Explorer on a GitHub-hos
 That pass covered the installer named above. It did not record remembered
 credentials across relaunch, the Start Menu entry, or uninstall.
 
-## Scope and evidence rules
+## Verification and provenance
 
-Freeze the implemented Jev/provider choices, import usability, saved/automatic
-review recovery, restore protection and worksheet export reuse. Fix reproduced
-release blockers; defer unrelated features and dependency upgrades. All automated
-checks use fake vaults and disposable fictional SQLCipher books. No paid AI calls.
-Keep failed runs and distinguish source/browser/frozen/native acceptance.
+The qualified application source is `a351c3ebe4ad0f837193c1720e56929beecc3539`.
+Subsequent release commits add acceptance workflows and documentation. The
+published Mac ZIP and supported Windows installers retain the qualified bytes
+listed above; the secondary Windows ZIP came from the tag-triggered build.
 
 | Check | Current evidence |
 | --- | --- |
@@ -79,154 +76,59 @@ Keep failed runs and distinguish source/browser/frozen/native acceptance.
 | Windows pinned tests, frozen runtime and installer | 901 passed, two POSIX-only skips in 1465.90s; encryption, build, frozen selfcheck, compressed routes, window shutdown and Inno installer all passed |
 | Windows native install/upgrade/save dialogs | GitHub-hosted machine: install of the published installer, browser-download mark, frozen self-check, compressed pages, and a desktop launch. SmartScreen showed the unsigned-app warning. Not a home-browser download. Remembered credentials, Start Menu, and uninstall were not recorded |
 
-Artifacts for this pass: `output/release-candidate-20260920/`. Earlier evidence
-remains in the dated Jev/usability/month-close guides and
-[desktop-pilot record](DESKTOP-PILOT-2026-09-19.md).
+The Mac lockfile matched all 90 installed packages and `pip check` passed.
+The signed archive was extracted and checked again: signature, notarization
+staple and Gatekeeper passed, with all 132 recorded source/config/legal files
+matching the build manifest. Production bundles contain no fixture vault backend
+or environment files. Apple notarization was accepted before publication.
 
-The pinned Mac lockfile matches all 90 installed packages and `pip check` reports
-no broken requirements. Final performance observations: 10,000 staged rows rendered
-50 row controls in 1.428s; a 50,000-row CSV parsed in 12.2676s and classified
-duplicates in 4.0158s with 44.92 MiB peak traced memory. The 10,000-entry journal
-page rendered in 0.1219s and audit page in 0.1611s. These are local measurements,
-not response-time guarantees on other hardware.
+Public CI evidence:
 
-## Candidate review and CI corrections
+- [Linux tests and browser acceptance](https://github.com/charliebarmore/LedgerTB/actions/runs/35531639105).
+- [Pinned dependency audits, secret scan and workflow audit](https://github.com/charliebarmore/LedgerTB/actions/runs/35531639095).
+- [Windows qualification and installer](https://github.com/charliebarmore/LedgerTB/actions/runs/35531662865).
+- [Installed Windows acceptance](https://github.com/charliebarmore/LedgerTB/actions/runs/35709281793).
 
-[Draft PR #50](https://github.com/charliebarmore/LedgerTB/pull/50) contains the
-candidate. `e712156` records the initial version and evidence; `2ca2a5a` corrects
-open-range Streamlit AppTest compatibility, declares pywebview as a test
-dependency, and records reviewed scanner false positives. The affected 46 tests
-passed locally; [Linux tests and browser acceptance passed](https://github.com/charliebarmore/LedgerTB/actions/runs/35508910672).
+## Corrections during qualification
 
-The original Windows run had 900 passes, two POSIX-only skips and one failure:
-the close-channel test incorrectly expected POSIX mode bits on Windows.
-Encryption, PyInstaller, frozen selfcheck, compressed HTTP serving, window
-shutdown and the Inno installer all passed. `a351c3e` keeps channel and close-guard
-assertions on both platforms and restricts only the mode-bit assertion to POSIX.
-The hosted encrypted suite took 24m43s, so its job allowance is now 30 minutes;
-individual crash-worker deadlines and accounting assertions are unchanged.
+The initial runs exposed Streamlit test-state compatibility, a missing pywebview
+test dependency, and a Windows assertion that incorrectly expected POSIX mode
+bits. These were corrected and the clean suites above passed. Six HTTPX2/HTTPCore2
+advisories were resolved by pinning the compatible 2.12.0 pair on both platforms.
+Individual accounting assertions and crash-worker transaction deadlines were not
+relaxed. Earlier host-pressure and native-input failures are not counted as passes.
 
-The dependency audit found six advisories in Windows' old HTTPX2/HTTPCore2 pins.
-Both platform locks now use 2.12.0, the matching pair required by package
-metadata. The Mac environment matches all 90 pins and passes `pip check`.
-[Security CI passes on a351c3e](https://github.com/charliebarmore/LedgerTB/actions/runs/35531639095),
-including both lockfile audits, tracked-file secret scanning and workflow audit.
-[Final Windows qualification passed](https://github.com/charliebarmore/LedgerTB/actions/runs/35531662865):
-901 tests passed, two POSIX-only checks skipped and three performance checks
-deselected in 1465.90s. All seven build/runtime/installer signals and both artifact
-uploads passed. [Final Linux tests and browser acceptance passed](https://github.com/charliebarmore/LedgerTB/actions/runs/35531639105).
+The separate fake-vault packaged tests intentionally fail the real-vault identity
+selfcheck. Their successful imports, encryption and OCR checks do not substitute
+for the separately documented signed installed-upgrade acceptance.
 
-Scanner review identified 389 commit/content hashes, two artifact paths and 15
-synthetic credential lines. The detect-secrets baseline matches value and path;
-gitleaks retains default rules with an exception only for SHA-1 hash fields in
-that baseline. Negative controls confirmed new synthetic credentials, other
-fields in the baseline, and the same field in unrelated files are still rejected.
-An attempted one-commit hook bypass was rejected by automatic approval review;
-the commit instead passed the active hook using its narrow supported exception.
+## Reproducing the automated checks
 
-## Native evidence and tool limits
-
-The native fixture imported the two-row CSV with $81.58 disbursements. Manual
-categorization selected 6100 Office Supplies for Cedar Paper and excluded the
-unknown $48.25 purchase. Canceling the actual close warning retained both values.
-After explicitly saving, excluding Cedar too and quitting, a fresh native session
-offered the saved review and a separate recovery copy. Resuming recovery retained
-both exclusions and the category; explicitly including Cedar and posting produced
-one $33.33 entry, with the unknown purchase excluded. No provider requests occurred.
-
-Reconciliation's canvas checkbox could not be operated reliably by the test
-driver. An experimental native-input helper was removed after it failed to change
-the control. The Excel action opened an actual save panel, whose remote controls
-were not exposed by the driver. Computer Use discovery returned, but selecting
-the Python app subsequently timed out after 26,379 seconds despite a requested
-10-second limit. This is a tool failure, not evidence of an application hang.
-That September 20 source-window attempt did not complete reconciliation or a
-PDF/Excel save and cancel. The September 22 packaged check in the acceptance
-section above did: difference $0.00, one cancelled save with no file, and saved
-files that opened and reconciled. The steps below are that earlier attempt.
-The task-owned native acceptance window was closed after preserving evidence;
-prior user previews remain untouched. Reopen the existing fictional book with:
+Use a clean environment matching the platform lockfile. All automated checks
+must use fictional encrypted books, fake credential backends and simulated
+providers; never run them against a client ledger or the user's credential vault.
 
 ```sh
-.macos-venv/bin/python scripts/native_pilot_driver.py \
-  --data-dir output/release-candidate-20260920/native-books \
-  --output output/release-candidate-20260920/manual-walkthrough
+python scripts/verify_lock.py requirements-macos-arm64.lock
+python -m pip check
+python -m pytest -q -ra -m "not performance"
+python -m pytest -q -s -m performance
 ```
 
-Unlock with `fictional-packaged-acceptance-only`. This source fixture uses a fake
-vault; it does not establish acceptance of the signed app’s real credential vault.
-Keep exports inside its `manual-walkthrough/downloads/` directory.
+See [TESTING.md](TESTING.md), [WINDOWS-TESTING.md](WINDOWS-TESTING.md), and the
+Mac acceptance reports above for scope and reproduction steps. Generated logs,
+screenshots, fixtures and test-modified bundles belong in ignored local output
+folders, not the source tree. Never distribute a test-modified bundle.
 
-1. Finish the Checking reconciliation at -$33.33: clear the sole Cedar entry,
-   save, verify zero difference, acknowledge and complete.
-2. On Trial Balance Worksheet, cancel an Excel save, then save Excel and both
-   close-package formats into the disposable output folder. Inspect the files
-   for the fictional client and balanced $33.33 totals.
-3. Repeat installed-upgrade/real-vault acceptance with Charlie's explicit
-   supervision; native Windows download/install/upgrade checks need Windows.
+## Remaining limitations and follow-ups
 
-The acceptance section records the September 22 results for those checks.
+The Windows installer is unsigned. Runner SmartScreen evidence does not prove
+a home-browser download or remembered credentials, Start Menu behavior,
+uninstall, installed upgrades or native save dialogs on a user's Windows PC.
+The Mac export report also records a save-destination automation limitation.
 
-## Local commands
-
-The source/build commit is `a351c3ebe4ad0f837193c1720e56929beecc3539`. The clean
-candidate is `output/release-candidate-20260920/dist-final/LedgerTB.app`.
-`acceptance-final/LedgerTB.app` is a separate modified test copy and must never
-be distributed. Production contains no fake-vault backend or `.env` files;
-`source-provenance-final.json` records its 132 matched files and lock fingerprints.
-The signed 105,073,373-byte archive `LedgerTB-1.8.0-notary.zip` has SHA-256
-`a47d923d6cd4b4a73fdb049d1636b51ecfaa4b133593d54e303419671aee7346`.
-Automatic approval review initially blocked the Apple upload; Charlie explicitly
-approved it later on September 20. Submission
-`ce953e33-d251-4290-be94-f3aeb514bb46` is Accepted. Stapling/validation succeeded
-and Gatekeeper reports `accepted`, `source=Notarized Developer ID`.
-The final distribution archive is `LedgerTB-1.8.0-macos-arm64.zip` (105,079,255 bytes),
-SHA-256 `7bb1bfe143f057ebdbe80c33970ba3b440917ec7166513743f55148586748ef2`.
-The extracted archive also passes strict signature verification, ticket validation
-and Gatekeeper assessment; all 132 recorded source/config/legal hashes match.
-Those bytes are the published `LedgerTB-1.8.0-mac.zip` and `LedgerTB-mac.zip`.
-
-The Windows installer from that same source and CI run is
-`windows-final/LedgerTB-1.8.0-windows-x64-setup.exe` (79,750,025 bytes), SHA-256
-`4374221b0e3bf80d21e3d89b50f4a2e0dec488400b37213336673887334f2bf0`.
-Those bytes are the published `LedgerTB-1.8.0-windows-x64-setup.exe` and
-`LedgerTB-windows-x64-setup.exe`. Its PE certificate table is empty: this
-installer is unsigned. The published `LedgerTB-1.8.0-windows-x64.zip` and
-`LedgerTB-windows-x64.zip` are the tag-build package, SHA-256
-`c8368f09d285f655041024802b64b96542339c9a88962ac732d8d2eb77248534`, not this
-installer. Ship the installer, not that zip. The GitHub-hosted Windows check
-in the acceptance section recorded the SmartScreen wording. It was not a
-download from the release page in a home browser. Both qualified artifact
-hashes are retained locally in `SHA256SUMS` and `artifact-manifest.json`.
-
-The sandbox prevented OCR and Developer ID verification. Repeating those checks
-outside it, while keeping the credential vault disabled, passed OCR/signature
-checks. The sole remaining selfcheck failure is the disabled credential backend.
-The installed Mac app was replaced with this 1.8.0 bundle on September 22.
-See the acceptance section.
-
-Use the pinned `.macos-venv` environment. Set BLAS worker counts to one if other
-workloads are active; do not relax assertions or performance thresholds.
-
-```sh
-.macos-venv/bin/python scripts/verify_lock.py requirements-macos-arm64.lock
-.macos-venv/bin/python -m pip check
-.macos-venv/bin/python -m pytest -x -q -ra -m "not performance"
-.macos-venv/bin/python -m pytest -q -s -m performance
-```
-
-For native fixture isolation and the fictional passphrase, follow
-`scripts/native_pilot_driver.py` and the desktop-pilot guide. For frozen browser
-acceptance use `scripts/check_packaged_jev.py` without `--key-file`; all provider
-requests remain simulated. Build into a new directory under the dated artifact
-folder. Do not overwrite earlier previews or `/Applications/LedgerTB.app`.
-
-## Release decision
-
-v1.8.0 was published on September 22, 2026. The published commit is
-`ae360a66d586ebcde6dacc60b53a24b6369b4558`. The published asset hashes are in
-the section above. Independent CPA evaluation of the synthetic labels, and firm
-approval of TypeSafe, Anthropic, and OpenAI data-handling terms, remain product
-decisions. Those features are opt-in and off by default. A cancelled worksheet
-export still writes an export audit row, and reconciliation history shows UTC
-while the Audit Trail shows local time. Those are accepted follow-ups.
+A canceled worksheet export still writes an export audit row, and reconciliation
+history displays UTC while Audit Trail displays local time. These are follow-ups.
+Independent CPA evaluation and each firm's approval of provider data-handling
+terms remain separate from availability of the optional, off-by-default providers.
+Synthetic results are not a guarantee of accuracy on client transactions.
