@@ -1,10 +1,8 @@
 # CPA usability verification: September 19, 2026
 
-Current decisions and next action belong in the [LedgerTB Notion project](https://app.notion.com/p/3d7f5bd8d2b981ed91d3fad1a03255ce).
 This document records technical changes and reproducible local evidence for the
 daytime follow-up to [the overnight trial](CPA-USABILITY-TRIAL-2026-09-18.md).
-The checkout is `LedgerLabs/ProBooks`, repository `charliebarmore/LedgerTB`,
-branch `codex/jev-overnight`.
+Final release status is in the [v1.8.0 release review](RELEASE-REVIEW-1.8.0.md).
 
 ## Changes
 
@@ -92,7 +90,7 @@ Artifacts live under `output/daytime-usability-20260919/`. Production source is
   rejection (`packaged_fake_vault.Keyring`). All 51 imports, SQLCipher and Apple
   Vision OCR reported no failure. This is not a passing native-keychain release
   gate. See `selfcheck.log`.
-- Native preview PID 48055 opened a 1360×900 logical-pixel window. Exact-PID
+- The native preview opened a 1360×900 logical-pixel window. Exact-PID
   metadata and screenshot are in `walkthrough/native-windows.json` and
   `walkthrough/native-startup.png`. Native startup is separate from the complete
   frozen-server Chromium workflow.
@@ -170,7 +168,7 @@ opening the disposable app directly. Previous previews are separate.
 7. Open Trial Balance Worksheet and inspect its wrapping export toolbar with the
    sidebar open. Exports and Refresh retain their usual behavior.
 
-Remaining rollout gates are unchanged: Charlie's usability acceptance,
+Remaining rollout gates are unchanged: independent CPA usability acceptance,
 independent label adjudication, provider terms and approved live-provider
 quality/usage/cost checks, real native credentials/installed-upgrade acceptance,
 Windows native acceptance and separate release approval. Nothing was pushed,

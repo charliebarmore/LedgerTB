@@ -45,6 +45,15 @@ and packaging on the target platform.
 
 ## Pull requests
 
+This repository and its pull requests are public. Keep release evidence concise:
+record reproducible commands, fictional fixtures, results, limitations, public
+CI links and distribution hashes. Do not include personal book metadata, vault
+inventories, machine-specific identifiers, private workspace links, agent-session
+transcripts or local screenshots/logs that have not been reviewed for disclosure.
+Generated acceptance output belongs in ignored local directories. Secret scanners
+do not detect every kind of private information; review the staged diff as well.
+Run `python scripts/check_public_hygiene.py` before opening a PR.
+
 Maintainers may ask for changes, additional tests, or a smaller scope. A pull
 request should state what changed, why, how it was verified, and any remaining
 risks. By contributing, you agree that your contribution is licensed under the
