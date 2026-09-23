@@ -78,7 +78,7 @@ re-approve access from Data Safety.
 
 ## Quickstart (from source)
 
-Requires Python 3.12 (what it's tested on).
+Requires Python 3.12 or later. Tested on 3.12 (CI) and 3.14 (a clean Linux install — see below).
 
 ```bash
 git clone https://github.com/charliebarmore/LedgerTB.git
@@ -95,6 +95,8 @@ LedgerTB's dependencies into everything else you run.
 
 Verified on a clean macOS install (Python 3.12.7, fresh venv, nothing preinstalled): `pip install -r requirements.txt` pulls a prebuilt `sqlcipher3` wheel and needs no Homebrew step. The same is true on Windows x64.
 
+Verified on a clean Linux install (Arch-based Omarchy, Python 3.14.7, empty home folder, nothing preinstalled, 2026-09-22): the same steps work unchanged. `pip` pulls a prebuilt `sqlcipher3` wheel with SQLCipher 4.12 built in — the database file is encrypted on disk — and the full test suite passes (901 passed; the 5 skips are Windows-only checks). There is no Linux installer yet; on Linux, run from source.
+
 If your platform has no wheel and the `sqlcipher3` build fails, you need the SQLCipher system library (macOS: `brew install sqlcipher`, Debian/Ubuntu: `libsqlcipher-dev`) — or drop that line from `requirements.txt` and set `LEDGERTB_ALLOW_UNENCRYPTED=1` to evaluate with sample data. Without that variable the app and MCP server refuse to open books and say why. With it, the database is unencrypted and every page says so. Install SQLCipher before keeping real books. The release selfcheck always requires SQLCipher, even when this demo variable is set.
 
 The app runs fully without any API key. To turn on AI categorization, either set `ANTHROPIC_API_KEY` in a `.env` file or save a key on the **Firm Settings** page (stored in your system credential vault, not in a file).
@@ -102,6 +104,7 @@ The app runs fully without any API key. To turn on AI categorization, either set
 ## Desktop builds
 
 - **macOS**: download the signed and notarized Apple Silicon `LedgerTB.app` from the latest release. To build it yourself, create a clean Python 3.12 environment, install `requirements-macos-arm64.lock`, and run `./scripts/build_release.sh`. The build verifies the lock before packaging. Signing is configured via a local `scripts/signing.env`.
+- **Linux**: no packaged build yet. From source, the app also runs in its own window instead of a browser tab: inside the virtual environment from the quickstart, run `pip install "pywebview>=5.0,<7.0" PyGObject`, then `python desktop.py`. The window uses the system's WebKitGTK 4.1 and GTK 3, and PyGObject compiles during install, so it also needs a C compiler and the GLib and cairo headers. Verified on Arch-based Omarchy (2026-09-22) with `webkit2gtk-4.1`, `gtk3` and `base-devel` installed. On Debian/Ubuntu, install the build prerequisites before the pip command above. The matching packages should be `libwebkit2gtk-4.1-0`, `gir1.2-webkit2-4.1`, `libgirepository-2.0-dev`, `libcairo2-dev`, `pkg-config`, `build-essential` and `python3-dev`. The Python headers are required to compile PyGObject and Pycairo; if the virtual environment uses a non-default Python, install the development headers matching that version instead. This Debian/Ubuntu setup has not been tested end to end.
 - **Windows**: an Inno Setup installer built by CI (`.github/workflows/release.yml`, tag-triggered) from `scripts/ledgertb.iss`. The release pipeline refuses to ship a build whose encryption is unavailable, installs the pinned set in `requirements-windows.lock`, and will not publish a build that cannot serve a page (`scripts/smoke_serve.ps1`) or fully exit after its native window closes (`scripts/smoke_close.ps1`).
 
 ## The posture
@@ -118,7 +121,7 @@ python -m pytest -q -m "not performance"
 ```
 
 (Dropping the marker filter also runs the slower volume baselines described in
-`PERFORMANCE.md`.) More than 700 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the Close Map and assistant review checkpoints, firm-mode locking, and export hardening. The release suite has been exercised on macOS and Windows, and on both pandas 2.2 and pandas 3.0; CI records results for proposed changes.
+`PERFORMANCE.md`.) More than 700 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the Close Map and assistant review checkpoints, firm-mode locking, and export hardening. The release suite has been exercised on macOS and Windows (and the full suite on Linux from source), and on both pandas 2.2 and pandas 3.0; CI records results for proposed changes.
 
 ## More documentation
 
