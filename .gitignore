@@ -1,6 +1,13 @@
 # Environment and secrets
 .env
 *.env
+.env.*
+!.env.example
+!.env.sample
+*.p12
+*.pfx
+*.pem
+*.key
 
 # Python
 __pycache__/
@@ -22,6 +29,22 @@ data/
 *.db
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.ledgertb
+*.ledgertb-*
+*.ledgertb.*
+
+# Local acceptance evidence, scratch files, and nested checkouts
+/output/
+/tmp/
+/.worktrees/
+/internal/
 
 # macOS
 .DS_Store

@@ -12,10 +12,9 @@ operate the canvas/save-panel controls and Computer Use timed out. The new recor
 contains the precise remaining walkthrough, source commit, artifact provenance
 and CI links. Earlier failures below are retained as historical evidence.
 
-Technical work on `codex/jev-overnight`, based on `f8e2755`. Current priorities
-and handoff belong in the private project tracker.
-This document is in progress; verification results below must be completed
-before treating the pilot goal as finished.
+Historical recovery design and pilot evidence based on `f8e2755`. Pending items
+below describe the original pilot, not current release status; final results are
+in the [v1.8.0 release review](RELEASE-REVIEW-1.8.0.md).
 
 ## Recovery and concurrent windows
 

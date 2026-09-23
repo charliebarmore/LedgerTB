@@ -1,6 +1,8 @@
 # Jev validation protocol — September 17–18, 2026
 
-Current work and priorities: private project tracker.
+Historical design and test evidence. Final qualification is recorded in the
+[v1.8.0 release review](RELEASE-REVIEW-1.8.0.md).
+
 Implementation baseline: local commit `6c31483`. This protocol is committed before
 expanded live inference. It does not authorize a release or installed-app change.
 

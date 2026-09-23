@@ -1,8 +1,8 @@
 # Optional AI categorization and second opinions
 
-Implementation and local verification: 2026-09-17–18. Current business priorities and
-rollout decisions live on the private project tracker.
-This is a source implementation, not a released or installed application update.
+Implementation guide for the optional providers shipped in v1.8.0. Historical
+verification below records the September 17–18 development snapshots; see the
+[release review](RELEASE-REVIEW-1.8.0.md) for final qualification.
 
 ## Use
 
@@ -437,9 +437,9 @@ remains historical evidence for that earlier build. See the
 
 ## September 18 walkthrough usability pass
 
-the maintainer verified the simulated native workflow: accept an Office Supplies
+A human reviewer verified the simulated native workflow: accept an Office Supplies
 suggestion, retain both exclusions, include only Cedar Paper, and post one
-balanced $33.33 entry while leaving the unknown purchase unposted. He then
+balanced $33.33 entry while leaving the unknown purchase unposted. The reviewer then
 requested a focused import/journal usability pass based on the crowded screens.
 
 The upload preview now leads to **Check totals → Continue to review**. Column
@@ -531,7 +531,7 @@ native acceptance on Windows; then obtain separate release/install approval.
 Mac packaged live TLS and the final-source staged review/posting workflow have
 the distinct passing evidence described above.
 The existing Windows native save/upgrade acceptance and broader import workbench
-threads remain open in Notion. This change does not implement that workbench redesign.
+checks are tracked separately from this historical test pass. This change does not implement that workbench redesign.
 
 ## API references
 

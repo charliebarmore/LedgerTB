@@ -11,6 +11,7 @@
 <!-- Note migrations, compatibility concerns, security/privacy effects, or remaining risks. -->
 
 - [ ] I used only synthetic or sanitized test data.
+- [ ] I checked the public diff for private metadata, workspace/session links, credentials and generated local artifacts.
 - [ ] I added or updated tests for behavior changes, or explained why none were needed.
 - [ ] I ran `python -m pytest -q -m "not performance"`, or documented the checks I could not run.
 - [ ] I updated relevant documentation for user-facing or setup changes.

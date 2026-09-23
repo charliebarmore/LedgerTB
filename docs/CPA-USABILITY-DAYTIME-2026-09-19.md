@@ -1,10 +1,8 @@
 # CPA usability verification: September 19, 2026
 
-Current decisions and next action belong in the private project tracker.
 This document records technical changes and reproducible local evidence for the
 daytime follow-up to [the overnight trial](CPA-USABILITY-TRIAL-2026-09-18.md).
-The checkout is `LedgerLabs/ProBooks`, repository `charliebarmore/LedgerTB`,
-branch `codex/jev-overnight`.
+Final release status is in the [v1.8.0 release review](RELEASE-REVIEW-1.8.0.md).
 
 ## Changes
 
@@ -170,7 +168,7 @@ opening the disposable app directly. Previous previews are separate.
 7. Open Trial Balance Worksheet and inspect its wrapping export toolbar with the
    sidebar open. Exports and Refresh retain their usual behavior.
 
-Remaining rollout gates are unchanged: the maintainer's usability acceptance,
+Remaining rollout gates are unchanged: independent CPA usability acceptance,
 independent label adjudication, provider terms and approved live-provider
 quality/usage/cost checks, real native credentials/installed-upgrade acceptance,
 Windows native acceptance and separate release approval. Nothing was pushed,

@@ -1,10 +1,8 @@
 # Recoverable fictional monthly close — September 19, 2026
 
-Local implementation and acceptance evidence for LedgerTB in `LedgerLabs/ProBooks`,
-branch `codex/jev-overnight`, based on `c647f7a`. Current business status and next
-actions belong to the private project tracker.
-Nothing in this pass was published, installed over the maintainer's app, or run against a
-real client ledger or real credential vault. No paid provider requests.
+Historical implementation and synthetic acceptance evidence based on `c647f7a`.
+Final release status is in the [v1.8.0 release review](RELEASE-REVIEW-1.8.0.md).
+This test pass used no real client ledger, credential vault or paid provider.
 
 Production changes are committed locally in `c4ab546`. Machine-readable evidence:
 [recoverable-month-close-2026-09-19.json](jev-evaluation-results/recoverable-month-close-2026-09-19.json).

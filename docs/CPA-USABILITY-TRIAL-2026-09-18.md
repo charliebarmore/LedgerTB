@@ -1,6 +1,8 @@
 # CPA usability trial: September 18–19, 2026
 
-Current priorities and handoff: private project tracker.
+Historical design and test evidence. Final qualification is recorded in the
+[v1.8.0 release review](RELEASE-REVIEW-1.8.0.md).
+
 This document owns technical behavior and reproducible evidence. Work starts from
 local `24eac4e` on `codex/jev-overnight`, in the ProBooks checkout of LedgerTB.
 No release, push, installed upgrade or live provider call is part of this pass.
@@ -247,7 +249,7 @@ build under `output/usability-overnight-20260918/dist/LedgerTB.app` (build log:
 - The native preview opened the isolated LedgerTB unlock window at 1360×876 logical
   pixels. Exact-PID window metadata and `walkthrough/native-startup.png` verify
   startup; this does not claim a complete native-window walkthrough. The window
-  is left open with fresh fictional books for the maintainer. Existing preview windows
+  is left open with fresh fictional books for manual review. Existing preview windows
   and the installed v1.7.2 app remain separate.
 
 - Frozen-server Chromium walkthrough: **20 checks passed** at 1360×768 using
@@ -280,9 +282,9 @@ remain beside their logs, rather than being relabeled as passes.
 
 ## Remaining rollout requirements
 
-the maintainer can now use the isolated synthetic preview for a CPA usability trial.
+The isolated synthetic preview supports a CPA usability trial.
 Live provider quality/cost qualification, independently adjudicated labels,
 provider terms review, real native credential/installed-upgrade acceptance and
 Windows native acceptance remain separate. No broader UI redesign or automatic
 multi-provider routing is included. Release approval is separate from this
-local trial checkpoint. Current decisions and next action belong in Notion.
+local trial checkpoint. See the release review for final qualification.
