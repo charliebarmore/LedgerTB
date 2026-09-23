@@ -24,6 +24,7 @@ from pathlib import Path
 import streamlit as st
 
 from config import APP_NAME
+from utils.brand import render_brand_header
 from database import connection as dbconn
 from database.crypto import (
     change_passphrase,
@@ -79,7 +80,7 @@ def _require_local_session():
     except Exception:
         address = None
     if address and not _is_loopback(address):
-        st.markdown(f"## 🔒 {APP_NAME}")
+        render_brand_header()
         st.error(
             f"{APP_NAME} is listening on {address}, which makes your books "
             "reachable from other computers on this network. It only ever "
@@ -101,7 +102,7 @@ def _require_local_session():
     if st.query_params.get(_UI_TOKEN_PARAM) == expected:
         st.session_state[_UI_SESSION_FLAG] = True
         return
-    st.markdown(f"## 🔒 {APP_NAME}")
+    render_brand_header()
     st.error(
         "This page was not opened by " + APP_NAME + ". Close it and use the "
         f"{APP_NAME} window instead. (Only the window the app opens can reach "
@@ -418,7 +419,7 @@ def require_unlock():
             st.error(UNENCRYPTED_REFUSAL_MESSAGE)
             st.stop()
         if database_state(dbconn.DATABASE_PATH) == "encrypted":
-            st.markdown(f"## 🔒 {APP_NAME}")
+            render_brand_header()
             st.error(
                 "This database is encrypted, but the SQLCipher driver "
                 "(`sqlcipher3`) is not installed on this machine, so it cannot "
@@ -673,7 +674,7 @@ def _render_book_chooser():
 
 def _render_gate(state: str):
     # Keep the lock screen clean: no client nav, just the passphrase prompt.
-    st.markdown(f"## 🔒 {APP_NAME}")
+    render_brand_header(chip="Encrypted book" if state == "encrypted" else "")
     if st.session_state.get("_book_lock_holder"):
         _render_lock_choice()
         return
