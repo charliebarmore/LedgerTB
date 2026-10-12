@@ -45,6 +45,7 @@ data/
 /tmp/
 /.worktrees/
 /internal/
+/.project-map/
 
 # macOS
 .DS_Store

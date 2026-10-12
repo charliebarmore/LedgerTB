@@ -4,6 +4,27 @@ LedgerTB can run in its own native window (no browser tab, no terminal) via
 `pywebview`. Everything stays local — this only changes how the app is launched
 and displayed.
 
+## v1.8.1 candidate verification (2026-10-10)
+
+The candidate adds Ollama import-review suggestions and fixes dollar amounts in
+assistant explanations and Close Map account selection during sequential signoff.
+It is not a published release.
+
+- Full suite: **944 passed, 5 Windows-only skips**, including performance checks.
+- The locked Apple Silicon build passed the 56-module SQLCipher/import/OCR
+  selfcheck and strict ad hoc signature verification.
+- Source and frozen-server browser acceptance passed currency rendering,
+  consecutive signoffs, provider settings, consent, local HTTP requests,
+  response reuse, suggestion acceptance without posting, and error handling.
+- The frozen check matched 121 bundled source/migration files. It used a
+  separately copied bundle with a fake vault and deterministic Ollama responses;
+  this verifies the request workflow, not model accuracy.
+
+Reproduce the checks using [TESTING.md](docs/TESTING.md). Native-window and
+installed-upgrade acceptance, Developer ID signing, notarization and Windows
+qualification remain separate release steps. Never distribute a bundle modified
+with a test vault.
+
 ## One-time setup
 
 Install the desktop dependency into the same Python that runs LedgerTB:
@@ -48,7 +69,7 @@ thin macOS wrapper that runs `desktop.py` from this folder.
   a repo-local `.macos-venv`, then `python3` on your PATH. Set
   `LEDGERTB_PYTHON` if it picks the wrong one. `python desktop.py` just uses
   whatever `python` is on your PATH.
-- **Logs:** double-click launches write output to `~/Library/Logs/LedgerTB.log`
+- **Logs:** double-click launches write output to `Library/Logs/LedgerTB.log` inside your home folder
   — check there if the window doesn't appear.
 - **Data location:** unchanged from the normal app. Before storing **real**
   client data, set `LEDGERTB_DB_PATH` to a location your firm's encrypted
@@ -125,7 +146,7 @@ anything.
   as data, plus Streamlit and all deps.
 - **Data location (frozen):** because the app bundle is read-only, a standalone
   build keeps its database and saved API key in
-  `~/Library/Application Support/LedgerTB/`. (Running from source still uses the
+  `Library/Application Support/LedgerTB/` inside your home folder. (Running from source still uses the
   repo `data/` folder.) Set `LEDGERTB_DB_PATH` to a location your firm's
   encrypted backup covers before storing real client data, as always.
 - **First open (unsigned build):** a plain build is ad-hoc signed, so macOS

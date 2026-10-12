@@ -140,3 +140,42 @@ def test_openai_key_is_saved_removed_in_fake_vault(monkeypatch, client_id, fake_
     at.run()
     next(b for b in at.button if b.label == 'Remove OpenAI key').click().run()
     assert 'openai_api_key' not in fake_credential_vault
+
+
+def test_local_model_runs_without_any_key(monkeypatch, client_id, accounts, fake_credential_vault):
+    at, row, calls = fixture(monkeypatch, client_id, accounts, fake_credential_vault, 'local')
+    fake_credential_vault.pop('anthropic_api_key'), fake_credential_vault.pop('openai_api_key')
+    at.run()
+    assert not any('API key' in x.value for x in at.info)
+    assert any('It is not sent anywhere else' in x.value for x in at.caption)
+    assert at.button(key='ai_review_run').disabled and not calls
+    ask(at)
+    assert len(calls) == 1 and calls[0][0] == 'local'
+    assert calls[0][1]['model'] == ai.MODELS['local'][0]
+    assert any(b.label == 'Accept Local model (Ollama) suggestion' for b in at.button)
+    assert at.session_state[row_key('cat', row)] is None
+    next(b for b in at.button if b.label == 'Accept Local model (Ollama) suggestion').click().run()
+    assert at.session_state[row_key('cat', row)] == accounts['revenue']
+    assert not at.session_state[row_key('include', row)]
+    next(b for b in at.button if b.label == 'Choose another AI').click().run()
+    assert not at.exception
+    assert next(w for w in at.selectbox if w.label == 'AI provider').value == 'jev'
+
+
+def test_local_model_address_is_validated_before_saving(monkeypatch, client_id, fake_credential_vault):
+    import utils.client_selector as selector
+    monkeypatch.setattr(selector, 'render_client_selector', lambda: client_id)
+    monkeypatch.setattr(st, 'page_link', lambda *a, **k: None)
+    at = AppTest.from_file(page_path('pages/12_Firm_Settings.py'), default_timeout=60).run()
+    assert at.text_input(key='firm_local_model_url').value == ai.DEFAULT_LOCAL_URL
+    save = lambda: next(b for b in at.button if b.label == 'Save local model address').click().run()
+    at.text_input(key='firm_local_model_url').set_value('http://models.example.test:11434').run()
+    save()
+    assert not at.exception and ai.LOCAL_URL_NAME not in fake_credential_vault
+    assert any('Plain http works only' in x.value for x in at.error)
+    at.text_input(key='firm_local_model_url').set_value('http://192.168.1.20:11434/').run()
+    save()
+    assert not at.exception and fake_credential_vault[ai.LOCAL_URL_NAME] == 'http://192.168.1.20:11434'
+    next(w for w in at.selectbox if w.label == 'Default categorization provider').set_value('local').run()
+    next(b for b in at.button if b.label == 'Save categorization provider').click().run()
+    assert not at.exception and fake_credential_vault['categorization_provider'] == 'local'

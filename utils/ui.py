@@ -1,6 +1,17 @@
 """Shared UI building blocks."""
 
+import re
+
 import streamlit as st
+
+
+def escape_currency(text: str) -> str:
+    """Keep dollar amounts literal in Markdown, including already escaped text."""
+    return re.sub(
+        r"(\\*)\$",
+        lambda match: match[1] + ("\\" if len(match[1]) % 2 == 0 else "") + "$",
+        text,
+    )
 
 # A horizontal radio styled as segmented tabs (dots hidden, underlined
 # selection). Scoped to one widget via its .st-key-* container class so

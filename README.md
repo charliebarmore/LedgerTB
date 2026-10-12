@@ -99,7 +99,7 @@ Verified on a clean Linux install (Arch-based Omarchy, Python 3.14.7, empty home
 
 If your platform has no wheel and the `sqlcipher3` build fails, you need the SQLCipher system library (macOS: `brew install sqlcipher`, Debian/Ubuntu: `libsqlcipher-dev`) — or drop that line from `requirements.txt` and set `LEDGERTB_ALLOW_UNENCRYPTED=1` to evaluate with sample data. Without that variable the app and MCP server refuse to open books and say why. With it, the database is unencrypted and every page says so. Install SQLCipher before keeping real books. The release selfcheck always requires SQLCipher, even when this demo variable is set.
 
-The app runs fully without any API key. To turn on AI categorization, either set `ANTHROPIC_API_KEY` in a `.env` file or save a key on the **Firm Settings** page (stored in your system credential vault, not in a file).
+The app runs fully without any API key. To turn on AI categorization, either set `ANTHROPIC_API_KEY` in a `.env` file or save a key on the **Firm Settings** page (stored in your system credential vault, not in a file). Import review can also use a local model with no key: save your Ollama server's address in **Firm Settings** and choose **Local model (Ollama)**.
 
 ## Desktop builds
 

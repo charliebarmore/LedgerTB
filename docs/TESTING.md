@@ -94,6 +94,33 @@ directory. Stop it when finished; its fake credential store is process-local.
 
 ## CI and remaining release acceptance
 
+### Review regression checks (2026-10-10)
+
+```sh
+python scripts/check_review_browser.py \
+  --agent-browser "$PWD/tests/browser-tools/node_modules/.bin/agent-browser"
+```
+
+The disposable Cedar fixture checks literal dollar amounts in draft rationales
+and Close Map proposals, mouse and keyboard account selection through consecutive
+preparer/reviewer signoffs, and persisted signoffs after a reload. It also saves
+the local-model provider and address in a fake vault, rejects an invalid address,
+imports a fictional CSV, makes an explicit request to a loopback Ollama test
+endpoint, accepts a suggestion without enabling posting, reuses the response,
+and displays a missing-model error without changing the staged category.
+The encrypted database independently proves that the correct accounts received
+both signoffs and that suggestions did not post entries.
+
+Pass `--chrome /path/to/chrome` to use an installed Chrome. Evidence defaults to
+`output/review-browser/`. For packaging acceptance, copy the newly built app to
+an ignored disposable directory under `output/`, then pass
+`--app output/review-candidate/LedgerTB.app`. The harness verifies bundled Python
+and migration files against source, adds a test-only fake vault to that copy,
+and repairs its ad hoc signature. Never distribute the modified test copy.
+The original build in `dist/` remains untouched. This exercises the frozen server
+in Chromium; native-window, real-vault upgrade, notarization and Windows checks
+are separate.
+
 The Tests workflow runs the Python suite and browser acceptance as separate
 jobs on code PRs and manual dispatch. It retains JUnit and browser evidence
 for 14 days. Platform-pinned release tests and existing packaging checks remain

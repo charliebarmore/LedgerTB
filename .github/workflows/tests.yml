@@ -87,6 +87,9 @@ jobs:
           python scripts/check_browser_fixture.py \
             --agent-browser "$PWD/tests/browser-tools/node_modules/.bin/agent-browser" \
             --output test-results/browser
+          python scripts/check_review_browser.py \
+            --agent-browser "$PWD/tests/browser-tools/node_modules/.bin/agent-browser" \
+            --output test-results/browser/review
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

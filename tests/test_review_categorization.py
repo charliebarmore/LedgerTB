@@ -10,9 +10,12 @@ from tests.test_jev_categorization import inputs
 
 
 def response(provider, payload, choice=None):
-    state = json.loads(payload['input'][0]['content'] if provider == 'openai' else payload['messages'][0]['content'])
+    state = json.loads(payload['input'][0]['content'] if provider == 'openai' else payload['messages'][-1]['content'])
     text = json.dumps({'suggestions': [dict(request_id=k, choice=choice or next(iter(state['choices'])),
                                            reason='Fictional receipt identifies office paper.') for k in state['transactions']]})
+    if provider == 'local':
+        return dict(model=payload['model'], done=True, done_reason='stop', prompt_eval_count=100, eval_count=20,
+                    message=dict(role='assistant', content=text))
     common = dict(model=payload['model'], usage=dict(input_tokens=100, output_tokens=20))
     if provider == 'openai':
         return dict(common, status='completed', output=[dict(type='message', content=[dict(type='output_text', text=text)])])
@@ -157,3 +160,137 @@ def test_chunk_failure_stops_unsent_requests(monkeypatch, accounts, client_id):
     assert len(ai.plan_requests(batch, 'openai', 'gpt-4o-mini')) == 2
     ai.suggest(batch, cache, provider='openai', model='gpt-4o-mini', api_key='fake', consent=True, transport=fail)
     assert len(calls) == 1 and 'Not sent' in cache['b']['error']
+
+
+def test_local_model_needs_no_key_and_never_writes(accounts, client_id):
+    from database.connection import get_connection
+    data = inputs(accounts, client_id)
+    cache, calls = {}, []
+    def send(p, payload, key):
+        calls.append((p, payload, key))
+        return response(p, payload, f"account_{accounts['expense']}")
+    kwargs = dict(provider='local', model=ai.MODELS['local'][0], api_key='', transport=send)
+    ai.suggest({'row': data}, cache, consent=False, **kwargs)
+    assert not calls and not cache
+    ai.suggest({'row': data}, cache, consent=True, **kwargs)
+    (provider, payload, key), = calls
+    assert provider == 'local' and key == ''
+    assert 'PRIVATE' not in json.dumps(payload)
+    assert payload['stream'] is False and payload['think'] is False
+    assert payload['options'] == dict(temperature=0, num_ctx=ai.LOCAL_CONTEXT_TOKENS)
+    assert payload['messages'][0] == dict(role='system', content=ai.REVIEW_INSTRUCTIONS)
+    rows = payload['format']['properties']['suggestions']['items']['properties']
+    assert rows['request_id']['enum'] == ['row'] and f"account_{accounts['expense']}" in rows['choice']['enum']
+    assert cache['row']['outcome'] == 'account' and cache['row']['requires_review']
+    assert cache['row']['provider'] == 'local' and cache['row']['model'] == ai.MODELS['local'][0]
+    assert cache['row']['batch_usage'] == dict(input_tokens=100, output_tokens=20)
+    with get_connection() as conn:
+        assert conn.execute('SELECT count(*) FROM journal_entries').fetchone()[0] == 0
+        assert conn.execute('SELECT count(*) FROM imported_transactions').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('bad', ['account', 'missing', 'duplicate', 'unknown_row', 'long_reason',
+                                 'cut_short', 'not_done', 'truncated_prompt', 'no_message'])
+def test_local_invalid_response_rejects_whole_batch(bad, accounts, client_id):
+    batch = {'row': inputs(accounts, client_id)}
+    result = response('local', ai.request_payload(batch, 'local', 'fictional-model:1b'))
+    parsed = json.loads(result['message']['content'])
+    if bad == 'account': parsed['suggestions'][0]['choice'] = 'account_999999'
+    if bad == 'missing': parsed['suggestions'] = []
+    if bad == 'duplicate': parsed['suggestions'] *= 2
+    if bad == 'unknown_row': parsed['suggestions'][0]['request_id'] = 'invented'
+    if bad == 'long_reason': parsed['suggestions'][0]['reason'] = 'x' * 801
+    result['message']['content'] = json.dumps(parsed)
+    if bad == 'cut_short': result['done_reason'] = 'length'
+    if bad == 'not_done': result['done'] = False
+    if bad == 'truncated_prompt': result['prompt_eval_count'] = ai.LOCAL_CONTEXT_TOKENS
+    if bad == 'no_message': del result['message']
+    with pytest.raises(ValueError): ai.validate_response(result, batch, 'local')
+
+
+@pytest.mark.parametrize('given,saved', [
+    ('http://127.0.0.1:11434', 'http://127.0.0.1:11434'),
+    ('  http://localhost:11434/  ', 'http://localhost:11434'),
+    ('http://192.168.1.20:11434', 'http://192.168.1.20:11434'),
+    ('http://10.0.0.5:8080', 'http://10.0.0.5:8080'),
+    ('http://100.64.0.7:11434', 'http://100.64.0.7:11434'),
+    ('http://[::1]:11434', 'http://[::1]:11434'),
+    ('https://models.example.test', 'https://models.example.test'),
+])
+def test_local_address_accepts_this_computer_private_networks_and_https(given, saved):
+    assert ai.normalize_local_url(given) == saved
+
+
+@pytest.mark.parametrize('given', [
+    '', 'not an address', 'ftp://127.0.0.1:11434', 'http://models.example.test:11434',
+    'http://203.0.113.9:11434', 'http://fictional:secret@127.0.0.1:11434',
+    'http://127.0.0.1:11434/api/chat', 'http://127.0.0.1:11434?x=1', 'http://127.0.0.1:notaport',
+])
+def test_local_address_rejects_unencrypted_public_and_malformed(given):
+    with pytest.raises(ValueError): ai.normalize_local_url(given)
+
+
+def test_local_address_setting_scopes_the_cache(accounts, client_id, fake_credential_vault):
+    data = inputs(accounts, client_id)
+    def key(**extra): return ai.request_key(('book', client_id), data, 'local', 'fictional-model:1b', **extra)
+    assert ai.local_url() == ai.DEFAULT_LOCAL_URL and ai.endpoint('local') == 'http://127.0.0.1:11434/api/chat'
+    original = key()
+    fake_credential_vault[ai.LOCAL_URL_NAME] = 'http://192.168.1.20:11434'
+    assert ai.endpoint('local') == 'http://192.168.1.20:11434/api/chat'
+    assert key() != original and key(local_endpoint='http://127.0.0.1:11434/api/chat') == original
+    fake_credential_vault[ai.LOCAL_URL_NAME] = 'http://203.0.113.9:11434'  # a tampered or stale setting
+    assert ai.local_url() == ai.DEFAULT_LOCAL_URL
+
+
+def test_local_transport_goes_straight_to_saved_address(monkeypatch, fake_credential_vault):
+    fake_credential_vault[ai.LOCAL_URL_NAME] = 'http://192.168.1.20:11434'
+    seen = []
+    class Reply:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, limit): return b'{"ok":true}'
+    class Opener:
+        def open(self, request, timeout):
+            seen.append((request, timeout))
+            return Reply()
+    def build(*handlers):
+        assert handlers[0] is jev._NoRedirect
+        proxies = [h for h in handlers if isinstance(h, ai.urllib.request.ProxyHandler)]
+        assert len(proxies) == 1 and proxies[0].proxies == {}
+        return Opener()
+    monkeypatch.setattr(ai.urllib.request, 'build_opener', build)
+    assert ai.send_request('local', {'model': 'fictional-model:1b'}, '') == {'ok': True}
+    (request, timeout), = seen
+    assert request.full_url == 'http://192.168.1.20:11434/api/chat' and timeout == ai.LOCAL_TIMEOUT
+    headers = dict((k.lower(), v) for k, v in request.header_items())
+    assert 'authorization' not in headers and 'x-api-key' not in headers
+
+
+def test_local_errors_name_the_server_and_never_a_charge(accounts, client_id):
+    batch = {'row': inputs(accounts, client_id)}
+    kwargs = dict(provider='local', model='fictional-model:1b', api_key='', consent=True)
+    def run(exc):
+        cache = {}
+        def fail(*args): raise exc
+        ai.suggest(batch, cache, **kwargs, transport=fail)
+        return cache['row']['error']
+    missing = urllib.error.HTTPError('http://127.0.0.1:11434/api/chat', 404, 'not found', {}, None)
+    assert 'does not have that model' in run(missing)
+    assert 'could not be reached' in run(urllib.error.URLError('refused'))
+    assert 'invalid or incomplete' in run(ValueError('bad'))
+    cache = {}
+    def interrupted(*args): raise KeyboardInterrupt()
+    with pytest.raises(KeyboardInterrupt):
+        ai.suggest(batch, cache, **kwargs, transport=interrupted)
+    assert 'interrupted' in cache['row']['error'] and 'charge' not in cache['row']['error']
+
+
+def test_local_requests_stay_inside_the_model_context(accounts, client_id):
+    data = inputs(accounts, client_id)
+    data['transaction']['receipt_text'] = 'x' * 30000
+    assert [fits for _, fits in ai.plan_requests({'row': data}, 'openai', 'gpt-4o-mini')] == [True]
+    assert [fits for _, fits in ai.plan_requests({'row': data}, 'local', 'fictional-model:1b')] == [False]
+    cache, calls = {}, []
+    ai.suggest({'row': data}, cache, provider='local', model='fictional-model:1b', api_key='', consent=True,
+               transport=lambda *a: calls.append(a))
+    assert not calls and cache['row']['retryable'] is False

@@ -258,9 +258,10 @@ from utils.secure_store import delete_secret, get_secret, set_secret
 from services.jev_categorization import PROVIDERS, configured_provider
 
 st.caption(
-    "Cloud categorization is optional. Local rules and manual review work offline. "
-    "Choose a default provider, save your own key in the system credential vault, and "
-    "explicitly request suggestions in Import Review. Nothing posts automatically."
+    "AI categorization is optional. Local rules and manual review work offline. "
+    "Choose a default provider, save your own key in the system credential vault "
+    "(a local model needs no key), and explicitly request suggestions in Import "
+    "Review. Nothing posts automatically."
 )
 _provider = st.selectbox("Default categorization provider", options=list(PROVIDERS),
                          index=list(PROVIDERS).index(configured_provider()),
@@ -271,6 +272,30 @@ if st.button("Save categorization provider"):
         st.success("Provider saved. Review requests remain opt-in.")
     except Exception:
         st.error("Could not save the provider in the credential vault. Try again.")
+
+st.markdown("**Local model (Ollama)**")
+from services import review_categorization as _review
+
+st.caption(
+    "Runs suggestions on a model server you control, such as Ollama on this computer "
+    "or on another computer on your own network. The selected transaction information "
+    "described below goes to that address and nowhere else. No API key is needed."
+)
+_local_url = st.text_input(
+    "Local model server address",
+    value=get_secret(_review.LOCAL_URL_NAME) or _review.DEFAULT_LOCAL_URL,
+    key="firm_local_model_url",
+    help="For Ollama on this computer, keep http://127.0.0.1:11434. Plain http is accepted "
+         "only for this computer or a private network IP address; otherwise use https.",
+)
+if st.button("Save local model address"):
+    try:
+        set_secret(_review.LOCAL_URL_NAME, _review.normalize_local_url(_local_url))
+        st.success("Local model address saved. Available immediately for review requests.")
+    except ValueError as exc:
+        st.error(str(exc))
+    except Exception:
+        st.error("Could not save the address in the credential vault. Try again.")
 
 st.markdown("**TypeSafe Jev**")
 st.caption(
