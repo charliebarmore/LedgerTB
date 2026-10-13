@@ -134,7 +134,7 @@ jobs:
         # quota can block them (recalculated slowly after deletions), and
         # that must not mask seven green signals or skip the scorecard.
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: LedgerTB-windows-installer
           path: installer/*.exe
@@ -144,7 +144,7 @@ jobs:
         id: upload_bundle
         if: steps.build.outcome == 'success'
         continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: LedgerTB-windows
           path: dist/LedgerTB/
