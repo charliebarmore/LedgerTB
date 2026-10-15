@@ -77,9 +77,9 @@ def main():
         command("find", "role", role, "click", "--name", name, *(["--exact"] if exact else []))
 
     def fill(name, value):
-        # Streamlit can paint the prompt before its input arrives in CI.
+        # Labels also resolve password inputs, which have no implicit textbox role.
         settled()
-        command("find", "role", "textbox", "fill", value, "--name", name, "--exact")
+        command("find", "label", name, "fill", value, "--exact")
 
     def body():
         settled()
