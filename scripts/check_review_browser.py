@@ -77,6 +77,8 @@ def main():
         command("find", "role", role, "click", "--name", name, *(["--exact"] if exact else []))
 
     def fill(name, value):
+        # Streamlit can paint the prompt before its input arrives in CI.
+        settled()
         command("find", "role", "textbox", "fill", value, "--name", name, "--exact")
 
     def body():

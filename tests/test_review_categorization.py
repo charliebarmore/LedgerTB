@@ -2,6 +2,7 @@
 import copy
 import json
 import urllib.error
+import uuid
 
 import pytest
 from services import review_categorization as ai
@@ -223,7 +224,9 @@ def test_local_address_accepts_this_computer_private_networks_and_https(given, s
 
 @pytest.mark.parametrize('given', [
     '', 'not an address', 'ftp://127.0.0.1:11434', 'http://models.example.test:11434',
-    'http://203.0.113.9:11434', 'http://fictional:secret@127.0.0.1:11434',
+    'http://203.0.113.9:11434',
+    # Generate dummy credentials only for URL rejection; no request is sent.
+    f'http://fixture:{uuid.uuid4().hex}@127.0.0.1:11434',
     'http://127.0.0.1:11434/api/chat', 'http://127.0.0.1:11434?x=1', 'http://127.0.0.1:notaport',
 ])
 def test_local_address_rejects_unencrypted_public_and_malformed(given):
