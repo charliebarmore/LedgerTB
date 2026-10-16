@@ -69,7 +69,7 @@ def main():
             # immediately in that gap. Retry only a missing locator (no action
             # occurred), never an action failure or an arbitrary CLI error.
             if (parts[0] == "find" and not payload.get("success")
-                    and str(payload.get("error", "")).startswith("No element found:")
+                    and str(payload.get("error", "")).startswith("No element found")
                     and time.monotonic() < deadline):
                 time.sleep(.1)
                 continue
