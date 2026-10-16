@@ -29,7 +29,7 @@ from utils.recovery import save_error_message
 from constants import EntryType
 from utils.fiscal_dates import fiscal_year_bounds
 from utils.dates import display_date
-from utils.ui import view_switcher
+from utils.ui import escape_currency, view_switcher
 from utils.recurring_ui import render_recurring_view
 from money import to_cents, to_dollars
 
@@ -1174,7 +1174,7 @@ if active_view == "Drafts":
                     # runs to a paragraph, and italics at that length is the
                     # hardest-reading text on the page.
                     st.markdown("**Why:** "
-                                + d.rationale.replace("\n", "  \n"))
+                                + escape_currency(d.rationale).replace("\n", "  \n"))
                 proposed_rows = [
                     {"Account": f"{l.account_number} - "
                                 f"{_names.get(str(l.account_number), '?')}",

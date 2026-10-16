@@ -39,9 +39,8 @@ jobs:
             requirements.txt
             requirements-dev.txt
       - name: Install SQLCipher headers
-        # sqlcipher3 has no Linux wheel, so it builds from source here; without
-        # the library the app would fall back to an unencrypted database and
-        # the encryption tests would not be exercised.
+        # Keep headers available if the selected Python/platform has no wheel.
+        # Encryption is still required by the tests and release selfcheck.
         run: |
           sudo apt-get update
           sudo apt-get install -y libsqlcipher-dev
@@ -56,6 +55,60 @@ jobs:
           name: pytest-results
           path: test-results/
           retention-days: 14
+
+  linux-pilot:
+    name: Linux pinned Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.14']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-linux.lock
+      - name: Install pinned Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlcipher-dev
+          python -m pip install -r requirements-linux.lock
+          python -m pip check
+          python scripts/verify_lock.py requirements-linux.lock
+      - name: Test the pinned source pilot
+        run: python -m pytest -q -ra -m "not performance" --junitxml=test-results/linux.xml
+      - name: Retain test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-pinned-${{ matrix.python }}
+          path: test-results/
+          retention-days: 14
+
+  linux-native:
+    name: Linux GTK window
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the system GTK stack and pinned application
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-venv python3-dev python3-gi python3-gi-cairo \
+            gir1.2-gtk-3.0 gir1.2-webkit2-4.1 libsqlcipher-dev xvfb dbus-x11
+          /usr/bin/python3 -m venv --system-site-packages .linux-venv
+          .linux-venv/bin/python -m pip install -r requirements-linux.lock
+          .linux-venv/bin/python -m pip check
+          .linux-venv/bin/python scripts/verify_lock.py requirements-linux.lock
+      - name: Unlock an encrypted book in GTK and close the real launcher
+        run: timeout 150 xvfb-run -a dbus-run-session -- .linux-venv/bin/python scripts/smoke_linux.py
 
   browser:
     name: Browser acceptance
@@ -87,6 +140,9 @@ jobs:
           python scripts/check_browser_fixture.py \
             --agent-browser "$PWD/tests/browser-tools/node_modules/.bin/agent-browser" \
             --output test-results/browser
+          python scripts/check_review_browser.py \
+            --agent-browser "$PWD/tests/browser-tools/node_modules/.bin/agent-browser" \
+            --output test-results/browser/review
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

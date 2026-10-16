@@ -778,7 +778,8 @@ def test_report_tab_clears_stale_drilldown_route(
     assert page.session_state["active_report"] == "Income Statement"
     assert "report" not in page.query_params
     assert "account_id" not in page.query_params
-    assert page.query_params["t"] == ["launch-secret"]
+    # AppTest 1.66 unwraps single query values; older versions return a list.
+    assert page.query_params["t"] in ("launch-secret", ["launch-secret"])
     assert return_key not in page.session_state
 
     reloaded = AppTest.from_file(
@@ -798,7 +799,7 @@ def test_report_tab_clears_stale_drilldown_route(
     assert not page.exception
     assert page.session_state["active_report"] == "General Ledger"
     assert page.selectbox(key="gl_account_filter__reports_g0").value == accounts["cash"]
-    assert page.query_params["t"] == ["launch-secret"]
+    assert page.query_params["t"] in ("launch-secret", ["launch-secret"])
 
 
 def test_year_close_checklist_page_renders(client_id, accounts, monkeypatch):

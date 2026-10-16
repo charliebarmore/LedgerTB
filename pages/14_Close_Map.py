@@ -20,6 +20,7 @@ from utils.client_context import scope_page_to_client
 from utils.client_selector import render_client_selector
 from utils.fiscal_dates import fiscal_year_ending_year
 from utils.unlock import require_unlock
+from utils.ui import escape_currency
 
 
 st.set_page_config(page_title="Close Map", page_icon=icons.CLOSE_MAP, layout="wide")
@@ -217,9 +218,11 @@ row_by_id = {row.account_id: row for row in filtered}
 selected_account_id = st.selectbox(
     "Review account",
     account_ids,
+    # Status changes after a signoff. Changing an option's display label leaves
+    # the browser holding an old value and can reset selection on the next click.
+    # Keep identity stable; the table and account detail show the current status.
     format_func=lambda aid: (
-        f"{row_by_id[aid].account_number} — {row_by_id[aid].account_name} "
-        f"({row_by_id[aid].status})"
+        f"{row_by_id[aid].account_number} — {row_by_id[aid].account_name}"
     ),
     key=close_map_key("account"),
 )
@@ -329,10 +332,10 @@ with st.form(f"close_review_{selected_account_id}"):
 if detail["proposals"]:
     st.markdown("#### Assistant proposals")
     for proposal in detail["proposals"]:
-        st.info(
+        st.info(escape_currency(
             f"{proposal['explanation']}\n\n"
             f"Rationale: {proposal['rationale'] or 'Not provided'} · {proposal['created_by']}"
-        )
+        ))
         pc1, pc2, _ = st.columns([1, 1, 4])
         if pc1.button("Accept", key=f"accept_close_proposal_{proposal['id']}"):
             close_map.resolve_proposal(client_id, proposal["id"], True)
