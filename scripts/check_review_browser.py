@@ -58,13 +58,24 @@ def main():
     transcript = []
 
     def command(*parts):
-        result = subprocess.run(cli + list(parts), capture_output=True, text=True, timeout=45)
-        transcript.append({"command": parts, "stdout": result.stdout, "stderr": result.stderr})
-        (args.output / "browser.json").write_text(json.dumps(transcript, indent=2))
-        assert result.returncode == 0, (parts, result.stdout, result.stderr)
-        payload = json.loads(result.stdout)
-        assert payload["success"], payload
-        return payload["data"]
+        deadline = time.monotonic() + 15
+        while True:
+            result = subprocess.run(cli + list(parts), capture_output=True, text=True, timeout=45)
+            transcript.append({"command": parts, "stdout": result.stdout, "stderr": result.stderr})
+            (args.output / "browser.json").write_text(json.dumps(transcript, indent=2))
+            payload = json.loads(result.stdout) if result.stdout.strip() else {}
+            # Streamlit's server can be idle before the frontend exposes a
+            # newly rendered control. agent-browser's semantic lookup fails
+            # immediately in that gap. Retry only a missing locator (no action
+            # occurred), never an action failure or an arbitrary CLI error.
+            if (parts[0] == "find" and not payload.get("success")
+                    and str(payload.get("error", "")).startswith("No element found:")
+                    and time.monotonic() < deadline):
+                time.sleep(.1)
+                continue
+            assert result.returncode == 0, (parts, result.stdout, result.stderr)
+            assert payload["success"], payload
+            return payload["data"]
 
     def wait(text):
         command("wait", "--text", text)
