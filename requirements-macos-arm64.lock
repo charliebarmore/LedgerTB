@@ -41,8 +41,8 @@ jsonschema-specifications==2025.9.1
 keyring==25.7.0
 macholib==1.16.4
 MarkupSafe==3.0.3
-mcp==2.0.0
-mcp-types==2.0.0
+mcp==2.3.0
+mcp-types==2.3.0
 more-itertools==11.1.0
 narwhals==2.24.0
 numpy==2.5.1
