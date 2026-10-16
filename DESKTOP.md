@@ -27,6 +27,9 @@ with a test vault.
 
 ## One-time setup
 
+For Linux, use the pinned setup below. The remaining build instructions describe
+the existing macOS and Windows distributions.
+
 Install the desktop dependency into the same Python that runs LedgerTB:
 
 ```bash
@@ -35,6 +38,81 @@ python -m pip install -r requirements-desktop.txt
 
 (If LedgerTB runs under a different Python than the one on your PATH, install
 there instead and set `LEDGERTB_PYTHON` — see below.)
+
+## Linux source pilot
+
+Use a checkout of the candidate being tested. This is a source installation,
+not a standalone Linux release. Python 3.12 and 3.14 are the pilot targets.
+The Python lock is shared across those targets; GTK, WebKitGTK, PyGObject and
+Pycairo are supplied by the distribution and must match its system Python.
+Do not use a separately downloaded Python with the distribution's bindings.
+
+On an up-to-date Omarchy/Arch installation:
+
+```sh
+sudo pacman -S --needed python python-gobject python-cairo gtk3 webkit2gtk-4.1
+```
+
+On Ubuntu 24.04:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y python3-venv python3-dev python3-gi python3-gi-cairo \
+  gir1.2-gtk-3.0 gir1.2-webkit2-4.1 libsqlcipher-dev build-essential
+```
+
+From the checkout, create a separate pilot environment. System-site access is
+needed for the distribution's GTK bindings; the application's Python packages
+are explicitly pinned and checked:
+
+```sh
+/usr/bin/python3 -m venv --system-site-packages .linux-venv
+. .linux-venv/bin/activate
+python -m pip install -r requirements-linux.lock
+python -m pip check
+python scripts/verify_lock.py requirements-linux.lock
+python -c 'import gi; gi.require_version("Gtk", "3.0"); gi.require_version("WebKit2", "4.1"); from gi.repository import Gtk, WebKit2; print("GTK/WebKit available")'
+python scripts/smoke_linux.py
+python desktop.py
+```
+
+The smoke check opens and closes a temporary native window, unlocks a synthetic
+encrypted book, checks that its client renders, and confirms the server exits.
+It uses a test-only in-memory credential store and leaves existing books alone.
+The final command launches the normal application.
+
+Saved provider keys and assistant settings use the desktop's credential service.
+Check the selected backend without reading any stored values:
+
+```sh
+python -c 'import keyring; b = keyring.get_keyring(); print(type(b).__module__, type(b).__name__)'
+```
+
+A `keyring.backends.fail` backend means that a supported credential service is
+unavailable in this login session. Configure the desktop's Secret Service wallet
+before testing saved credentials. Do not substitute a plaintext keyring.
+
+### Pilot acceptance
+
+Use a new synthetic book for the first device run. Record the Git commit, Python
+version, distribution version, GTK/WebKit versions and credential backend.
+
+1. Create an encrypted book, close the app, and unlock it again.
+2. Import a CSV, accept a category while leaving posting excluded, save the
+   review, and reopen it. Explicitly include and post the intended rows once.
+3. Create a balanced journal entry. Confirm an unbalanced entry is refused.
+4. Prepare and review two Close Map accounts. Confirm both signoffs persist.
+5. Export a PDF and spreadsheet through the native save dialog. Open both files.
+6. Make and verify a backup, then restore it into a separate test book.
+7. Save a provider setting through Firm Settings, close, and reopen. Confirm
+   the setting survives through the real credential service.
+8. Check keyboard navigation, file pickers and scaling under the normal Wayland
+   session. Close the window and confirm no LedgerTB server remains running.
+
+Automated GTK acceptance on a virtual X11 display does not establish these
+Wayland, file-dialog or real-vault results. Follow [the workflow testing guide](docs/TESTING.md)
+for accounting and recovery evidence. Linux packaging and broader distribution
+support remain separate qualification work.
 
 ## Launch it
 

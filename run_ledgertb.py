@@ -553,7 +553,7 @@ def main() -> int:
 
         try:
             import webview
-            from utils.desktop_window import configure_webview
+            from utils.desktop_window import configure_webview, webview_backend
 
             configure_webview(webview)
             geom = _window_geometry()
@@ -570,7 +570,7 @@ def main() -> int:
             try:
                 webview.start(
                     _place_window, (window, win_x, win_y),
-                    gui="cocoa" if sys.platform == "darwin" else "edgechromium",
+                    gui=webview_backend(),
                 )
             finally:
                 gui_returned.set()

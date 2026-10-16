@@ -9,7 +9,8 @@ import run_ledgertb
 
 
 @pytest.mark.parametrize("launcher", ["source", "packaged"])
-def test_launchers_configure_downloads_and_keep_links_in_app(monkeypatch, tmp_path, launcher):
+@pytest.mark.parametrize("platform,backend", [("darwin", "cocoa"), ("win32", "edgechromium"), ("linux", "gtk")])
+def test_launchers_configure_downloads_and_keep_links_in_app(monkeypatch, tmp_path, launcher, platform, backend):
     """Exercise each real entry point up to native window creation.
 
     Stub OS/window boundaries, not the shared policy: a launcher forgetting to
@@ -29,6 +30,8 @@ def test_launchers_configure_downloads_and_keep_links_in_app(monkeypatch, tmp_pa
     stopped = []
     proc = object()
     from webview.event import Event
+    monkeypatch.setattr(sys, "platform", platform)
+    renderers = []
 
     def create_window(*args, **kwargs):
         observed.append(dict(settings))
@@ -37,7 +40,8 @@ def test_launchers_configure_downloads_and_keep_links_in_app(monkeypatch, tmp_pa
         return window
 
     monkeypatch.setitem(sys.modules, "webview", SimpleNamespace(
-        settings=settings, create_window=create_window, start=lambda *a, **k: None,
+        settings=settings, create_window=create_window,
+        start=lambda *a, **k: renderers.append(k.get("gui")),
     ))
     entry = desktop if launcher == "source" else run_ledgertb
     monkeypatch.setattr(entry, "_find_free_port", lambda: 8501)
@@ -58,6 +62,7 @@ def test_launchers_configure_downloads_and_keep_links_in_app(monkeypatch, tmp_pa
     assert entry.main() == 0
     assert observed == [{"ALLOW_DOWNLOADS": True, "OPEN_EXTERNAL_LINKS_IN_BROWSER": False}]
     assert stopped == [proc]
+    assert renderers == [backend]
 
 
 def test_command_line_selfcheck_cannot_launch_a_second_app(monkeypatch):

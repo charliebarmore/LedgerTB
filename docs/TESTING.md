@@ -109,7 +109,8 @@ imports a fictional CSV, makes an explicit request to a loopback Ollama test
 endpoint, accepts a suggestion without enabling posting, reuses the response,
 and displays a missing-model error without changing the staged category.
 The encrypted database independently proves that the correct accounts received
-both signoffs and that suggestions did not post entries.
+both signoffs, that the accepted account persists in the recovery copy while
+posting remains excluded, and that suggestions did not post entries.
 
 Pass `--chrome /path/to/chrome` to use an installed Chrome. Evidence defaults to
 `output/review-browser/`. For packaging acceptance, copy the newly built app to
@@ -125,6 +126,35 @@ The Tests workflow runs the Python suite and browser acceptance as separate
 jobs on code PRs and manual dispatch. It retains JUnit and browser evidence
 for 14 days. Platform-pinned release tests and existing packaging checks remain
 in their existing workflows.
+
+### Linux pilot checks (2026-10-16)
+
+The same workflow tests `requirements-linux.lock` on Python 3.12 and 3.14,
+including dependency consistency and exact pin verification. Its separate GTK
+job uses Ubuntu 24.04's system Python and GUI bindings. It runs the real source
+launcher on a virtual display, unlocks an encrypted synthetic book, checks the
+rendered client and verifies child-server exit when the native window closes.
+The GTK check uses a fake vault; it never reads the runner's credential store.
+
+To repeat after the [Linux setup](../DESKTOP.md#linux-source-pilot):
+
+```sh
+python -m pytest -q -ra -m "not performance"
+python scripts/smoke_linux.py
+```
+
+On a headless Linux host with `xvfb` and `dbus-x11` installed:
+
+```sh
+timeout 150 xvfb-run -a dbus-run-session -- .linux-venv/bin/python scripts/smoke_linux.py
+```
+
+Local Ubuntu 24.04 arm64 evidence: 940 application checks passed; five Git-based
+hygiene checks initially could not run because Git was missing, then all five
+passed after installing it. Five Windows-only tests skip and three performance
+checks are deselected. The pinned environment and native GTK unlock/render/close
+check pass. This is container evidence, not Omarchy device acceptance or a
+packaged Linux release. CI supplies the x86-64 and Python-version results.
 
 The automated browser scenario is a source-app check with synthetic seed data.
 It does not certify first-time installation, native file dialogs, real OS-vault

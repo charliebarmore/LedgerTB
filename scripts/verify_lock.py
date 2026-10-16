@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that the current Apple Silicon build environment matches its lock."""
+"""Verify that a supported platform environment matches its dependency lock."""
 
 from __future__ import annotations
 
@@ -14,14 +14,23 @@ LOCK_LINE = re.compile(r"^([A-Za-z0-9_.-]+)==([^#\s]+)$")
 
 
 def main() -> int:
-    if sys.platform != "darwin" or platform.machine() != "arm64":
+    default = "requirements-linux.lock" if sys.platform == "linux" else "requirements-macos-arm64.lock"
+    lock_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(default)
+    linux = lock_path.name == "requirements-linux.lock"
+    label = "LINUX" if linux else "MACOS"
+    if linux and sys.platform != "linux":
+        print("Linux lock verification requires Linux.", file=sys.stderr)
+        return 2
+    if linux and sys.version_info[:2] not in ((3, 12), (3, 14)):
+        print("Linux pilot lock requires Python 3.12 or 3.14.", file=sys.stderr)
+        return 2
+    if not linux and (sys.platform != "darwin" or platform.machine() != "arm64"):
         print("macOS arm64 lock verification requires an Apple Silicon Mac.", file=sys.stderr)
         return 2
-    if sys.version_info[:2] != (3, 12):
+    if not linux and sys.version_info[:2] != (3, 12):
         print("macOS lock verification requires Python 3.12.", file=sys.stderr)
         return 2
 
-    lock_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("requirements-macos-arm64.lock")
     failures: list[str] = []
     checked = 0
     for raw_line in lock_path.read_text(encoding="utf-8").splitlines():
@@ -43,10 +52,10 @@ def main() -> int:
             failures.append(f"{package}: expected {expected}, installed {actual}")
 
     if failures:
-        print("MACOS LOCK FAIL:")
+        print(f"{label} LOCK FAIL:")
         print("\n".join(f"  {failure}" for failure in failures))
         return 1
-    print(f"MACOS LOCK OK — verified {checked} packages")
+    print(f"{label} LOCK OK — verified {checked} packages")
     return 0
 
 

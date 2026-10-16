@@ -158,7 +158,7 @@ def main() -> int:
     # present -- lets the server-start logic be smoke-tested headlessly.
     import webview
 
-    from utils.desktop_window import configure_webview
+    from utils.desktop_window import configure_webview, webview_backend
 
     configure_webview(webview)
 
@@ -170,7 +170,7 @@ def main() -> int:
     )
     register_close_guard(window, review_status)
     try:
-        webview.start(_place_window, (window, win_x, win_y))
+        webview.start(_place_window, (window, win_x, win_y), gui=webview_backend())
     finally:
         stop_streamlit(proc)
         review_channel.cleanup()

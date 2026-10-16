@@ -250,10 +250,18 @@ def main():
                 opinions()
                 wait("Synthetic receipt identifies office supplies.")
                 click("button", "Accept Local model (Ollama) suggestion")
+                # Streamlit 1.66 renders the selection as an input value, which
+                # agent-browser's interactive snapshot omits. Older versions
+                # render text beside the input. Scope the check to this picker,
+                # never the opinion text (which already names the account).
+                command("wait", "--fn", "(() => {"
+                        "const input = document.querySelector('[role=combobox][aria-label=Account]');"
+                        "return input && (input.value === '6000 - Office Expense' || "
+                        "input.closest('[data-testid=stSelectbox]')?.textContent.includes('6000 - Office Expense'));"
+                        "})()")
                 settled()
                 state = command("snapshot", "-i")["snapshot"]
                 assert 'checkbox "Include for posting" [checked=false' in state, state
-                assert "6000 - Office Expense" in state
                 show_panel("AI suggestions")
                 click("button", "Ask Local model (Ollama) for suggestions")
                 settled()
@@ -287,6 +295,13 @@ def main():
                         for account in ("capital", "revenue") for role in ("preparer", "reviewer")]
                     assert cur.execute("SELECT COUNT(*) FROM journal_entries").fetchone()[0] == 3
                     assert cur.execute("SELECT COUNT(*) FROM draft_entries WHERE status='pending'").fetchone()[0] == 2
+                    recovery = cur.execute("SELECT payload FROM import_review_recovery").fetchall()
+                    assert len(recovery) == 1
+                    saved_rows = json.loads(recovery[0]["payload"])["rows"]
+                    assert len(saved_rows) == 1
+                    expense = cur.execute("SELECT id FROM accounts WHERE account_number='6000'").fetchone()[0]
+                    assert saved_rows[0]["selected_account_id"] == expense
+                    assert saved_rows[0]["include"] is False
                 dbc.clear_active_key()
                 if args.app:
                     assert (book_dir / "fake-vault-loaded").exists()

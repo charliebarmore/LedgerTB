@@ -259,7 +259,8 @@ def test_ui_token_gate_refuses_sessions_the_app_did_not_open(db, monkeypatch):
     at.query_params["t"] = "guessed"
     at.run()
     assert any("was not opened by" in e.value for e in at.error)
-    assert at.query_params["t"] == ["guessed"]  # Never disclose the real token.
+    # AppTest 1.66 unwraps single query values; older versions return a list.
+    assert at.query_params["t"] in ("guessed", ["guessed"])  # Never disclose the real token.
 
     # The real token opens the app, and the session stays authorized
     # afterwards even though navigation drops the query parameter.
@@ -270,7 +271,7 @@ def test_ui_token_gate_refuses_sessions_the_app_did_not_open(db, monkeypatch):
     at.query_params.clear()
     at.run()
     assert not any("was not opened by" in e.value for e in at.error)
-    assert at.query_params["t"] == ["launch-secret"]
+    assert at.query_params["t"] in ("launch-secret", ["launch-secret"])
     # A browser refresh creates a new session using the retained URL.
     refreshed = AppTest.from_file(page_path("pages/7_Dashboard.py"), default_timeout=30)
     refreshed.query_params.update(at.query_params)
