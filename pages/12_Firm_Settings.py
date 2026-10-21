@@ -260,7 +260,7 @@ from services.jev_categorization import PROVIDERS, configured_provider
 st.caption(
     "AI categorization is optional. Local rules and manual review work offline. "
     "Choose a default provider, save your own key in the system credential vault "
-    "(a local model needs no key), and explicitly request suggestions in Import "
+    "(Ollama needs no key in LedgerTB), and explicitly request suggestions in Import "
     "Review. Nothing posts automatically."
 )
 _provider = st.selectbox("Default categorization provider", options=list(PROVIDERS),
@@ -273,14 +273,15 @@ if st.button("Save categorization provider"):
     except Exception:
         st.error("Could not save the provider in the credential vault. Try again.")
 
-st.markdown("**Local model (Ollama)**")
+st.markdown("**Ollama (your server)**")
 from services import review_categorization as _review
 
 st.caption(
-    "Runs suggestions on a model server you control, such as Ollama on this computer "
-    "or on another computer on your own network. The selected transaction information "
-    "described below goes to that address and nowhere else. No API key is needed."
+    "Sends review requests to the Ollama server address you save here. "
+    "No API key is needed in LedgerTB. The server's configuration determines "
+    "where requests are processed and what is kept or logged."
 )
+st.info(_review.OLLAMA_DATA_NOTICE)
 _local_url = st.text_input(
     "Local model server address",
     value=get_secret(_review.LOCAL_URL_NAME) or _review.DEFAULT_LOCAL_URL,

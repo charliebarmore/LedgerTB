@@ -55,7 +55,7 @@ OUTCOMES = {
     "transfer_review": "Transfer review: confirmed owned-account movement, card-balance repayment, owner funding/draw, loan principal, refundable security deposit, or human-flagged transfer. Check the other side. An ordinary card purchase is not a card-balance repayment; a confirmed expense component with principal requires a split.",
 }
 PROVIDERS = {"off": "Off (local rules only)", "anthropic": "Anthropic", "jev": "TypeSafe Jev", "openai": "OpenAI",
-             "local": "Local model (Ollama)"}
+             "local": "Ollama (your server)"}
 
 
 def configured_provider():

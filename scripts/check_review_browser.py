@@ -228,7 +228,7 @@ def main():
                 click("link", "Firm Settings", exact=False)
                 wait("Default categorization provider")
                 click("combobox", "Default categorization provider")
-                click("option", "Local model (Ollama)")
+                click("option", "Ollama (your server)")
                 click("button", "Save categorization provider")
                 wait("Provider saved")
                 fill("Local model server address", "http://example.com")
@@ -250,17 +250,18 @@ def main():
                 show_panel("Select rows for actions")
                 click("button", "Select all")
                 show_panel("AI suggestions")
-                assert "Local model (Ollama)" in body()
+                assert "Ollama (your server)" in body()
+                assert "Ollama may send the selected information to a cloud provider" in body()
                 assert json.loads((book_dir / "local-requests.json").read_text()) == []
                 state = command("snapshot", "-i")["snapshot"]
-                assert any('button "Ask Local model (Ollama) for suggestions"' in line and "disabled" in line
+                assert any('button "Ask Ollama (your server) for suggestions"' in line and "disabled" in line
                            for line in state.splitlines()), state
-                check("Send the selected transaction information to Local model (Ollama)")
-                click("button", "Ask Local model (Ollama) for suggestions")
+                check("Send the selected transaction information to Ollama (your server)")
+                click("button", "Ask Ollama (your server) for suggestions")
                 show_panel()
                 opinions()
                 wait("Synthetic receipt identifies office supplies.")
-                click("button", "Accept Local model (Ollama) suggestion")
+                click("button", "Accept Ollama (your server) suggestion")
                 # Streamlit 1.66 renders the selection as an input value, which
                 # agent-browser's interactive snapshot omits. Older versions
                 # render text beside the input. Scope the check to this picker,
@@ -274,7 +275,7 @@ def main():
                 state = command("snapshot", "-i")["snapshot"]
                 assert 'checkbox "Include for posting" [checked=false' in state, state
                 show_panel("AI suggestions")
-                click("button", "Ask Local model (Ollama) for suggestions")
+                click("button", "Ask Ollama (your server) for suggestions")
                 settled()
                 assert len(json.loads((book_dir / "local-requests.json").read_text())) == 1
                 show_panel("AI suggestions")
@@ -284,9 +285,9 @@ def main():
                 command("press", "Tab")
                 settled()
                 state = command("snapshot", "-i")["snapshot"]
-                assert 'checkbox "Send the selected transaction information to Local model (Ollama)" [checked=false' in state
-                check("Send the selected transaction information to Local model (Ollama)")
-                click("button", "Ask Local model (Ollama) for suggestions")
+                assert 'checkbox "Send the selected transaction information to Ollama (your server)" [checked=false' in state
+                check("Send the selected transaction information to Ollama (your server)")
+                click("button", "Ask Ollama (your server) for suggestions")
                 show_panel()
                 opinions()
                 wait("does not have that model")

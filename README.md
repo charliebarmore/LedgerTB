@@ -99,7 +99,7 @@ Verified on a clean Linux install (Arch-based Omarchy, Python 3.14.7, empty home
 
 If your platform has no wheel and the `sqlcipher3` build fails, you need the SQLCipher system library (macOS: `brew install sqlcipher`, Debian/Ubuntu: `libsqlcipher-dev`) — or drop that line from `requirements.txt` and set `LEDGERTB_ALLOW_UNENCRYPTED=1` to evaluate with sample data. Without that variable the app and MCP server refuse to open books and say why. With it, the database is unencrypted and every page says so. Install SQLCipher before keeping real books. The release selfcheck always requires SQLCipher, even when this demo variable is set.
 
-The app runs fully without any API key. To turn on AI categorization, either set `ANTHROPIC_API_KEY` in a `.env` file or save a key on the **Firm Settings** page (stored in your system credential vault, not in a file). Import review can also use a local model with no key: save your Ollama server's address in **Firm Settings** and choose **Local model (Ollama)**.
+The app runs fully without any API key. To turn on AI categorization, either set `ANTHROPIC_API_KEY` in a `.env` file or save a key on the **Firm Settings** page (stored in your system credential vault, not in a file). Import review can also use **Ollama (your server)** with no key in LedgerTB: save the server address in **Firm Settings**. That server may use local or cloud models; review the disclosure before sending information.
 
 ## Desktop builds
 
@@ -109,7 +109,7 @@ The app runs fully without any API key. To turn on AI categorization, either set
 
 ## The posture
 
-This tool follows the same rule we teach in the Lab: AI drafts, the professional decides. Categorization suggestions are never auto-posted, everything is reviewable, and the audit trail keeps the record. Assistant access via MCP is off by default and permissioned at **read / propose / post**; the default is propose, while direct posting requires an explicit warning and confirmation. The database always blocks assistant edits and deletes. LedgerTB itself makes an outbound call only when you enable Anthropic categorization. If you enable MCP, your MCP client may also send returned book data to its configured AI provider—vet that provider and your firm's data policy before using client data. The books remain in the local encrypted database.
+This tool follows the same rule we teach in the Lab: AI drafts, the professional decides. Categorization suggestions are never auto-posted, everything is reviewable, and the audit trail keeps the record. Assistant access via MCP is off by default and permissioned at **read / propose / post**; the default is propose, while direct posting requires an explicit warning and confirmation. The database always blocks assistant edits and deletes. Optional AI features send information to Anthropic, TypeSafe Jev, OpenAI, or the Ollama server you configure. Import-review suggestions require an explicit request; document parsing and Book Review use Anthropic. An Ollama server can forward requests to a cloud provider. See [PRIVACY.md](PRIVACY.md) for the information sent and provider boundaries. If you enable MCP, your MCP client may also send returned book data to its configured AI provider—vet that provider and your firm's data policy before using client data. The books remain in the local encrypted database.
 
 ## Tests
 

@@ -1,9 +1,9 @@
 """Explicit, review-only Anthropic/OpenAI/local-model opinions using the Jev evidence contract.
 
 No SDK, database, posting, environment-key discovery, or automatic fallback.
-Cloud providers use fixed HTTPS endpoints. The local model uses the address
-saved in Firm Settings and needs no key. Only the chosen provider receives
-the selected evidence.
+Cloud providers use fixed HTTPS endpoints. Ollama uses the address saved in
+Firm Settings and needs no key in LedgerTB. That server may forward requests
+to a cloud provider; its address does not establish where inference runs.
 """
 import copy
 import hashlib
@@ -29,9 +29,15 @@ MODELS = {
 }
 KEY_NAMES = {"jev": "typesafe_api_key", "anthropic": "anthropic_api_key", "openai": "openai_api_key"}
 ENDPOINTS = {"anthropic": "https://api.anthropic.com/v1/messages", "openai": "https://api.openai.com/v1/responses"}
-# The local model is an Ollama server the firm runs itself. Its address is a
-# setting, not a fixed endpoint, and it has no key.
+# Keep the stored provider ID stable. It identifies the configured Ollama
+# server, not a guarantee of local inference.
 LOCAL_PROVIDER = "local"
+OLLAMA_DATA_NOTICE = (
+    "Ollama may send the selected information to a cloud provider, even when its server "
+    "runs on this computer. LedgerTB cannot verify where your server runs a model. "
+    "For local-only use, disable cloud features on your Ollama server and choose a downloaded model. "
+    "[Ollama setup instructions](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features)"
+)
 LOCAL_URL_NAME = "local_model_url"
 DEFAULT_LOCAL_URL = "http://127.0.0.1:11434"
 LOCAL_TIMEOUT = 300

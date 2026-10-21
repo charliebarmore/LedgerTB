@@ -112,6 +112,13 @@ The encrypted database independently proves that the correct accounts received
 both signoffs, that the accepted account persists in the recovery copy while
 posting remains excluded, and that suggestions did not post entries.
 
+**2026-10-20 disclosure regression:** the browser checks the visible Ollama
+cloud-forwarding notice before consent. `tests/test_ai_review.py` also selects
+a custom cloud model against a stubbed transport, verifies that changing the
+model clears consent, and requires a new explicit request without accepting a
+category or enabling posting. It also checks the notice in Firm Settings.
+These checks make no live cloud request and do not certify server configuration.
+
 Pass `--chrome /path/to/chrome` to use an installed Chrome. Evidence defaults to
 `output/review-browser/`. For packaging acceptance, copy the newly built app to
 an ignored disposable directory under `output/`, then pass

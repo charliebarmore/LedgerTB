@@ -62,12 +62,17 @@ changes alone send nothing. Their keys use the operating system credential vault
 Results stay in session memory and require human acceptance. OpenAI requests go
 directly from your computer to OpenAI under your OpenAI account and service terms.
 
-Import review can also use a local model: an Ollama server you run on this
-computer or on your own network, at the address you save in Firm Settings. Each
-explicit request sends the same selected evidence to that address only. No key is
-used. Plain http is accepted only for this computer or a private network address;
-any other address must use https. What that server keeps or logs depends on how
-you run it. Ledger Labs LLC does not receive those requests.
+Import review also offers **Ollama (your server)** at the address you save in
+Firm Settings. Each explicit request sends the same selected evidence to that
+address, without an API key in LedgerTB. Plain http is accepted only for this
+computer or a private network address; any other address must use https.
+
+The server may forward requests to a cloud provider, including when it runs on
+this computer. LedgerTB cannot verify where that server runs a model. Its
+configuration and any downstream provider determine what is processed, kept or
+logged. For local-only use, disable Ollama's cloud features on the server and
+choose a downloaded model; see [Ollama's instructions](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features).
+Ledger Labs LLC does not receive these requests.
 
 TypeSafe requests go directly from your computer to TypeSafe and are governed
 by your TypeSafe account, agreement, and service settings.

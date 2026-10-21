@@ -32,7 +32,7 @@ off-screen. Accepting a Jev account updates the summary in the same interaction.
 
 **Off (local rules only)** is the default until a provider is saved, including
 for existing installations with an Anthropic key. Import review now supports
-Jev, Anthropic, OpenAI and a local model through the same explicit
+Jev, Anthropic, OpenAI and an Ollama server through the same explicit
 review-and-accept flow.
 Document parsing and Book Review
 retain their separate Anthropic behavior; this setting controls import categorization.
@@ -141,19 +141,32 @@ The separate fictional native preview uses
 simulated providers. Do not open the bundle directly for real client work. The
 installed application and older walkthrough windows were not replaced or closed.
 
-## Local model (Ollama)
+## Ollama (your server)
 
 Added after v1.8.0; not yet in a release.
 
-**Local model (Ollama)** sends the same review request to an Ollama server the
-firm runs itself, on this computer or on its own network. It needs no key.
+**Ollama (your server)** sends the same review request to the server address
+saved in Firm Settings. It needs no API key in LedgerTB. The server may forward
+the request to a cloud provider, even when its address is on this computer.
+LedgerTB cannot verify where the server runs a model; the disclosure appears
+beside the consent checkbox before a request can be sent.
+
+For local-only use, disable cloud features **on the Ollama server**, then
+restart it and choose a downloaded model. Ollama documents `OLLAMA_NO_CLOUD=1`
+and the `disable_ollama_cloud` server setting in its
+[local-only instructions](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features).
+Setting this in LedgerTB's environment does not configure a separate server.
+Cloud model IDs are accepted as custom IDs, with the same disclosure, consent
+and response validation. A model name or loopback address is not proof of local
+execution.
 
 1. Install Ollama on the computer that will run the model and pull a model
    there, for example `ollama pull qwen3:14b`.
-2. In **Firm Settings → AI categorization → Local model (Ollama)**, save the
+2. In **Firm Settings → AI categorization → Ollama (your server)**, save the
    server address. Keep `http://127.0.0.1:11434` for Ollama on this computer.
-3. In **AI suggestions**, choose **Local model (Ollama)** and a model. **Other
-   model ID** takes any name `ollama list` shows on that server.
+3. In **AI suggestions**, choose **Ollama (your server)** and a model. **Other
+   model ID** takes a model available to that server, including cloud models.
+   Cloud models send the selected information to a cloud provider.
 
 Address rules, enforced on save and again on every request
 (`normalize_local_url`): the address is scheme, host and optional port only.

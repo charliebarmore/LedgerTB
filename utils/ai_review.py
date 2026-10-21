@@ -109,7 +109,7 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
                      key=f'ai_review_model_{provider}', on_change=reset_consent)
     if st.session_state[f'ai_review_model_{provider}'] == 'Other model ID':
         st.text_input('Model ID', key=f'ai_review_custom_{provider}', on_change=reset_consent,
-                      help='A model installed on your local model server, as named by `ollama list`.'
+                      help='A model available to your Ollama server. Cloud models send information to a cloud provider.'
                       if provider == ai.LOCAL_PROVIDER else
                       'An API model available to your provider account that supports structured JSON output.')
     chosen = st.session_state.get('bulk_rows', [])
@@ -121,12 +121,10 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
         name = ai.PROVIDERS[provider]
         local = provider == ai.LOCAL_PROVIDER
         with st.expander(f'What is sent to {name}'):
-            receiver = f'Your local model server at {ai.local_url()}' if local else name
+            receiver = f'Your Ollama server at {ai.local_url()}' if local else name
             st.caption(f'{receiver} receives the selected dates, descriptions, amounts, source account IDs, transfer flags, '
                        'receipt text if present, eligible account details and AI business context. General client Notes '
-                       'and other providers’ answers are not sent. '
-                       + ('It is not sent anywhere else. ' if local else '')
-                       + 'Every suggestion requires your approval.')
+                       'and other providers’ answers are not sent. Every suggestion requires your approval.')
         st.caption('Suggestions only. Every account choice needs your approval.')
         valid = ai.valid_model(provider, model)
         if not valid:
@@ -134,6 +132,9 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
         too_many = len(chosen) > jev.MAX_BATCH
         if too_many:
             st.info(f'Select at most {jev.MAX_BATCH} rows per AI request. Bulk category changes can use more.')
+        if local:
+            # Keep the forwarding disclosure visible, outside the collapsed details.
+            st.info(ai.OLLAMA_DATA_NOTICE)
         consent = st.checkbox(f'Send the selected transaction information to {name}', key='ai_review_consent')
         api_key = '' if local else secure_store.get_secret(ai.KEY_NAMES[provider])
         if not local and not api_key:
