@@ -119,6 +119,10 @@ model clears consent, and requires a new explicit request without accepting a
 category or enabling posting. It also checks the notice in Firm Settings.
 These checks make no live cloud request and do not certify server configuration.
 
+The first reviewer signoff waits for its rendered confirmation before reading
+the page; the independent database assertions still verify both roles and the
+selected account. A server-idle marker alone can precede that frontend update.
+
 Pass `--chrome /path/to/chrome` to use an installed Chrome. Evidence defaults to
 `output/review-browser/`. For packaging acceptance, copy the newly built app to
 an ignored disposable directory under `output/`, then pass

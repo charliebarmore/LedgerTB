@@ -175,6 +175,10 @@ def main():
                 settled()
                 after_prepare = selected_account()
                 click("button", "Mark reviewed")
+                if not args.expect_bugs:
+                    # An idle server can precede the final frontend render.
+                    # Wait for the observable result; never repeat the mutation.
+                    wait("Latest reviewer signoff")
                 settled()
                 after_review = selected_account()
                 review_text = body()
