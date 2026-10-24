@@ -94,10 +94,78 @@ directory. Stop it when finished; its fake credential store is process-local.
 
 ## CI and remaining release acceptance
 
+### Review regression checks (2026-10-10)
+
+```sh
+python scripts/check_review_browser.py \
+  --agent-browser "$PWD/tests/browser-tools/node_modules/.bin/agent-browser"
+```
+
+The disposable Cedar fixture checks literal dollar amounts in draft rationales
+and Close Map proposals, mouse and keyboard account selection through consecutive
+preparer/reviewer signoffs, and persisted signoffs after a reload. It also saves
+the local-model provider and address in a fake vault, rejects an invalid address,
+imports a fictional CSV, makes an explicit request to a loopback Ollama test
+endpoint, accepts a suggestion without enabling posting, reuses the response,
+and displays a missing-model error without changing the staged category.
+The encrypted database independently proves that the correct accounts received
+both signoffs, that the accepted account persists in the recovery copy while
+posting remains excluded, and that suggestions did not post entries.
+
+**2026-10-20 disclosure regression:** the browser checks the visible Ollama
+cloud-forwarding notice before consent. `tests/test_ai_review.py` also selects
+a custom cloud model against a stubbed transport, verifies that changing the
+model clears consent, and requires a new explicit request without accepting a
+category or enabling posting. It also checks the notice in Firm Settings.
+These checks make no live cloud request and do not certify server configuration.
+
+The first reviewer signoff waits for its rendered confirmation before reading
+the page; the independent database assertions still verify both roles and the
+selected account. A server-idle marker alone can precede that frontend update.
+
+Pass `--chrome /path/to/chrome` to use an installed Chrome. Evidence defaults to
+`output/review-browser/`. For packaging acceptance, copy the newly built app to
+an ignored disposable directory under `output/`, then pass
+`--app output/review-candidate/LedgerTB.app`. The harness verifies bundled Python
+and migration files against source, adds a test-only fake vault to that copy,
+and repairs its ad hoc signature. Never distribute the modified test copy.
+The original build in `dist/` remains untouched. This exercises the frozen server
+in Chromium; native-window, real-vault upgrade, notarization and Windows checks
+are separate.
+
 The Tests workflow runs the Python suite and browser acceptance as separate
 jobs on code PRs and manual dispatch. It retains JUnit and browser evidence
 for 14 days. Platform-pinned release tests and existing packaging checks remain
 in their existing workflows.
+
+### Linux pilot checks (2026-10-16)
+
+The same workflow tests `requirements-linux.lock` on Python 3.12 and 3.14,
+including dependency consistency and exact pin verification. Its separate GTK
+job uses Ubuntu 24.04's system Python and GUI bindings. It runs the real source
+launcher on a virtual display, unlocks an encrypted synthetic book, checks the
+rendered client and verifies child-server exit when the native window closes.
+The GTK check uses a fake vault; it never reads the runner's credential store.
+
+To repeat after the [Linux setup](../DESKTOP.md#linux-source-pilot):
+
+```sh
+python -m pytest -q -ra -m "not performance"
+python scripts/smoke_linux.py
+```
+
+On a headless Linux host with `xvfb` and `dbus-x11` installed:
+
+```sh
+timeout 150 xvfb-run -a dbus-run-session -- .linux-venv/bin/python scripts/smoke_linux.py
+```
+
+Local Ubuntu 24.04 arm64 evidence: 940 application checks passed; five Git-based
+hygiene checks initially could not run because Git was missing, then all five
+passed after installing it. Five Windows-only tests skip and three performance
+checks are deselected. The pinned environment and native GTK unlock/render/close
+check pass. This is container evidence, not Omarchy device acceptance or a
+packaged Linux release. CI supplies the x86-64 and Python-version results.
 
 The automated browser scenario is a source-app check with synthetic seed data.
 It does not certify first-time installation, native file dialogs, real OS-vault

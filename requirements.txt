@@ -1,20 +1,20 @@
 # Ranges span the versions LedgerTB is actually tested on; the platform lock
-# files (requirements-windows.lock, requirements-macos-arm64.lock) hold the
-# exact stacks the shipped builds use. The upper bounds are deliberate: a new
+# files hold the exact shipped desktop stacks and the Linux source pilot.
+# The upper bounds are deliberate: a new
 # major of anything below ships only after the full test suite passes on it.
-streamlit>=1.59.0,<2.0
+streamlit>=1.66.1,<2.0
 sqlcipher3>=0.6.2,<0.7
 pandas>=2.0.0,<4.0
 openpyxl>=3.1.0,<4.0
 anthropic>=0.18.0,<1.0
 # Already pinned in both desktop locks; explicit for Jev TLS in frozen builds.
-certifi>=2026.7.22,<2027
+certifi>=2026.10.19,<2027
 python-dotenv>=1.0.0,<2.0
 platformdirs>=3.0,<5.0
 portalocker>=3.2,<4.0
 keyring>=24.0,<26.0
-mcp>=2.0,<3.0
+mcp>=2.2,<3.0
 pypdfium2>=5.4.0,<6.0
 reportlab>=4.4.0,<6.0
-Pillow>=10.0.0,<13.0
+Pillow>=13.0.0,<14.0
 pyobjc-framework-Quartz>=10.0,<13.0; sys_platform == "darwin"

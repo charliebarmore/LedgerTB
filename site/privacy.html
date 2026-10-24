@@ -57,6 +57,25 @@
       <p>Requests go directly from the user's computer to Anthropic under the
       user's Anthropic account, agreement, and service settings. Ledger Labs
       LLC does not receive those requests.</p>
+      <p>Import review also offers TypeSafe Jev, OpenAI, and an Ollama
+      server you configure. Only an explicit request sends the selected rows'
+      dates, descriptions, amounts, source account IDs, transfer flags, receipt
+      text if present, eligible account details, and AI business context to the
+      chosen provider. General client Notes and other providers' answers are
+      not sent. Changing a provider or model sends nothing. Every suggestion
+      requires human acceptance and does not post an entry.</p>
+      <p>TypeSafe and OpenAI requests go directly to the chosen provider under
+      the user's account and service terms. An Ollama request goes to the
+      server address saved in Firm Settings without an API key in LedgerTB.
+      Plain http is accepted only for this computer or a private network
+      address; other addresses require https.</p>
+      <p>The Ollama server may forward requests to a cloud provider, even when
+      it runs on this computer. LedgerTB cannot verify where that server runs
+      a model. Its configuration and any downstream provider determine what
+      is processed, kept or logged. For local-only use, disable Ollama's cloud
+      features on the server and choose a downloaded model; see
+      <a href="https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features">Ollama's instructions</a>.
+      Ledger Labs LLC does not receive these requests.</p>
     </section>
 
     <section>

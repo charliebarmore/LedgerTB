@@ -1,5 +1,12 @@
 """Native-window policy shared by the source and packaged launchers."""
 
+import sys
+
+
+def webview_backend():
+    """Use the platform's supported native renderer in both entry points."""
+    return {"darwin": "cocoa", "win32": "edgechromium", "linux": "gtk"}.get(sys.platform)
+
 
 def configure_webview(webview):
     # Downloads are opt-in in both Cocoa and WebView2. Set this before creating

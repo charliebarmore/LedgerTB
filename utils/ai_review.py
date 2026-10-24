@@ -44,19 +44,23 @@ def prepare_other_reviews(transactions, accounts, client_id, book, context, stat
     variants = state.get('ai_review_variants', {})
     by_uid = {t['uid']: t for t in transactions}
     inputs, keys = {}, {}
+    local_endpoint = None
     for uid, row in by_uid.items():
         accepted = row.get('ai_review_accepted')
         needed = [(v['provider'], v['model']) for v in variants.values() if uid in v['rows']]
         if accepted:
             needed.append((accepted['provider'], accepted['model']))
-        if uid in chosen and provider in ai.ENDPOINTS and ai.valid_model(provider, model):
+        if uid in chosen and ai.is_review_provider(provider) and ai.valid_model(provider, model):
             needed.append((provider, model))
         if not needed:
             continue
         evidence = {**row, 'is_transfer': state.get(row_key('xfer', row), row.get('is_transfer', False))}
         inputs[uid] = jev.request_input(evidence, accounts, client_id, context)
         for p, m in set(needed):
-            keys[(uid, p, m)] = ai.request_key((str(book), client_id), inputs[uid], p, m)
+            if p == ai.LOCAL_PROVIDER and local_endpoint is None:
+                local_endpoint = ai.endpoint(ai.LOCAL_PROVIDER)
+            keys[(uid, p, m)] = ai.request_key((str(book), client_id), inputs[uid], p, m,
+                                               local_endpoint=local_endpoint)
         if accepted:
             cat_key = row_key('cat', row)
             current = state.get(cat_key, row.get('selected_account_id'))
@@ -83,7 +87,7 @@ def change_provider(widget_key):
 
 def choose_another():
     current = st.session_state['ai_review_provider']
-    providers = ['jev', 'anthropic', 'openai']
+    providers = ['jev', 'anthropic', 'openai', 'local']
     st.session_state['ai_review_provider'] = providers[(providers.index(current) + 1) % len(providers)]
     st.session_state['ai_review_picker_epoch'] += 1
     reset_consent()
@@ -105,7 +109,9 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
                      key=f'ai_review_model_{provider}', on_change=reset_consent)
     if st.session_state[f'ai_review_model_{provider}'] == 'Other model ID':
         st.text_input('Model ID', key=f'ai_review_custom_{provider}', on_change=reset_consent,
-                      help='An API model available to your provider account that supports structured JSON output.')
+                      help='A model available to your Ollama server. Cloud models send information to a cloud provider.'
+                      if provider == ai.LOCAL_PROVIDER else
+                      'An API model available to your provider account that supports structured JSON output.')
     chosen = st.session_state.get('bulk_rows', [])
     if not chosen:
         st.info('Choose rows in Select rows for actions first. Inclusion checkboxes control posting only.')
@@ -113,8 +119,10 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
         render_jev_review(transactions, accounts, client_id, jev_prepared, chosen=chosen, show_results=False)
     else:
         name = ai.PROVIDERS[provider]
+        local = provider == ai.LOCAL_PROVIDER
         with st.expander(f'What is sent to {name}'):
-            st.caption(f'{name} receives the selected dates, descriptions, amounts, source account IDs, transfer flags, '
+            receiver = f'Your Ollama server at {ai.local_url()}' if local else name
+            st.caption(f'{receiver} receives the selected dates, descriptions, amounts, source account IDs, transfer flags, '
                        'receipt text if present, eligible account details and AI business context. General client Notes '
                        'and other providers’ answers are not sent. Every suggestion requires your approval.')
         st.caption('Suggestions only. Every account choice needs your approval.')
@@ -124,9 +132,12 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
         too_many = len(chosen) > jev.MAX_BATCH
         if too_many:
             st.info(f'Select at most {jev.MAX_BATCH} rows per AI request. Bulk category changes can use more.')
+        if local:
+            # Keep the forwarding disclosure visible, outside the collapsed details.
+            st.info(ai.OLLAMA_DATA_NOTICE)
         consent = st.checkbox(f'Send the selected transaction information to {name}', key='ai_review_consent')
-        api_key = secure_store.get_secret(ai.KEY_NAMES[provider])
-        if not api_key:
+        api_key = '' if local else secure_store.get_secret(ai.KEY_NAMES[provider])
+        if not local and not api_key:
             st.info(f'Add your {name} API key in Firm Settings. Local review remains available.')
         inputs, keys = other_prepared
         requested = {keys[(uid, provider, model)]: inputs[uid] for uid in chosen} if valid and not too_many else {}
@@ -134,12 +145,13 @@ def render_controls(transactions, accounts, client_id, jev_prepared, other_prepa
         new = ai.plan_requests({k: v for k, v in requested.items() if k not in cache}, provider, model) if valid else []
         if new:
             st.caption(f'This selection needs {sum(fits for _, fits in new)} new {name} request(s). Existing results are reused.')
-        enabled = bool(requested and consent and api_key)
+        enabled = bool(requested and consent and (local or api_key))
         run = st.button(f'Ask {name} for suggestions', key='ai_review_run', disabled=not enabled)
         has_error = any(cache.get(k, {}).get('error') and cache[k].get('retryable', True) for k in requested)
         retry = False
         if has_error:
-            st.caption('Retry may incur another charge, including after a timeout.')
+            st.caption('Retry sends the request to your local model server again.' if local else
+                       'Retry may incur another charge, including after a timeout.')
             retry = st.button(f'Retry failed {name} requests', key='ai_review_retry', disabled=not enabled)
         if run or retry:
             variant_id = f'{provider}:{model}'

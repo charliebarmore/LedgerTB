@@ -8,7 +8,7 @@ verification below records the September 17–18 development snapshots; see the
 
 1. In **Firm Settings → AI categorization**, select **TypeSafe Jev**, save the
    provider, and save your own TypeSafe key. Keys use `utils/secure_store.py` and
-   the OS credential vault. The desktop app never reads `~/.typesafe.env`.
+   the OS credential vault. The desktop app never reads a separate TypeSafe environment file.
 2. Load staged transactions through **Import Transactions → Review & Categorize**.
 3. Open **Select rows for actions** and choose rows in **Selected rows**. Open
    **AI suggestions**, check the disclosure consent, and click **Ask Jev for suggestions**.
@@ -32,7 +32,8 @@ off-screen. Accepting a Jev account updates the summary in the same interaction.
 
 **Off (local rules only)** is the default until a provider is saved, including
 for existing installations with an Anthropic key. Import review now supports
-Jev, Anthropic and OpenAI through the same explicit review-and-accept flow.
+Jev, Anthropic, OpenAI and an Ollama server through the same explicit
+review-and-accept flow.
 Document parsing and Book Review
 retain their separate Anthropic behavior; this setting controls import categorization.
 No provider call occurs from loading the page, choosing rows, opening action panels, changing consent,
@@ -140,6 +141,70 @@ The separate fictional native preview uses
 simulated providers. Do not open the bundle directly for real client work. The
 installed application and older walkthrough windows were not replaced or closed.
 
+## Ollama (your server)
+
+Added after v1.8.0; not yet in a release.
+
+**Ollama (your server)** sends the same review request to the server address
+saved in Firm Settings. It needs no API key in LedgerTB. The server may forward
+the request to a cloud provider, even when its address is on this computer.
+LedgerTB cannot verify where the server runs a model; the disclosure appears
+beside the consent checkbox before a request can be sent.
+
+For local-only use, disable cloud features **on the Ollama server**, then
+restart it and choose a downloaded model. Ollama documents `OLLAMA_NO_CLOUD=1`
+and the `disable_ollama_cloud` server setting in its
+[local-only instructions](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features).
+Setting this in LedgerTB's environment does not configure a separate server.
+Cloud model IDs are accepted as custom IDs, with the same disclosure, consent
+and response validation. A model name or loopback address is not proof of local
+execution.
+
+1. Install Ollama on the computer that will run the model and pull a model
+   there, for example `ollama pull qwen3:14b`.
+2. In **Firm Settings → AI categorization → Ollama (your server)**, save the
+   server address. Keep `http://127.0.0.1:11434` for Ollama on this computer.
+3. In **AI suggestions**, choose **Ollama (your server)** and a model. **Other
+   model ID** takes a model available to that server, including cloud models.
+   Cloud models send the selected information to a cloud provider.
+
+Address rules, enforced on save and again on every request
+(`normalize_local_url`): the address is scheme, host and optional port only.
+Plain http is accepted for `localhost` and for IP addresses in loopback,
+RFC 1918, link-local, 100.64.0.0/10 and the IPv6 equivalents. Anything else
+must use https. A saved value that no longer passes falls back to
+`http://127.0.0.1:11434`. A hostname over plain http is rejected; Ollama also
+answers 403 to host names it does not recognize, so use the IP address.
+
+Request shape: Ollama's native `/api/chat`, not streamed, thinking off,
+temperature 0, with the same JSON schema as the cloud providers in `format`.
+The response passes the same validation as every other provider and fails
+closed.
+
+Limits that differ from the cloud providers:
+
+- Requests ask for a 16,384-token context window and are capped at 24,000
+  bytes, because Ollama drops the start of a prompt that exceeds the window
+  without an error. A selection over the cap is split or kept local, never
+  truncated. A response that reports a full window is rejected.
+- The timeout is 300 seconds; a model that is still loading can be slow.
+- System proxy settings are ignored, so the request goes straight to the
+  saved address. Redirects are refused, as for every provider.
+- The cache key includes the saved address. Changing it never reuses a result
+  from another server.
+
+Document parsing and Book Review still use Anthropic only.
+
+**2026-10-10 verification:** source Chromium and a frozen Mac v1.8.1 candidate
+passed saved-provider/address, invalid-address, explicit-consent, real loopback
+HTTP, suggestion acceptance, response-reuse and missing-model checks. Acceptance
+kept posting excluded; independent SQLCipher queries confirmed no new journal
+entries. The HTTP endpoint supplied deterministic Ollama-format test responses.
+See [the browser regression command](TESTING.md#review-regression-checks-2026-10-10)
+and [Mac candidate evidence](../DESKTOP.md). This is packaged-flow evidence,
+not a new live-model accuracy claim. Windows and distribution qualification
+remain pending.
+
 ## Data and boundaries
 
 The allowlisted request contains dates, descriptions, integer-cent amounts,
@@ -235,7 +300,7 @@ source account separately.
 
 # Explicit live request: synthetic fixtures only; the key is never printed.
 .macos-venv/bin/python scripts/compare_jev.py --live-jev \
-  --key-file ~/.typesafe.env --output output/jev-comparison.json
+  --key-file /path/to/typesafe.env --output output/jev-comparison.json
 
 # Optional Anthropic comparison: supply ANTHROPIC_API_KEY in the environment.
 .macos-venv/bin/python scripts/compare_jev.py --live-jev --live-anthropic \
@@ -272,7 +337,7 @@ PYINSTALLER_CONFIG_DIR="$PWD/output/jev-package-cache" \
 .macos-venv/bin/python scripts/check_packaged_jev.py \
   --app output/jev-overnight-20260917/dist/LedgerTB.app \
   --output output/jev-overnight-20260917/packaged-browser
-# Optional explicit fictional live TLS check: add --key-file ~/.typesafe.env.
+# Optional explicit fictional live TLS check: add --key-file /path/to/typesafe.env.
 # The key is read in memory by the test backend, never copied into the bundle.
 ```
 
