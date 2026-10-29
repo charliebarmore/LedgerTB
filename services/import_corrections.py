@@ -39,7 +39,18 @@ def import_history_links(cursor, client_id):
         elif event['table_name'] == 'journal_entries' and event['action'] == 'REVERSE':
             if values.get('reversal_entry_id'):
                 reversals.append((event['record_id'], values['reversal_entry_id']))
-    # Resolve transitive reversals independently of audit ordering.
+    # Human-approved assistant corrections have a durable draft relationship.
+    # Include corrections of corrections as well as reversals of either kind.
+    reversals.extend(
+        (row['original_entry_id'], row['posted_entry_id'])
+        for row in cursor.execute(
+            "SELECT original_entry_id, posted_entry_id FROM draft_entries "
+            "WHERE client_id = ? AND status = 'approved' "
+            "AND original_entry_id IS NOT NULL AND posted_entry_id IS NOT NULL",
+            (client_id,)
+        ).fetchall()
+    )
+    # Resolve transitive relationships independently of creation/audit ordering.
     while reversals:
         pending = []
         for original, reversal in reversals:

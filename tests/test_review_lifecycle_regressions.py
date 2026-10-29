@@ -220,3 +220,22 @@ def test_close_holds_write_lock_through_checklist_and_commit(client_id, accounts
         with pytest.raises(ValueError, match='closed'):
             posting.result(timeout=5)
     assert JournalEntry.count(client_id) == 0
+
+
+def test_approved_assistant_correction_is_part_of_import_history(client_id, accounts):
+    from models.draft_entry import DraftEntry, DraftLine
+    second = new_expense(client_id, '6100', 'Synthetic travel')
+    final = new_expense(client_id, '6200', 'Synthetic supplies')
+    original, _ = imported_expense(client_id, accounts)
+    draft = DraftEntry(client_id=client_id, original_entry_id=original.id,
+        entry_date='2026-01-11', description='Reclassify imported expense', lines=[
+            DraftLine(account_number='6100', debit_cents=10000),
+            DraftLine(account_number='6000', credit_cents=10000)])
+    draft.save()
+    correction_id = draft.approve()
+    correct_imported_category(client_id=client_id, journal_entry_id=original.id,
+        target_account_id=final, correction_date=date(2026, 1, 12), reason='Final category')
+    statement = ReportGenerator.income_statement(client_id, date(2026, 1, 1), date(2026, 1, 31))
+    assert {r['account_number']: r['balance'] for r in statement['expenses']} == {'6200': 100}
+    with pytest.raises(ValueError, match='history'):
+        JournalEntry.delete(correction_id, client_id=client_id)

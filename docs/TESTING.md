@@ -56,9 +56,9 @@ and posting interleaved with year closing. These checks use synthetic encrypted
 books and the fake vault.
 
 Import correction and reversal relationships come from existing structured audit
-records. Reversing a correction updates the source category in the same
-transaction. Ambiguous older correction chains require review. Linked import
-history cannot be edited or deleted in place. The compact ledger hides only
+records and approved assistant-correction drafts. Reversing a correction
+updates the source category in the same transaction. Ambiguous older correction
+chains require review. Linked import history cannot be edited or deleted in place. The compact ledger hides only
 pairs whose account amounts net to zero.
 
 Posting and closing hold a database write transaction while checking period
