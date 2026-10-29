@@ -102,6 +102,7 @@ class FiscalPeriod:
     ):
         """Close or reopen a fiscal period."""
         with get_cursor(commit=True) as cursor:
+            cursor.execute("BEGIN IMMEDIATE")
             query = "SELECT * FROM fiscal_periods WHERE id = ?"
             params = [period_id]
             if client_id is not None:
@@ -274,14 +275,18 @@ class FiscalPeriod:
             )
 
     @staticmethod
-    def get_closed_period_for_date(client_id: int, entry_date: date) -> Optional['FiscalPeriod']:
+    def get_closed_period_for_date(client_id: int, entry_date: date, conn=None) -> Optional['FiscalPeriod']:
         """Return the CLOSED 'Year' period that contains entry_date, if any.
 
         Used to lock journal-entry posting/editing/deletion within a closed
         fiscal year. Only Year-type periods gate edits; Quarter/Month periods
         are reporting views and do not lock.
         """
-        with get_cursor() as cursor:
+        owns_conn = conn is None
+        if owns_conn:
+            conn = get_connection()
+        try:
+            cursor = conn.cursor()
             cursor.execute(
                 """
                 SELECT * FROM fiscal_periods
@@ -293,6 +298,10 @@ class FiscalPeriod:
                 (client_id, entry_date.isoformat(), entry_date.isoformat())
             )
             row = cursor.fetchone()
+
+        finally:
+            if owns_conn:
+                conn.close()
 
         if not row:
             return None
@@ -391,6 +400,7 @@ class FiscalPeriod:
     def delete(period_id: int, client_id: Optional[int] = None):
         """Delete a fiscal period."""
         with get_cursor(commit=True) as cursor:
+            cursor.execute("BEGIN IMMEDIATE")
             query = "SELECT * FROM fiscal_periods WHERE id = ?"
             params = [period_id]
             if client_id is not None:

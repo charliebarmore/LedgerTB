@@ -47,6 +47,24 @@ python -m pytest -q -ra \
   draft types, deny direct posting at propose level, downgrade permissions,
   reconnect after human resolution, and revoke access without restarting.
 
+## Accounting lifecycle regressions (2026-10-29)
+
+`python -m pytest -q tests/test_review_lifecycle_regressions.py` exercises
+correction/reversal/reclassification sequences, superseded imports, immutable
+import history, nonzero legacy reversal pairs, reconciliation date ordering,
+and posting interleaved with year closing. These checks use synthetic encrypted
+books and the fake vault.
+
+Import correction and reversal relationships come from existing structured audit
+records. Reversing a correction updates the source category in the same
+transaction. Ambiguous older correction chains require review. Linked import
+history cannot be edited or deleted in place. The compact ledger hides only
+pairs whose account amounts net to zero.
+
+Posting and closing hold a database write transaction while checking period
+status. New reconciliations follow statement order; older drafts exclude
+clearing activity from later statements when computing and validating balances.
+
 ## Real browser acceptance
 
 The browser runner creates its own disposable book, fake credential store,

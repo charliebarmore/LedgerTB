@@ -1,11 +1,80 @@
 """Safe reclassification of a journal entry created from an imported row."""
 
+import json
 from datetime import date
 
 from database.connection import get_connection
 from models.audit_log import AuditLog
 from models.journal_entry import JournalEntry, JournalEntryLine
 from money import to_dollars
+
+
+def import_history_links(cursor, client_id):
+    """Map immutable ledger history to its imported source using audit links.
+
+    Existing corrections already record structured correction_entry_id values.
+    REVERSE events preserve the relationship even if display text changes.
+    """
+    rows = cursor.execute(
+        "SELECT id, journal_entry_id, reversal_journal_entry_id FROM imported_transactions "
+        "WHERE client_id = ?", (client_id,)
+    ).fetchall()
+    links = {}
+    for row in rows:
+        for key in ('journal_entry_id', 'reversal_journal_entry_id'):
+            if row[key] is not None:
+                links[row[key]] = row['id']
+    events = cursor.execute(
+        "SELECT table_name, record_id, action, new_values FROM audit_log "
+        "WHERE client_id = ? AND action IN ('UPDATE', 'REVERSE') ORDER BY id",
+        (client_id,)
+    ).fetchall()
+    reversals = []
+    for event in events:
+        values = json.loads(event['new_values'] or '{}')
+        if event['table_name'] == 'imported_transactions':
+            correction_id = values.get('correction_entry_id')
+            if correction_id:
+                links[correction_id] = event['record_id']
+        elif event['table_name'] == 'journal_entries' and event['action'] == 'REVERSE':
+            if values.get('reversal_entry_id'):
+                reversals.append((event['record_id'], values['reversal_entry_id']))
+    # Resolve transitive reversals independently of audit ordering.
+    while reversals:
+        pending = []
+        for original, reversal in reversals:
+            if original in links:
+                links[reversal] = links[original]
+            else:
+                pending.append((original, reversal))
+        if len(pending) == len(reversals):
+            break
+        reversals = pending
+    return links
+
+
+def effective_import_category(cursor, imported, links):
+    """Recover the category from the complete, cent-exact ledger chain.
+
+    Refuse legacy edited/ambiguous history rather than guessing a category.
+    """
+    ids = [entry_id for entry_id, source_id in links.items()
+           if source_id == imported['id']]
+    amounts = dict(cursor.execute(
+        'SELECT l.account_id, SUM(l.debit - l.credit) FROM journal_entry_lines l '
+        'JOIN journal_entries e ON e.id = l.journal_entry_id '
+        'WHERE e.client_id = ? AND e.id IN (' + ','.join('?' for _ in ids) + ') '
+        'GROUP BY l.account_id', [imported['client_id'], *ids]
+    ).fetchall())
+    bank = amounts.pop(imported['bank_account_id'], 0)
+    categories = {account: amount for account, amount in amounts.items() if amount}
+    if bank != imported['amount'] or len(categories) != 1:
+        raise ValueError('This import was reversed or its correction history needs review. '
+                         'Review the linked entries before changing its category.')
+    account_id, amount = next(iter(categories.items()))
+    if amount != -imported['amount']:
+        raise ValueError('The imported category could not be determined safely.')
+    return account_id
 
 
 def correct_imported_category(
@@ -32,6 +101,7 @@ def correct_imported_category(
     conn = get_connection()
     try:
         cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
         cursor.execute(
             """
             SELECT it.*, old_account.name AS old_account_name,
@@ -56,7 +126,8 @@ def correct_imported_category(
                 "reclassified automatically."
             )
         imported = linked_rows[0]
-        if imported["status"] != "Posted":
+        if (imported["status"] != "Posted" or imported["superseded_by_batch"]
+                or imported["reversal_journal_entry_id"]):
             raise ValueError("Only posted imported transactions can be corrected.")
         if imported["new_account_name"] is None:
             raise ValueError("The correction account must belong to the selected client.")
@@ -65,20 +136,9 @@ def correct_imported_category(
         if target_account_id == imported["bank_account_id"]:
             raise ValueError("The correction account cannot be the imported bank account.")
 
-        old_account_id = imported["suggested_account_id"]
-        if old_account_id is None:
-            cursor.execute(
-                """
-                SELECT DISTINCT account_id
-                FROM journal_entry_lines
-                WHERE journal_entry_id = ? AND account_id != ?
-                """,
-                (journal_entry_id, imported["bank_account_id"]),
-            )
-            candidates = [row["account_id"] for row in cursor.fetchall()]
-            if len(candidates) != 1:
-                raise ValueError("The current category could not be determined safely.")
-            old_account_id = candidates[0]
+        old_account_id = effective_import_category(
+            cursor, imported, import_history_links(cursor, client_id)
+        )
         if target_account_id == old_account_id:
             raise ValueError("Choose a different category for the correction.")
 

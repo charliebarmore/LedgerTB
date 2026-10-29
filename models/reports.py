@@ -2132,8 +2132,13 @@ class ReportGenerator:
         """
         entry_ids = {entry.entry_id for entry in entries if entry.entry_id}
         hidden_entry_ids = set()
+        net_by_entry = {}
         for entry in entries:
-            if entry.reversed_by_entry_id in entry_ids:
+            net_by_entry[entry.entry_id] = net_by_entry.get(entry.entry_id, 0) + to_cents(entry.debit) - to_cents(entry.credit)
+        for entry in entries:
+            pair = {entry.entry_id, entry.reversed_by_entry_id}
+            pair_amount = sum(net_by_entry.get(entry_id, 0) for entry_id in pair)
+            if entry.reversed_by_entry_id in entry_ids and pair_amount == 0:
                 hidden_entry_ids.update(
                     {entry.entry_id, entry.reversed_by_entry_id}
                 )

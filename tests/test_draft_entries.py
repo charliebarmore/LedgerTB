@@ -260,7 +260,7 @@ def test_draft_inbox_mode_files_drafts_but_cannot_reach_the_ledger(
     assert result["status"] == "pending"
 
     # The ledger is unreachable — even through the real posting model.
-    with pytest.raises(Exception, match="not authorized|prohibited|DatabaseError|denied"):
+    with pytest.raises(Exception, match="not authorized|prohibited|DatabaseError|denied|readonly"):
         post_entry(client_id, date(2026, 7, 31),
                    [(accounts["cash"], 1, 0), (accounts["revenue"], 0, 1)])
 

@@ -90,15 +90,6 @@ class JournalEntry:
         if errors:
             raise ValueError("; ".join(errors))
 
-        # Block posting/editing entries dated within a closed fiscal year
-        from models.fiscal_period import FiscalPeriod
-        closed = FiscalPeriod.get_closed_period_for_date(self.client_id, self.entry_date)
-        if closed:
-            raise ValueError(
-                f"{closed.period_name} is closed. Reopen the year before posting or "
-                f"editing entries dated {self.entry_date.isoformat()}."
-            )
-
         owns_conn = conn is None
         if owns_conn:
             conn = get_connection()
@@ -108,6 +99,14 @@ class JournalEntry:
         old_values = None
 
         try:
+            if not conn.in_transaction:
+                cursor.execute("BEGIN IMMEDIATE")
+            from models.fiscal_period import FiscalPeriod
+            closed = FiscalPeriod.get_closed_period_for_date(
+                self.client_id, self.entry_date, conn=conn
+            )
+            if closed:
+                raise ValueError(f"{closed.period_name} is closed. Reopen the year before posting or editing entries.")
             # SQLite foreign keys ensure referenced accounts exist, but cannot
             # express that every line belongs to the same client as the entry.
             # Enforce that tenant boundary before inserting or replacing lines.
@@ -145,17 +144,20 @@ class JournalEntry:
                     raise ValueError("Journal entry not found for the selected client.")
                 cursor.execute(
                     "SELECT 1 FROM imported_transactions "
-                    "WHERE journal_entry_id = ? AND client_id = ? LIMIT 1",
-                    (self.id, self.client_id),
+                    "WHERE (journal_entry_id = ? OR reversal_journal_entry_id = ?) AND client_id = ? LIMIT 1",
+                    (self.id, self.id, self.client_id),
                 )
                 if cursor.fetchone():
                     raise ValueError(
                         "Imported postings cannot be edited in place. "
                         "Use Correct category so the source and ledger history stay intact."
                     )
+                from services.import_corrections import import_history_links
+                if self.id in import_history_links(cursor, self.client_id):
+                    raise ValueError("Imported correction history cannot be edited in place. Reverse it instead.")
                 old_entry_date = date.fromisoformat(old_row['entry_date'])
                 old_closed = FiscalPeriod.get_closed_period_for_date(
-                    self.client_id, old_entry_date
+                    self.client_id, old_entry_date, conn=conn
                 )
                 if old_closed:
                     raise ValueError(
@@ -536,6 +538,7 @@ class JournalEntry:
         try:
             cursor = conn.cursor()
 
+            cursor.execute("BEGIN IMMEDIATE")
             # Get the entry info for audit logging (scoped to the client when given)
             if client_id is None:
                 cursor.execute("SELECT * FROM journal_entries WHERE id = ?", (entry_id,))
@@ -575,7 +578,7 @@ class JournalEntry:
                 # Block deleting entries dated within a closed fiscal year
                 from models.fiscal_period import FiscalPeriod
                 entry_date = date.fromisoformat(row['entry_date'])
-                closed = FiscalPeriod.get_closed_period_for_date(client_id, entry_date)
+                closed = FiscalPeriod.get_closed_period_for_date(client_id, entry_date, conn=conn)
                 if closed:
                     raise ValueError(
                         f"{closed.period_name} is closed. Reopen the year before deleting "
@@ -631,6 +634,9 @@ class JournalEntry:
                         "Reverse it instead so the correction chain remains intact."
                     )
 
+                from services.import_corrections import import_history_links
+                if entry_id in import_history_links(cursor, client_id):
+                    raise ValueError("Imported correction history cannot be deleted. Reverse it instead.")
                 cursor.execute("DELETE FROM journal_entries WHERE id = ?", (entry_id,))
                 AuditLog.write(
                     cursor, client_id, 'journal_entries', entry_id, 'DELETE',
@@ -648,6 +654,7 @@ class JournalEntry:
         conn = get_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
             cursor.execute(
                 "SELECT * FROM journal_entries WHERE id = ? AND client_id = ?",
                 (entry_id, client_id),
@@ -703,6 +710,21 @@ class JournalEntry:
                     "reversal_date": reversal_date.isoformat(),
                 },
             )
+            from services.import_corrections import import_history_links, effective_import_category
+            links = import_history_links(cursor, client_id)
+            imported_id = links.get(entry_id)
+            if imported_id:
+                imported = cursor.execute(
+                    "SELECT * FROM imported_transactions WHERE id = ? AND client_id = ?",
+                    (imported_id, client_id)
+                ).fetchone()
+                if entry_id != imported['journal_entry_id']:
+                    category = effective_import_category(cursor, imported, links)
+                    cursor.execute("UPDATE imported_transactions SET suggested_account_id = ? WHERE id = ?",
+                                   (category, imported_id))
+                    AuditLog.write(cursor, client_id, 'imported_transactions', imported_id, 'UPDATE',
+                        old_values={'suggested_account_id': imported['suggested_account_id']},
+                        new_values={'suggested_account_id': category, 'reversal_entry_id': reversal.id})
             conn.commit()
             return reversal
         except Exception:

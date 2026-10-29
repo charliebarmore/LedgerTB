@@ -85,7 +85,14 @@ class BankReconciliation:
         conn = get_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
             cls._validate_account(cursor, client_id, account_id)
+            if cursor.execute(
+                "SELECT 1 FROM bank_reconciliations WHERE client_id = ? AND account_id = ? "
+                "AND statement_end_date > ? LIMIT 1",
+                (client_id, account_id, end_date.isoformat())
+            ).fetchone():
+                raise ValueError("Reopen newer reconciliations first before creating an earlier statement.")
             cursor.execute(
                 """
                 SELECT id FROM bank_reconciliations
@@ -206,6 +213,7 @@ class BankReconciliation:
         conn = get_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
             cursor.execute(
                 "SELECT * FROM bank_reconciliations WHERE id = ? AND client_id = ?",
                 (self.id, self.client_id),
@@ -303,6 +311,7 @@ class BankReconciliation:
         conn = get_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
             cursor.execute(
                 "SELECT status FROM bank_reconciliations WHERE id = ? AND client_id = ?",
                 (self.id, self.client_id),
@@ -361,9 +370,9 @@ class BankReconciliation:
                 JOIN bank_reconciliation_items bri ON bri.journal_entry_line_id = jel.id
                 JOIN bank_reconciliations br ON br.id = bri.reconciliation_id
                 WHERE je.client_id = ? AND jel.account_id = ? AND je.entry_date <= ?
-                  AND (br.status = 'Completed' OR br.id = ?)
+                  AND ((br.status = 'Completed' AND br.statement_end_date <= ?) OR br.id = ?)
             """
-            params = (self.client_id, self.account_id, self.statement_end_date.isoformat(), self.id)
+            params = (self.client_id, self.account_id, self.statement_end_date.isoformat(), self.statement_end_date.isoformat(), self.id)
         with get_cursor() as cursor:
             cursor.execute(query, params)
             return cursor.fetchone()["balance"]
@@ -381,6 +390,7 @@ class BankReconciliation:
         conn = get_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
             cursor.execute(
                 "SELECT * FROM bank_reconciliations WHERE id = ? AND client_id = ?",
                 (self.id, self.client_id),
@@ -397,8 +407,8 @@ class BankReconciliation:
                 JOIN bank_reconciliation_items bri ON bri.journal_entry_line_id = jel.id
                 JOIN bank_reconciliations br ON br.id = bri.reconciliation_id
                 WHERE je.client_id = ? AND jel.account_id = ? AND je.entry_date <= ?
-                  AND (br.status = 'Completed' OR br.id = ?)
-            """, (self.client_id, self.account_id, self.statement_end_date.isoformat(), self.id))
+                  AND ((br.status = 'Completed' AND br.statement_end_date <= ?) OR br.id = ?)
+            """, (self.client_id, self.account_id, self.statement_end_date.isoformat(), self.statement_end_date.isoformat(), self.id))
             cleared_cents = cursor.fetchone()["balance"]
             if cleared_cents != row["statement_ending_balance"]:
                 raise ValueError(
@@ -428,6 +438,7 @@ class BankReconciliation:
         conn = get_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
             cursor.execute(
                 "SELECT * FROM bank_reconciliations WHERE id = ? AND client_id = ?",
                 (self.id, self.client_id),
