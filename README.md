@@ -1,8 +1,14 @@
 # LedgerTB
 
+[![Security checks](https://github.com/charliebarmore/LedgerTB/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/charliebarmore/LedgerTB/actions/workflows/security.yml)
+[![Latest release](https://img.shields.io/github/v/release/charliebarmore/LedgerTB)](../../releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Double-entry bookkeeping you can read, run, and change. A desktop app built by a practicing CPA to keep real books: multiple clients, journal entries with debit-credit validation, bank imports, AI-assisted categorization, standard reports, and a close workflow that ends in a branded PDF package.
 
-A **Ledger Labs LLC** product — the software studio of [Charlie Barmore, CPA](https://cbarmorecpa.com), who built this with Claude Code. Shared with the [AI Lab for Accountants](https://ailabforaccountants.com) community as a working example of what one accountant can build.
+A **Ledger Labs LLC** product — the software studio of [Charlie Barmore, CPA](https://cbarmorecpa.com), who built this with Claude Code. A working example of what one accountant can build.
+
+![LedgerTB dashboard](site/images/app-dashboard-hero.png)
 
 ## What it does
 
@@ -109,7 +115,7 @@ The app runs fully without any API key. To turn on AI categorization, either set
 
 ## The posture
 
-This tool follows the same rule we teach in the Lab: AI drafts, the professional decides. Categorization suggestions are never auto-posted, everything is reviewable, and the audit trail keeps the record. Assistant access via MCP is off by default and permissioned at **read / propose / post**; the default is propose, while direct posting requires an explicit warning and confirmation. The database always blocks assistant edits and deletes. Optional AI features send information to Anthropic, TypeSafe Jev, OpenAI, or the Ollama server you configure. Import-review suggestions require an explicit request; document parsing and Book Review use Anthropic. An Ollama server can forward requests to a cloud provider. See [PRIVACY.md](PRIVACY.md) for the information sent and provider boundaries. If you enable MCP, your MCP client may also send returned book data to its configured AI provider—vet that provider and your firm's data policy before using client data. The books remain in the local encrypted database.
+This tool follows one rule: AI drafts, the professional decides. Categorization suggestions are never auto-posted, everything is reviewable, and the audit trail keeps the record. Assistant access via MCP is off by default and permissioned at **read / propose / post**; the default is propose, while direct posting requires an explicit warning and confirmation. The database always blocks assistant edits and deletes. Optional AI features send information to Anthropic, TypeSafe Jev, OpenAI, or the Ollama server you configure. Import-review suggestions require an explicit request; document parsing and Book Review use Anthropic. An Ollama server can forward requests to a cloud provider. See [PRIVACY.md](PRIVACY.md) for the information sent and provider boundaries. If you enable MCP, your MCP client may also send returned book data to its configured AI provider—vet that provider and your firm's data policy before using client data. The books remain in the local encrypted database.
 
 ## Tests
 
@@ -121,7 +127,7 @@ python -m pytest -q -m "not performance"
 ```
 
 (Dropping the marker filter also runs the slower volume baselines described in
-`PERFORMANCE.md`.) More than 700 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the Close Map and assistant review checkpoints, firm-mode locking, and export hardening. The release suite has been exercised on macOS and Windows (and the full suite on Linux from source), and on both pandas 2.2 and pandas 3.0; CI records results for proposed changes.
+`PERFORMANCE.md`.) More than 900 tests cover the ledger math, posting rules, imports, reports, the MCP tools and access levels, the Close Map and assistant review checkpoints, firm-mode locking, and export hardening. The release suite has been exercised on macOS and Windows (and the full suite on Linux from source), and on both pandas 2.2 and pandas 3.0; CI records results for proposed changes.
 
 ## More documentation
 
